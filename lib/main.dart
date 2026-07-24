@@ -60,7 +60,7 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
     AppColors.brightness = _effectiveBrightness(mode);
 
     return MaterialApp(
-      title: 'HICOM Production Log',
+      title: 'HDSB Operations',
       debugShowCheckedModeBanner: false,
       themeMode: mode,
       theme: _buildTheme(Brightness.light),

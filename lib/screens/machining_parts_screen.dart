@@ -4,6 +4,7 @@ import '../config/constants.dart';
 import '../models/machining_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
+import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
@@ -104,47 +105,42 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     );
   }
 
-  Future<void> _managePart(MachiningPartStatus part) async {
-    final action = await showManageActionSheet(
+  Future<void> _renamePart(MachiningPartStatus part) async {
+    final name = await promptText(
       context,
-      itemLabel: 'Part ${part.part}',
+      title: 'Rename Part',
+      label: 'Part',
+      initialValue: part.part,
     );
-    if (action == null || !mounted) return;
-    if (action == ManageAction.rename) {
-      final name = await promptText(
-        context,
-        title: 'Rename Part',
-        label: 'Part',
-        initialValue: part.part,
-      );
-      if (name == null || name == part.part) return;
-      await _mutate(
-        () => _sheetsService.configRename(
-          module: 'machining',
-          kind: 'part',
-          group: widget.customer,
-          value: part.part,
-          newValue: name,
-        ),
-      );
-    } else {
-      final confirmed = await confirmDelete(
-        context,
-        title: 'Delete Part ${part.part}?',
-        message:
-            'Historical logs already saved are not affected. '
-            'This cannot be undone.',
-      );
-      if (confirmed != true) return;
-      await _mutate(
-        () => _sheetsService.configDelete(
-          module: 'machining',
-          kind: 'part',
-          group: widget.customer,
-          value: part.part,
-        ),
-      );
-    }
+    if (name == null || name == part.part) return;
+    await _mutate(
+      () => _sheetsService.configRename(
+        module: 'machining',
+        kind: 'part',
+        group: widget.customer,
+        value: part.part,
+        newValue: name,
+      ),
+    );
+  }
+
+  Future<void> _deletePart(MachiningPartStatus part) async {
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete Part ${part.part}?',
+      message:
+          'Historical logs already saved are not affected. '
+          'This cannot be undone.',
+    );
+    if (confirmed != true) return;
+    await _mutate(
+      () => _sheetsService.configDelete(
+        module: 'machining',
+        kind: 'part',
+        group: widget.customer,
+        value: part.part,
+      ),
+    );
   }
 
   @override
@@ -174,9 +170,9 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Tap to log · long-press a card to rename or delete',
+                      'Tap to open · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -223,10 +219,20 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
                 return AddTile(label: 'Add Part', onTap: _addPart);
               }
               final part = _parts[index];
-              return _PartCard(
-                part: part,
-                onTap: () => _openPart(part),
-                onLongPress: () => _managePart(part),
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: _PartCard(part: part, onTap: () => _openPart(part)),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: CardMenuButton(
+                      onEdit: () => _renamePart(part),
+                      onDelete: () => _deletePart(part),
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -237,15 +243,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
 }
 
 class _PartCard extends StatelessWidget {
-  const _PartCard({
-    required this.part,
-    required this.onTap,
-    required this.onLongPress,
-  });
+  const _PartCard({required this.part, required this.onTap});
 
   final MachiningPartStatus part;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +260,6 @@ class _PartCard extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
         child: Padding(
           padding: const EdgeInsets.all(12),

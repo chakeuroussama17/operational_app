@@ -14,14 +14,12 @@ class FillTankCard extends StatelessWidget {
     required this.subtitle,
     required this.fillPercent,
     required this.onTap,
-    this.onLongPress,
   });
 
   final String title;
   final String subtitle;
   final int fillPercent;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
   static const Color _fillColor = Color(0xFF4CAF50);
 
@@ -48,7 +46,6 @@ class FillTankCard extends StatelessWidget {
           ),
           child: InkWell(
             onTap: onTap,
-            onLongPress: onLongPress,
             child: Stack(
               fit: StackFit.expand,
               children: [

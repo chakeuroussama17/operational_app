@@ -4,6 +4,7 @@ import '../config/constants.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
+import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/fill_tank_card.dart';
 import '../widgets/hicom_app_bar.dart';
@@ -102,47 +103,42 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     );
   }
 
-  Future<void> _managePart(SecondaryPartStatus part) async {
-    final action = await showManageActionSheet(
+  Future<void> _renamePart(SecondaryPartStatus part) async {
+    final name = await promptText(
       context,
-      itemLabel: 'Part ${part.part}',
+      title: 'Rename Part',
+      label: 'Part',
+      initialValue: part.part,
     );
-    if (action == null || !mounted) return;
-    if (action == ManageAction.rename) {
-      final name = await promptText(
-        context,
-        title: 'Rename Part',
-        label: 'Part',
-        initialValue: part.part,
-      );
-      if (name == null || name == part.part) return;
-      await _mutate(
-        () => _sheetsService.configRename(
-          module: 'secondary',
-          kind: 'part',
-          group: widget.station,
-          value: part.part,
-          newValue: name,
-        ),
-      );
-    } else {
-      final confirmed = await confirmDelete(
-        context,
-        title: 'Delete Part ${part.part}?',
-        message:
-            'Historical logs already saved are not affected. '
-            'This cannot be undone.',
-      );
-      if (confirmed != true) return;
-      await _mutate(
-        () => _sheetsService.configDelete(
-          module: 'secondary',
-          kind: 'part',
-          group: widget.station,
-          value: part.part,
-        ),
-      );
-    }
+    if (name == null || name == part.part) return;
+    await _mutate(
+      () => _sheetsService.configRename(
+        module: 'secondary',
+        kind: 'part',
+        group: widget.station,
+        value: part.part,
+        newValue: name,
+      ),
+    );
+  }
+
+  Future<void> _deletePart(SecondaryPartStatus part) async {
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete Part ${part.part}?',
+      message:
+          'Historical logs already saved are not affected. '
+          'This cannot be undone.',
+    );
+    if (confirmed != true) return;
+    await _mutate(
+      () => _sheetsService.configDelete(
+        module: 'secondary',
+        kind: 'part',
+        group: widget.station,
+        value: part.part,
+      ),
+    );
   }
 
   @override
@@ -172,9 +168,9 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Tap to log · long-press a card to rename or delete',
+                      'Tap to log · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -224,14 +220,27 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
                 return AddTile(label: 'Add Part', onTap: _addPart);
               }
               final part = _parts[index];
-              return FillTankCard(
-                title: part.part,
-                subtitle: part.lastUpdated != null
-                    ? 'Last updated: ${part.lastUpdated}'
-                    : 'No entries yet today',
-                fillPercent: part.fillPercent,
-                onTap: () => _openPart(part),
-                onLongPress: () => _managePart(part),
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: FillTankCard(
+                      title: part.part,
+                      subtitle: part.lastUpdated != null
+                          ? 'Last updated: ${part.lastUpdated}'
+                          : 'No entries yet today',
+                      fillPercent: part.fillPercent,
+                      onTap: () => _openPart(part),
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: CardMenuButton(
+                      onEdit: () => _renamePart(part),
+                      onDelete: () => _deletePart(part),
+                    ),
+                  ),
+                ],
               );
             },
           );

@@ -4,10 +4,10 @@ import '../config/constants.dart';
 import '../models/machining_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
+import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
-import 'group_manager_screen.dart';
 import 'machining_parts_screen.dart';
 
 /// Machining module root: pick a customer (Mazda, Proton, Toyota).
@@ -102,74 +102,46 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
     );
   }
 
-  Future<void> _manageCustomer(CustomerStatus customer) async {
-    final action = await showManageActionSheet(
+  Future<void> _renameCustomer(CustomerStatus customer) async {
+    final name = await promptText(
       context,
-      itemLabel: customer.customer,
+      title: 'Rename Customer',
+      label: 'Customer',
+      initialValue: customer.customer,
     );
-    if (action == null || !mounted) return;
-    if (action == ManageAction.rename) {
-      final name = await promptText(
-        context,
-        title: 'Rename Customer',
-        label: 'Customer',
-        initialValue: customer.customer,
-      );
-      if (name == null || name == customer.customer) return;
-      await _mutate(
-        () => _sheetsService.configRename(
-          module: 'machining',
-          kind: 'group',
-          value: customer.customer,
-          newValue: name,
-        ),
-      );
-    } else {
-      final confirmed = await confirmDelete(
-        context,
-        title: 'Delete Customer ${customer.customer}?',
-        message:
-            'This also deletes all of its parts. Historical logs already '
-            'saved are not affected. This cannot be undone.',
-      );
-      if (confirmed != true) return;
-      await _mutate(
-        () => _sheetsService.configDelete(
-          module: 'machining',
-          kind: 'group',
-          value: customer.customer,
-        ),
-      );
-    }
+    if (name == null || name == customer.customer) return;
+    await _mutate(
+      () => _sheetsService.configRename(
+        module: 'machining',
+        kind: 'group',
+        value: customer.customer,
+        newValue: name,
+      ),
+    );
+  }
+
+  Future<void> _deleteCustomer(CustomerStatus customer) async {
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete Customer ${customer.customer}?',
+      message:
+          'This also deletes all of its parts. Historical logs already '
+          'saved are not affected. This cannot be undone.',
+    );
+    if (confirmed != true) return;
+    await _mutate(
+      () => _sheetsService.configDelete(
+        module: 'machining',
+        kind: 'group',
+        value: customer.customer,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(
-        subtitle: 'Machining — Customers',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_rounded),
-            tooltip: 'Manage customers, parts & lines',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const GroupManagerScreen(
-                        module: 'machining',
-                        title: 'Manage — Machining',
-                        groupLabel: 'Customer',
-                        partLabel: 'Part',
-                        showLines: true,
-                      ),
-                    ),
-                  )
-                  .then((_) => _load());
-            },
-          ),
-        ],
-      ),
+      appBar: const HicomAppBar(subtitle: 'Machining — Customers'),
       body: SafeArea(
         child: Column(
           children: [
@@ -193,9 +165,9 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Tap to log · long-press a card to rename or delete',
+                      'Tap to log · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -242,10 +214,23 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
                 return AddTile(label: 'Add Customer', onTap: _addCustomer);
               }
               final customer = _customers[index];
-              return _CustomerCard(
-                customer: customer,
-                onTap: () => _openCustomer(customer),
-                onLongPress: () => _manageCustomer(customer),
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: _CustomerCard(
+                      customer: customer,
+                      onTap: () => _openCustomer(customer),
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: CardMenuButton(
+                      onEdit: () => _renameCustomer(customer),
+                      onDelete: () => _deleteCustomer(customer),
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -256,15 +241,10 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
 }
 
 class _CustomerCard extends StatelessWidget {
-  const _CustomerCard({
-    required this.customer,
-    required this.onTap,
-    required this.onLongPress,
-  });
+  const _CustomerCard({required this.customer, required this.onTap});
 
   final CustomerStatus customer;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -278,7 +258,6 @@ class _CustomerCard extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
         child: Padding(
           padding: const EdgeInsets.all(12),

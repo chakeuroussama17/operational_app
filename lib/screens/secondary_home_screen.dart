@@ -4,10 +4,10 @@ import '../config/constants.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
+import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
-import 'group_manager_screen.dart';
 import 'secondary_parts_screen.dart';
 
 /// Secondary module root: pick a station (ST1, ST2, ST3).
@@ -102,73 +102,46 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
     );
   }
 
-  Future<void> _manageStation(StationStatus station) async {
-    final action = await showManageActionSheet(
+  Future<void> _renameStation(StationStatus station) async {
+    final name = await promptText(
       context,
-      itemLabel: 'Station ${station.station}',
+      title: 'Rename Station',
+      label: 'Station',
+      initialValue: station.station,
     );
-    if (action == null || !mounted) return;
-    if (action == ManageAction.rename) {
-      final name = await promptText(
-        context,
-        title: 'Rename Station',
-        label: 'Station',
-        initialValue: station.station,
-      );
-      if (name == null || name == station.station) return;
-      await _mutate(
-        () => _sheetsService.configRename(
-          module: 'secondary',
-          kind: 'group',
-          value: station.station,
-          newValue: name,
-        ),
-      );
-    } else {
-      final confirmed = await confirmDelete(
-        context,
-        title: 'Delete Station ${station.station}?',
-        message:
-            'This also deletes all of its parts. Historical logs already '
-            'saved are not affected. This cannot be undone.',
-      );
-      if (confirmed != true) return;
-      await _mutate(
-        () => _sheetsService.configDelete(
-          module: 'secondary',
-          kind: 'group',
-          value: station.station,
-        ),
-      );
-    }
+    if (name == null || name == station.station) return;
+    await _mutate(
+      () => _sheetsService.configRename(
+        module: 'secondary',
+        kind: 'group',
+        value: station.station,
+        newValue: name,
+      ),
+    );
+  }
+
+  Future<void> _deleteStation(StationStatus station) async {
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete Station ${station.station}?',
+      message:
+          'This also deletes all of its parts. Historical logs already '
+          'saved are not affected. This cannot be undone.',
+    );
+    if (confirmed != true) return;
+    await _mutate(
+      () => _sheetsService.configDelete(
+        module: 'secondary',
+        kind: 'group',
+        value: station.station,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(
-        subtitle: 'Secondary — Stations',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_rounded),
-            tooltip: 'Manage stations & parts',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const GroupManagerScreen(
-                        module: 'secondary',
-                        title: 'Manage — Secondary',
-                        groupLabel: 'Station',
-                        partLabel: 'Part',
-                      ),
-                    ),
-                  )
-                  .then((_) => _load());
-            },
-          ),
-        ],
-      ),
+      appBar: const HicomAppBar(subtitle: 'Secondary — Stations'),
       body: SafeArea(
         child: Column(
           children: [
@@ -192,9 +165,9 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Tap to log · long-press a card to rename or delete',
+                      'Tap to log · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -241,10 +214,23 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
                 return AddTile(label: 'Add Station', onTap: _addStation);
               }
               final station = _stations[index];
-              return _StationCard(
-                station: station,
-                onTap: () => _openStation(station),
-                onLongPress: () => _manageStation(station),
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: _StationCard(
+                      station: station,
+                      onTap: () => _openStation(station),
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: CardMenuButton(
+                      onEdit: () => _renameStation(station),
+                      onDelete: () => _deleteStation(station),
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -255,15 +241,10 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
 }
 
 class _StationCard extends StatelessWidget {
-  const _StationCard({
-    required this.station,
-    required this.onTap,
-    required this.onLongPress,
-  });
+  const _StationCard({required this.station, required this.onTap});
 
   final StationStatus station;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -277,7 +258,6 @@ class _StationCard extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
         child: Padding(
           padding: const EdgeInsets.all(12),

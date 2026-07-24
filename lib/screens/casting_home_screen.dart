@@ -4,13 +4,13 @@ import '../config/constants.dart';
 import '../models/casting_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
+import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'casting_parts_screen.dart';
-import 'group_manager_screen.dart';
 
-/// Casting module root: pick the shift once, then pick a DCM machine.
+/// Casting module root: pick a DCM machine.
 class CastingHomeScreen extends StatefulWidget {
   const CastingHomeScreen({super.key});
 
@@ -81,45 +81,40 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
     );
   }
 
-  Future<void> _manageDcm(DcmStatus machine) async {
-    final action = await showManageActionSheet(
+  Future<void> _renameDcm(DcmStatus machine) async {
+    final name = await promptText(
       context,
-      itemLabel: 'DCM ${machine.dcm}',
+      title: 'Rename DCM',
+      label: 'DCM',
+      initialValue: machine.dcm,
     );
-    if (action == null || !mounted) return;
-    if (action == ManageAction.rename) {
-      final name = await promptText(
-        context,
-        title: 'Rename DCM',
-        label: 'DCM',
-        initialValue: machine.dcm,
-      );
-      if (name == null || name == machine.dcm) return;
-      await _mutate(
-        () => _sheetsService.configRename(
-          module: 'casting',
-          kind: 'group',
-          value: machine.dcm,
-          newValue: name,
-        ),
-      );
-    } else {
-      final confirmed = await confirmDelete(
-        context,
-        title: 'Delete DCM ${machine.dcm}?',
-        message:
-            'This also deletes all of its parts. Historical logs already '
-            'saved are not affected. This cannot be undone.',
-      );
-      if (confirmed != true) return;
-      await _mutate(
-        () => _sheetsService.configDelete(
-          module: 'casting',
-          kind: 'group',
-          value: machine.dcm,
-        ),
-      );
-    }
+    if (name == null || name == machine.dcm) return;
+    await _mutate(
+      () => _sheetsService.configRename(
+        module: 'casting',
+        kind: 'group',
+        value: machine.dcm,
+        newValue: name,
+      ),
+    );
+  }
+
+  Future<void> _deleteDcm(DcmStatus machine) async {
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete DCM ${machine.dcm}?',
+      message:
+          'This also deletes all of its parts. Historical logs already '
+          'saved are not affected. This cannot be undone.',
+    );
+    if (confirmed != true) return;
+    await _mutate(
+      () => _sheetsService.configDelete(
+        module: 'casting',
+        kind: 'group',
+        value: machine.dcm,
+      ),
+    );
   }
 
   Future<void> _mutate(Future<void> Function() action) async {
@@ -142,29 +137,7 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(
-        subtitle: 'Casting — Machines',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_rounded),
-            tooltip: 'Manage DCMs & parts',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const GroupManagerScreen(
-                        module: 'casting',
-                        title: 'Manage — Casting',
-                        groupLabel: 'DCM',
-                        partLabel: 'Part',
-                      ),
-                    ),
-                  )
-                  .then((_) => _load());
-            },
-          ),
-        ],
-      ),
+      appBar: const HicomAppBar(subtitle: 'Casting — Machines'),
       body: SafeArea(
         child: Column(
           children: [
@@ -188,9 +161,9 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
                         color: AppColors.textSecondary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Tap to log · long-press a card to rename or delete',
+                      'Tap to log · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -237,10 +210,23 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
                 return AddTile(label: 'Add DCM', onTap: _addDcm);
               }
               final machine = _machines[index];
-              return _DcmCard(
-                machine: machine,
-                onTap: () => _openMachine(machine),
-                onLongPress: () => _manageDcm(machine),
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: _DcmCard(
+                      machine: machine,
+                      onTap: () => _openMachine(machine),
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: CardMenuButton(
+                      onEdit: () => _renameDcm(machine),
+                      onDelete: () => _deleteDcm(machine),
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -251,15 +237,10 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
 }
 
 class _DcmCard extends StatelessWidget {
-  const _DcmCard({
-    required this.machine,
-    required this.onTap,
-    required this.onLongPress,
-  });
+  const _DcmCard({required this.machine, required this.onTap});
 
   final DcmStatus machine;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -273,7 +254,6 @@ class _DcmCard extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
         child: Padding(
           padding: const EdgeInsets.all(12),

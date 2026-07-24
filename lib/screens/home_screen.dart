@@ -102,6 +102,27 @@ class _HomeScreenState extends State<HomeScreen> {
 class _LogTab extends StatelessWidget {
   const _LogTab();
 
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  /// Today's date as "24 July 2026".
+  static String _formatToday() {
+    final now = DateTime.now();
+    return '${now.day} ${_months[now.month - 1]} ${now.year}';
+  }
+
   void _open(BuildContext context, Widget screen) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
   }
@@ -115,19 +136,30 @@ class _LogTab extends StatelessWidget {
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               decoration: BoxDecoration(
                 color: AppColors.surfaceTint,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Text(
-                'TODAY',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                  color: AppColors.navy,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.event_rounded,
+                    size: 14,
+                    color: AppColors.navy,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'TODAY · ${_formatToday()}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      color: AppColors.navy,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

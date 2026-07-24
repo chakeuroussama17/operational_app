@@ -4,7 +4,7 @@ import 'package:hicom_ops/config/theme_controller.dart';
 import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/casting_home_screen.dart';
-import 'package:hicom_ops/screens/group_manager_screen.dart';
+import 'package:hicom_ops/widgets/card_menu_button.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_home_screen.dart';
 import 'package:hicom_ops/screens/secondary_home_screen.dart';
@@ -89,18 +89,33 @@ void main() {
     expect(find.byType(MachiningHomeScreen), findsOneWidget);
   });
 
-  testWidgets('gear icon opens the manage screen for each module', (
+  testWidgets('card 3-dots menu shows Edit/Delete and fires callbacks', (
     tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: CastingHomeScreen()));
-    await tester.pumpAndSettle();
+    var edited = false;
+    var deleted = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: CardMenuButton(
+              onEdit: () => edited = true,
+              onDelete: () => deleted = true,
+            ),
+          ),
+        ),
+      ),
+    );
 
-    await tester.tap(find.byIcon(Icons.settings_rounded));
+    await tester.tap(find.byIcon(Icons.more_vert_rounded));
     await tester.pumpAndSettle();
+    expect(find.text('Edit'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
 
-    expect(find.byType(GroupManagerScreen), findsOneWidget);
-    // Config fetch failed (stubbed 400) -> error body with Retry.
-    expect(find.text('Retry'), findsOneWidget);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
+    expect(edited, isFalse);
   });
 
   testWidgets('casting home shows a retry error state when the fetch fails', (

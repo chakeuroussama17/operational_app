@@ -1,0 +1,315 @@
+import 'package:flutter/material.dart';
+
+import '../config/constants.dart';
+import '../models/casting_models.dart';
+import '../services/sheets_service.dart';
+import '../widgets/add_tile.dart';
+import '../widgets/error_retry.dart';
+import '../widgets/hicom_app_bar.dart';
+import '../widgets/manage_dialogs.dart';
+import 'casting_parts_screen.dart';
+import 'group_manager_screen.dart';
+
+/// Casting module root: pick the shift once, then pick a DCM machine.
+class CastingHomeScreen extends StatefulWidget {
+  const CastingHomeScreen({super.key});
+
+  @override
+  State<CastingHomeScreen> createState() => _CastingHomeScreenState();
+}
+
+class _CastingHomeScreenState extends State<CastingHomeScreen> {
+  final _sheetsService = SheetsService();
+
+  bool _loading = true;
+  String? _error;
+  List<DcmStatus> _machines = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _sheetsService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final machines = await _sheetsService.fetchCastingDashboard();
+      if (!mounted) return;
+      setState(() {
+        _machines = machines;
+        _loading = false;
+      });
+    } on SheetsSubmissionException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.message;
+        _loading = false;
+      });
+    }
+  }
+
+  void _openMachine(DcmStatus machine) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => CastingPartsScreen(dcm: machine.dcm),
+          ),
+        )
+        // Refresh timestamps after logging deeper in the flow.
+        .then((_) => _load());
+  }
+
+  Future<void> _addDcm() async {
+    final name = await promptText(context, title: 'Add DCM', label: 'DCM');
+    if (name == null) return;
+    await _mutate(
+      () => _sheetsService.configAdd(
+        module: 'casting',
+        kind: 'group',
+        value: name,
+      ),
+    );
+  }
+
+  Future<void> _manageDcm(DcmStatus machine) async {
+    final action = await showManageActionSheet(
+      context,
+      itemLabel: 'DCM ${machine.dcm}',
+    );
+    if (action == null || !mounted) return;
+    if (action == ManageAction.rename) {
+      final name = await promptText(
+        context,
+        title: 'Rename DCM',
+        label: 'DCM',
+        initialValue: machine.dcm,
+      );
+      if (name == null || name == machine.dcm) return;
+      await _mutate(
+        () => _sheetsService.configRename(
+          module: 'casting',
+          kind: 'group',
+          value: machine.dcm,
+          newValue: name,
+        ),
+      );
+    } else {
+      final confirmed = await confirmDelete(
+        context,
+        title: 'Delete DCM ${machine.dcm}?',
+        message:
+            'This also deletes all of its parts. Historical logs already '
+            'saved are not affected. This cannot be undone.',
+      );
+      if (confirmed != true) return;
+      await _mutate(
+        () => _sheetsService.configDelete(
+          module: 'casting',
+          kind: 'group',
+          value: machine.dcm,
+        ),
+      );
+    }
+  }
+
+  Future<void> _mutate(Future<void> Function() action) async {
+    try {
+      await action();
+      await _load();
+    } on SheetsSubmissionException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(error.message),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: HicomAppBar(
+        subtitle: 'Casting — Machines',
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_rounded),
+            tooltip: 'Manage DCMs & parts',
+            onPressed: () {
+              Navigator.of(context)
+                  .push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const GroupManagerScreen(
+                        module: 'casting',
+                        title: 'Manage — Casting',
+                        groupLabel: 'DCM',
+                        partLabel: 'Part',
+                      ),
+                    ),
+                  )
+                  .then((_) => _load());
+            },
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppDimens.screenPadding,
+                AppDimens.screenPadding,
+                AppDimens.screenPadding,
+                8,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Select machine (DCM)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Tap to log · long-press a card to rename or delete',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(child: _body()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _body() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.steelBlue),
+      );
+    }
+    if (_error != null) {
+      return ErrorRetry(message: _error!, onRetry: _load);
+    }
+    return RefreshIndicator(
+      color: AppColors.steelBlue,
+      onRefresh: _load,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = constraints.maxWidth >= 640 ? 3 : 2;
+          return GridView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(AppDimens.screenPadding),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: AppDimens.fieldSpacing,
+              crossAxisSpacing: AppDimens.fieldSpacing,
+              childAspectRatio: 1.35,
+            ),
+            itemCount: _machines.length + 1,
+            itemBuilder: (context, index) {
+              if (index == _machines.length) {
+                return AddTile(label: 'Add DCM', onTap: _addDcm);
+              }
+              final machine = _machines[index];
+              return _DcmCard(
+                machine: machine,
+                onTap: () => _openMachine(machine),
+                onLongPress: () => _manageDcm(machine),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DcmCard extends StatelessWidget {
+  const _DcmCard({
+    required this.machine,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final DcmStatus machine;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      elevation: 2,
+      shadowColor: Colors.black26,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+        side: BorderSide(color: AppColors.borderSubtle),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.local_fire_department_rounded,
+                color: AppColors.amber,
+                size: 26,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                machine.dcm,
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                machine.lastUpdated != null
+                    ? 'Last updated: ${machine.lastUpdated}'
+                    : 'No entries yet today',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

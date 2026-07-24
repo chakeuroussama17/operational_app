@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for the app to reach the Google Apps Script backend.
+         Flutter only adds this to the debug/profile manifests by default, so
+         without it here the RELEASE apk has no network access. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="hicom_ops"
         android:name="${applicationName}"

@@ -25,6 +25,10 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
   String? _error;
   List<DcmStatus> _machines = const [];
 
+  /// Defaults to whatever shift wall-clock time suggests; the supervisor can
+  /// flip it any time (e.g. logging a late entry after shift changeover).
+  String _shift = autoDetectCastingShift();
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +47,9 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
       _error = null;
     });
     try {
-      final machines = await _sheetsService.fetchCastingDashboard();
+      final machines = await _sheetsService.fetchCastingDashboard(
+        shift: _shift,
+      );
       if (!mounted) return;
       setState(() {
         _machines = machines;
@@ -58,11 +64,17 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
     }
   }
 
+  void _setShift(String shift) {
+    if (shift == _shift) return;
+    setState(() => _shift = shift);
+    _load();
+  }
+
   void _openMachine(DcmStatus machine) {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) => CastingPartsScreen(dcm: machine.dcm),
+            builder: (_) => CastingPartsScreen(dcm: machine.dcm, shift: _shift),
           ),
         )
         // Refresh timestamps after logging deeper in the flow.
@@ -148,29 +160,28 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
                 AppDimens.screenPadding,
                 8,
               ),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Select machine (DCM)',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _ShiftToggle(shift: _shift, onChanged: _setShift),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Select machine (DCM)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Tap to log · ⋮ to rename or delete',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
-                      ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Tap to log · ⋮ to rename or delete',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
             Expanded(child: _body()),
@@ -288,6 +299,89 @@ class _DcmCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Day/Night selector — Casting's real shift schedule (Day 8AM-6PM, Night
+/// 8PM-6AM crossing midnight), not calendar midnight. Everything below this
+/// screen (parts, entry form) operates within whichever shift is selected.
+class _ShiftToggle extends StatelessWidget {
+  const _ShiftToggle({required this.shift, required this.onChanged});
+
+  final String shift;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _ShiftButton(
+            label: 'Day shift',
+            icon: Icons.wb_sunny_rounded,
+            selected: shift == 'Day',
+            onTap: () => onChanged('Day'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _ShiftButton(
+            label: 'Night shift',
+            icon: Icons.nightlight_round,
+            selected: shift == 'Night',
+            onTap: () => onChanged('Night'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShiftButton extends StatelessWidget {
+  const _ShiftButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.navy : AppColors.surfaceTint,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: selected ? AppColors.amber : AppColors.steelBlue,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w800,
+                color: selected ? Colors.white : AppColors.steelBlue,
+              ),
+            ),
+          ],
         ),
       ),
     );

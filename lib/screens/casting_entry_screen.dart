@@ -8,14 +8,26 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
 
-/// Data entry for one DCM + Part. Pre-fills today's saved values, lets the
-/// supervisor fill any subset of time slots, and submits only the fields
-/// that changed — the backend upserts and recalculates LOR%.
+/// Data entry for one DCM + Part + Shift. Pre-fills this shift's saved
+/// values, lets the supervisor fill any subset of time slots, and submits
+/// only the fields that changed — the backend upserts and recalculates LOR%.
 class CastingEntryScreen extends StatefulWidget {
-  const CastingEntryScreen({super.key, required this.dcm, required this.part});
+  const CastingEntryScreen({
+    super.key,
+    required this.dcm,
+    required this.part,
+    required this.shift,
+    this.mo,
+  });
 
   final String dcm;
   final String part;
+  final String shift;
+
+  /// The part's MO (manufacturing order) number, as of when the Parts
+  /// screen loaded it — shown as read-only context, not editable here (see
+  /// the part's Edit action on the Parts screen for that).
+  final String? mo;
 
   @override
   State<CastingEntryScreen> createState() => _CastingEntryScreenState();
@@ -25,9 +37,11 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
   final _formKey = GlobalKey<FormState>();
   final _sheetsService = SheetsService();
 
+  late final List<CastingSlot> _slots = castingSlotsForShift(widget.shift);
+
   final _planController = TextEditingController();
-  final Map<String, TextEditingController> _slotControllers = {
-    for (final slot in castingSlots) slot.outputKey: TextEditingController(),
+  late final Map<String, TextEditingController> _slotControllers = {
+    for (final slot in _slots) slot.outputKey: TextEditingController(),
   };
 
   /// Backend-computed LOR% labels, keyed by lorKey.
@@ -65,11 +79,12 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
       final row = await _sheetsService.fetchCastingRow(
         dcm: widget.dcm,
         part: widget.part,
+        shift: widget.shift,
       );
       if (!mounted) return;
       setState(() {
         _planController.text = row?.value('Plan') ?? '';
-        for (final slot in castingSlots) {
+        for (final slot in _slots) {
           _slotControllers[slot.outputKey]!.text =
               row?.value(slot.outputKey) ?? '';
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
@@ -90,7 +105,7 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
 
   Map<String, String> _currentValues() => {
     'Plan': _planController.text.trim(),
-    for (final slot in castingSlots)
+    for (final slot in _slots)
       slot.outputKey: _slotControllers[slot.outputKey]!.text.trim(),
   };
 
@@ -129,6 +144,7 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
       await _sheetsService.submitCastingUpdate({
         'DCM': widget.dcm,
         'PartNo': widget.part,
+        'Shift': widget.shift,
         ...changed,
       });
       if (!mounted) return;
@@ -149,7 +165,9 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: HicomAppBar(
-        subtitle: 'Casting — DCM ${widget.dcm} · Part ${widget.part}',
+        subtitle:
+            'Casting — DCM ${widget.dcm} · Part ${widget.part} · '
+            '${widget.shift} shift',
       ),
       body: SafeArea(
         child: _loading
@@ -163,7 +181,12 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _ContextHeader(dcm: widget.dcm, part: widget.part),
+                      _ContextHeader(
+                        dcm: widget.dcm,
+                        part: widget.part,
+                        shift: widget.shift,
+                        mo: widget.mo,
+                      ),
                       if (_loadError != null) ...[
                         const SizedBox(height: 14),
                         _LoadErrorBanner(message: _loadError!, onRetry: _load),
@@ -174,7 +197,7 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
                         controller: _planController,
                         required: false,
                       ),
-                      for (final slot in castingSlots) ...[
+                      for (final slot in _slots) ...[
                         const SizedBox(height: AppDimens.fieldSpacing),
                         _SlotRow(
                           slot: slot,
@@ -198,13 +221,21 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
   }
 }
 
-/// DCM / Part context chips so the supervisor always knows where this entry
-/// is going.
+/// DCM / Part / Shift / MO context chips so the supervisor always knows
+/// where this entry is going. MO is read-only here — edit it from the
+/// part's Edit action on the Parts screen.
 class _ContextHeader extends StatelessWidget {
-  const _ContextHeader({required this.dcm, required this.part});
+  const _ContextHeader({
+    required this.dcm,
+    required this.part,
+    required this.shift,
+    this.mo,
+  });
 
   final String dcm;
   final String part;
+  final String shift;
+  final String? mo;
 
   @override
   Widget build(BuildContext context) {
@@ -237,6 +268,11 @@ class _ContextHeader extends StatelessWidget {
       children: [
         chip(Icons.local_fire_department_rounded, 'DCM $dcm'),
         chip(Icons.tag_rounded, 'Part $part'),
+        chip(
+          shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+          '$shift shift',
+        ),
+        if (mo != null) chip(Icons.description_outlined, 'MO $mo'),
       ],
     );
   }

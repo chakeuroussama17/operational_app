@@ -136,7 +136,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: CastingEntryScreen(dcm: '1212', part: '1'),
+        home: CastingEntryScreen(dcm: '1212', part: '1', shift: 'Day'),
       ),
     );
     await tester.pumpAndSettle();
@@ -147,8 +147,9 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    expect(find.text('Output — 10 AM'), findsOneWidget);
-    expect(find.text('Output — 8 PM'), findsOneWidget);
+    // Day shift runs 8AM-6PM (not the old flat 10AM-8PM list).
+    expect(find.text('Output — 8 AM'), findsOneWidget);
+    expect(find.text('Output — 6 PM'), findsOneWidget);
     expect(find.text('LOR'), findsNWidgets(6));
 
     // Submitting with no values entered is a no-op with a hint.

@@ -12,7 +12,7 @@
  * === REQUIRED: Sheet header rows (row 1), spelled EXACTLY like this ===
  *
  * Config (drives every dropdown/card list across all 3 modules):
- *   Module | Kind | Group | Value
+ *   Module | Kind | Group | Value | MO
  *   - Kind = "group": one row per DCM/Station/Customer. Group = its name,
  *     Value blank. (Lets a group exist with zero parts yet.)
  *   - Kind = "part": one row per part under a group. Group = the parent
@@ -20,14 +20,30 @@
  *   - Kind = "line": Machining only, global (not per-part). Group blank,
  *     Value = the line name (e.g. "Line 1").
  *   Module is stored lowercase ("casting" | "secondary" | "machining").
+ *   MO (Casting parts only — see getConfigPartMo): the part's current
+ *     manufacturing order number, editable from the app; blank/unused for
+ *     every other row. Added by migrateCastingShiftSchema(), see below.
  *   Run seedDefaultConfig() once from the Apps Script editor (Run menu)
  *   after creating this tab to populate it with the current defaults.
  *
- * Casting:
- *   Date | DCM | PartNo | Plan |
+ * Casting (shift-aware — the only module with this schema; see
+ * CASTING_DAY_SLOTS/CASTING_NIGHT_SLOTS above. Each DCM+Part+day gets up to
+ * TWO rows, one per Shift, keyed by DCM+PartNo+Shift+shift-date):
+ *   Date | DCM | PartNo | Plan | ...original 6 columns unchanged...
  *   Output_10AM | Output_LOR10AM | Output_12PM | Output_LOR12PM |
  *   Output_2PM  | Output_LOR2PM  | Output_4PM  | Output_LOR4PM  |
  *   Output_6PM  | Output_LOR6PM  | Output_8PM  | Output_LOR8PM  | LastUpdated
+ *   ...plus these appended by migrateCastingShiftSchema() (order doesn't
+ *   matter — reads/writes are all by header name, never position):
+ *   MO | Shift | Output_8AM | Output_LOR8AM |
+ *   Output_10PM | Output_LOR10PM | Output_12AM | Output_LOR12AM |
+ *   Output_2AM  | Output_LOR2AM  | Output_4AM  | Output_LOR4AM  |
+ *   Output_6AM  | Output_LOR6AM
+ *   - Shift = "Day" (checkpoints 8AM-6PM) or "Night" (checkpoints
+ *     8PM-6AM, crossing midnight — see getCastingShiftDate).
+ *   - MO = manufacturing order number, snapshotted from the part's Config
+ *     MO onto the row once, at creation — never rewritten by later Config
+ *     edits, so historical rows keep whatever MO was active when logged.
  *
  * Secondary:
  *   Date | Station | PartNo | Plan |
@@ -55,9 +71,37 @@ var MACHINING_SHEET = 'Machining';
 var CONFIG_SHEET = 'Config';
 var OUTPUT_TIME_SLOTS = ['10AM', '12PM', '2PM', '4PM', '6PM', '8PM'];
 
+// Casting ONLY: real 2-shift schedule. Day checkpoints run 8AM-6PM; Night
+// checkpoints run 8PM-6AM (crossing midnight). Secondary/Machining are
+// unchanged and still use the single OUTPUT_TIME_SLOTS list above.
+var CASTING_DAY_SLOTS = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM'];
+var CASTING_NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
+
+function castingSlotsForShift(shift) {
+  return shift === 'Night' ? CASTING_NIGHT_SLOTS : CASTING_DAY_SLOTS;
+}
+
+// The "business date" a Casting row belongs to. Day shift never crosses
+// midnight, so it's always today. Night shift starts in the evening and
+// runs past midnight — its early-morning checkpoints (12AM/2AM/4AM/6AM)
+// must still be filed under the date the shift STARTED (yesterday evening),
+// not the calendar day they happen to be typed in on.
+function getCastingShiftDate(shift) {
+  var tz = Session.getScriptTimeZone();
+  var now = new Date();
+  if (shift === 'Night') {
+    var hour = parseInt(Utilities.formatDate(now, tz, 'H'), 10);
+    if (hour < 8) {
+      var yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      return Utilities.formatDate(yesterday, tz, 'yyyy-MM-dd');
+    }
+  }
+  return Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+}
+
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'ANALYTICS-v1';
+var BACKEND_VERSION = 'CASTING-SHIFT-v1';
 
 function doGet(e) {
   try {
@@ -74,16 +118,19 @@ function doGet(e) {
       if (action === 'row') {
         return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, e.parameter.line));
       }
+    } else if (!module || module === 'casting') {
+      // Casting has its own dedicated shift-aware functions (see below) —
+      // Secondary still runs on the generic getDashboard/getParts/getRow.
+      var shift = e.parameter.shift;
+      if (action === 'dashboard') return jsonResponse(getCastingDashboard(shift));
+      if (action === 'parts') return jsonResponse(getCastingParts(e.parameter.dcm, shift));
+      if (action === 'row') {
+        return jsonResponse(getCastingRow(e.parameter.dcm, e.parameter.part, shift));
+      }
     } else {
       if (action === 'dashboard') return jsonResponse(getDashboard(module));
-      if (action === 'parts') {
-        var key = (module === 'secondary') ? e.parameter.station : e.parameter.dcm;
-        return jsonResponse(getParts(module, key));
-      }
-      if (action === 'row') {
-        var key = (module === 'secondary') ? e.parameter.station : e.parameter.dcm;
-        return jsonResponse(getRow(module, key, e.parameter.part));
-      }
+      if (action === 'parts') return jsonResponse(getParts(module, e.parameter.station));
+      if (action === 'row') return jsonResponse(getRow(module, e.parameter.station, e.parameter.part));
     }
 
     return jsonResponse({
@@ -102,8 +149,15 @@ function doPost(e) {
     if (payload.secret !== SECRET_KEY) {
       return jsonResponse({ status: 'error', message: 'Unauthorized' });
     }
-    if (payload.action === 'config') return jsonResponse(configMutate(payload));
-    if (payload.module === 'casting') return jsonResponse(upsertRow('casting', payload.data));
+    if (payload.action === 'config') {
+      // Casting-only part ops that also carry an MO number — everything
+      // else (groups, lines, Secondary/Machining parts) stays on the
+      // generic configMutate, untouched.
+      if (payload.op === 'castingAddPart') return jsonResponse(castingAddPart(payload));
+      if (payload.op === 'castingEditPart') return jsonResponse(castingEditPart(payload));
+      return jsonResponse(configMutate(payload));
+    }
+    if (payload.module === 'casting') return jsonResponse(upsertCastingRow(payload.data));
     if (payload.module === 'secondary') return jsonResponse(upsertRow('secondary', payload.data));
     if (payload.module === 'machining') return jsonResponse(upsertMachiningRow(payload.data));
     return jsonResponse({ status: 'error', message: 'Unknown module' });
@@ -231,6 +285,186 @@ function upsertRow(module, data) {
     version: BACKEND_VERSION,
     message: existing ? 'Row updated (same row)' : 'Row created',
   };
+}
+
+// ---------- Casting: reads (shift-aware — Day/Night, separate rows) ----------
+//
+// Casting is keyed by DCM + PartNo + Shift + shift-date (see
+// getCastingShiftDate above), NOT plain calendar date like the other
+// modules. Each shift only ever reads/writes its own 6 columns
+// (castingSlotsForShift), so a Day row and a Night row for the same
+// DCM+Part+date live side by side without colliding.
+
+function getCastingDashboard(shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getModuleSheet('casting'));
+  var shiftDate = getCastingShiftDate(shift);
+  var groups = getConfigGroups('casting');
+  var result = groups.map(function (dcm) {
+    var match = rows.find(function (r) {
+      return String(r.DCM) === dcm && String(r.Shift) === shift && formatDateOnly(r.Date) === shiftDate;
+    });
+    return { dcm: dcm, lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null };
+  });
+  return { status: 'success', data: result };
+}
+
+function getCastingParts(dcm, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getModuleSheet('casting'));
+  var shiftDate = getCastingShiftDate(shift);
+  var slots = castingSlotsForShift(shift);
+  var parts = getConfigParts('casting', dcm);
+  var result = parts.map(function (part) {
+    var match = rows.find(function (r) {
+      return String(r.DCM) === dcm && String(r.PartNo) === part &&
+        String(r.Shift) === shift && formatDateOnly(r.Date) === shiftDate;
+    });
+    var filled = 0;
+    if (match) {
+      slots.forEach(function (slot) {
+        var v = match['Output_' + slot];
+        if (v !== '' && v !== null && v !== undefined) filled++;
+      });
+    }
+    return {
+      part: part,
+      mo: getConfigPartMo('casting', dcm, part),
+      lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
+      fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
+    };
+  });
+  return { status: 'success', data: result };
+}
+
+function getCastingRow(dcm, part, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getModuleSheet('casting'));
+  var shiftDate = getCastingShiftDate(shift);
+  var match = rows.find(function (r) {
+    return String(r.DCM) === dcm && String(r.PartNo) === part &&
+      String(r.Shift) === shift && formatDateOnly(r.Date) === shiftDate;
+  });
+  if (!match) return { status: 'success', data: null };
+  delete match._rowNum;
+  return { status: 'success', data: match };
+}
+
+// ---------- Casting: upsert (shift-aware, snapshots MO once at creation) ----------
+
+function upsertCastingRow(data) {
+  var shift = data.Shift === 'Night' ? 'Night' : 'Day';
+  var sheet = getModuleSheet('casting');
+  var headers = getHeaders(sheet);
+  var rows = getAllRowsAsObjects(sheet);
+  var shiftDate = getCastingShiftDate(shift);
+  var slots = castingSlotsForShift(shift);
+
+  var existing = rows.find(function (r) {
+    return String(r.DCM) === String(data.DCM) && String(r.PartNo) === String(data.PartNo) &&
+      String(r.Shift) === shift && formatDateOnly(r.Date) === shiftDate;
+  });
+
+  var merged = existing ? Object.assign({}, existing) : {};
+  merged.Date = shiftDate;
+  merged.DCM = data.DCM;
+  merged.PartNo = data.PartNo;
+  merged.Shift = shift;
+  if (!existing) {
+    // Snapshot the part's CURRENTLY configured MO onto the row exactly once,
+    // at creation. If the Config MO changes later (new month), rows already
+    // logged keep the MO that was active when they were written — a later
+    // Config edit must never silently rewrite already-logged history.
+    merged.MO = getConfigPartMo('casting', data.DCM, data.PartNo);
+  }
+  if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
+
+  slots.forEach(function (slot) {
+    var outKey = 'Output_' + slot;
+    var lorKey = 'Output_LOR' + slot;
+    if (data[outKey] !== undefined && data[outKey] !== '') {
+      merged[outKey] = data[outKey];
+      var plan = parseFloat(merged.Plan);
+      var output = parseFloat(data[outKey]);
+      if (plan > 0 && !isNaN(output)) {
+        merged[lorKey] = Math.round((output / plan) * 100) + '%';
+      }
+    }
+  });
+
+  merged.LastUpdated = new Date();
+  var rowArray = headers.map(function (h) {
+    return merged.hasOwnProperty(h) ? merged[h] : '';
+  });
+
+  if (existing) {
+    sheet.getRange(existing._rowNum, 1, 1, headers.length).setValues([rowArray]);
+  } else {
+    sheet.appendRow(rowArray);
+  }
+  return {
+    status: 'success',
+    version: BACKEND_VERSION,
+    message: existing ? 'Row updated (same row)' : 'Row created',
+  };
+}
+
+// ---------- Casting: part MO number (Config-sheet 5th column) ----------
+//
+// MO is scoped to (Casting, DCM, Part) — the same granularity as the part
+// record itself — and lives on that part's Config row, NOT on every data
+// row. upsertCastingRow snapshots it onto a new data row at creation time;
+// editing it here only changes what NEW rows will pick up going forward.
+
+function getConfigPartMo(module, group, part) {
+  var rows = getConfigRows();
+  var match = rows.find(function (r) {
+    return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
+      String(r.Group) === group && String(r.Value) === part;
+  });
+  return match && match.MO ? String(match.MO) : '';
+}
+
+function castingAddPart(payload) {
+  var dcm = String(payload.group || '');
+  var part = String(payload.part || '').trim();
+  var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : '';
+  if (!dcm || !part) return { status: 'error', message: 'group and part are required' };
+
+  var sheet = getConfigSheet();
+  var rows = getAllRowsAsObjects(sheet);
+  var dup = rows.some(function (r) {
+    return String(r.Module).toLowerCase() === 'casting' && r.Kind === 'part' &&
+      String(r.Group) === dcm && String(r.Value) === part;
+  });
+  if (dup) return { status: 'error', message: 'Already exists' };
+  sheet.appendRow(['casting', 'part', dcm, part, mo]);
+  return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
+}
+
+function castingEditPart(payload) {
+  var dcm = String(payload.group || '');
+  var part = String(payload.part || '');
+  var newPart = payload.newPart !== undefined && payload.newPart !== null ? String(payload.newPart).trim() : part;
+  // null (not just empty string) means "leave MO unchanged".
+  var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : null;
+  if (!dcm || !part || !newPart) {
+    return { status: 'error', message: 'group, part and newPart are required' };
+  }
+
+  var sheet = getConfigSheet();
+  var headers = getHeaders(sheet);
+  var valueCol = headers.indexOf('Value') + 1;
+  var moCol = headers.indexOf('MO') + 1;
+  var rows = getAllRowsAsObjects(sheet);
+  var match = rows.find(function (r) {
+    return String(r.Module).toLowerCase() === 'casting' && r.Kind === 'part' &&
+      String(r.Group) === dcm && String(r.Value) === part;
+  });
+  if (!match) return { status: 'error', message: 'Not found' };
+  if (newPart !== part) sheet.getRange(match._rowNum, valueCol).setValue(newPart);
+  if (mo !== null && moCol > 0) sheet.getRange(match._rowNum, moCol).setValue(mo);
+  return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
 
 // ---------- Machining: reads (Customer -> Part -> Line -> entry) ----------
@@ -455,8 +689,15 @@ function getAnalytics(module, days) {
 
   var outputPrefix = (module === 'secondary') ? 'Actual_' : 'Output_';
   var lorPrefix = (module === 'secondary') ? 'LOR_' : 'Output_LOR';
-  var outputKeys = OUTPUT_TIME_SLOTS.map(function (s) { return outputPrefix + s; });
-  var lorKeys = OUTPUT_TIME_SLOTS.map(function (s) { return lorPrefix + s; });
+  // Casting alone splits into Day+Night shift columns (see
+  // CASTING_DAY_SLOTS/CASTING_NIGHT_SLOTS) — sum the full union so a day's
+  // total reflects both shifts. Both shifts share the same shift-date, so
+  // grouping by Date alone (below) already puts them in the same bucket.
+  var timeSlots = module === 'casting'
+    ? CASTING_DAY_SLOTS.concat(CASTING_NIGHT_SLOTS)
+    : OUTPUT_TIME_SLOTS;
+  var outputKeys = timeSlots.map(function (s) { return outputPrefix + s; });
+  var lorKeys = timeSlots.map(function (s) { return lorPrefix + s; });
   var rejectionKeys = (module === 'machining')
     ? OUTPUT_TIME_SLOTS.map(function (s) { return 'Rejection_' + s; })
     : [];
@@ -662,6 +903,50 @@ function seedDefaultConfig() {
 
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
   Logger.log('Seeded ' + rows.length + ' config rows.');
+}
+
+// ---------- One-time setup: run manually to add Casting Shift/MO support ----------
+//
+// Appends the new columns the Casting shift+MO feature needs — MO, Shift,
+// and the 6 new AM/PM time-slot columns — to the END of the Casting sheet's
+// header row, and adds an MO column to Config. Column ORDER never matters
+// to this backend (every read/write is by header NAME), so appending at the
+// end is always safe and never disturbs a single existing data cell.
+// Idempotent — skips any column that's already there, so it's safe to run
+// more than once (e.g. if you add the two tabs at different times).
+//
+// Run this ONCE from the Apps Script editor (select it in the function
+// dropdown, click Run) after redeploying this version.
+function migrateCastingShiftSchema() {
+  var castingSheet = getModuleSheet('casting');
+  var castingHeaders = getHeaders(castingSheet);
+  var newCastingCols = [
+    'MO', 'Shift',
+    'Output_8AM', 'Output_LOR8AM',
+    'Output_10PM', 'Output_LOR10PM',
+    'Output_12AM', 'Output_LOR12AM',
+    'Output_2AM', 'Output_LOR2AM',
+    'Output_4AM', 'Output_LOR4AM',
+    'Output_6AM', 'Output_LOR6AM',
+  ];
+  var added = [];
+  newCastingCols.forEach(function (col) {
+    if (castingHeaders.indexOf(col) === -1) {
+      castingSheet.getRange(1, castingSheet.getLastColumn() + 1).setValue(col);
+      added.push(col);
+    }
+  });
+
+  var configSheet = getConfigSheet();
+  var configHeaders = getHeaders(configSheet);
+  if (configHeaders.indexOf('MO') === -1) {
+    configSheet.getRange(1, configSheet.getLastColumn() + 1).setValue('MO');
+    added.push('Config!MO');
+  }
+
+  Logger.log(added.length
+    ? 'Added columns: ' + added.join(', ')
+    : 'Nothing to add — already migrated.');
 }
 
 // ---------- Helpers ----------

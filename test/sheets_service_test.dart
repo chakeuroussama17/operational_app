@@ -6,8 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
-  group('casting incremental API', () {
-    test('dashboard: parses a bare list and passes action param', () async {
+  group('casting incremental API (shift-aware)', () {
+    test('dashboard: parses a bare list, passes action+shift params', () async {
       late Uri requested;
       final service = SheetsService(
         client: MockClient((request) async {
@@ -19,9 +19,12 @@ void main() {
         }),
       );
 
-      final machines = await service.fetchCastingDashboard();
+      final machines = await service.fetchCastingDashboard(shift: 'Day');
 
-      expect(requested.queryParameters['action'], 'dashboard');
+      expect(requested.queryParameters, {
+        'action': 'dashboard',
+        'shift': 'Day',
+      });
       expect(machines, hasLength(2));
       expect(machines[0].dcm, '1212');
       expect(machines[0].lastUpdated, '14:32');
@@ -29,23 +32,32 @@ void main() {
     });
 
     test(
-      'parts: parses envelope form, clamps and rounds fillPercent',
+      'parts: parses envelope form + MO, clamps and rounds fillPercent',
       () async {
+        late Uri requested;
         final service = SheetsService(
-          client: MockClient(
-            (request) async => http.Response(
+          client: MockClient((request) async {
+            requested = request.url;
+            return http.Response(
               '{"status":"ok","data":['
-              '{"part":1,"lastUpdated":"09:15","fillPercent":"33.4"},'
+              '{"part":1,"mo":"JUL-0451","lastUpdated":"09:15","fillPercent":"33.4"},'
               '{"part":"2","lastUpdated":null,"fillPercent":140}]}',
               200,
-            ),
-          ),
+            );
+          }),
         );
 
-        final parts = await service.fetchCastingParts('1212');
+        final parts = await service.fetchCastingParts('1212', shift: 'Night');
 
+        expect(requested.queryParameters, {
+          'action': 'parts',
+          'dcm': '1212',
+          'shift': 'Night',
+        });
         expect(parts[0].part, '1');
+        expect(parts[0].mo, 'JUL-0451');
         expect(parts[0].fillPercent, 33);
+        expect(parts[1].mo, isNull);
         expect(parts[1].fillPercent, 100);
         expect(parts[1].lastUpdated, isNull);
       },
@@ -59,7 +71,11 @@ void main() {
         ),
       );
 
-      final row = await service.fetchCastingRow(dcm: '1212', part: '1');
+      final row = await service.fetchCastingRow(
+        dcm: '1212',
+        part: '1',
+        shift: 'Day',
+      );
 
       expect(row, isNull);
     });
@@ -73,22 +89,29 @@ void main() {
             requested = request.url;
             return http.Response(
               '{"status":"success","data":{"Date":"2026-07-17","DCM":1212,'
-              '"PartNo":3,"Plan":300,"Output_10AM":30,'
-              '"Output_LOR10AM":0.1,"Output_12PM":45,"Output_LOR12PM":0.15,'
-              '"Output_2PM":"","Output_LOR2PM":"","LastUpdated":"14:32"}}',
+              '"PartNo":3,"Shift":"Day","MO":"JUL-0451","Plan":300,'
+              '"Output_10AM":30,"Output_LOR10AM":0.1,"Output_12PM":45,'
+              '"Output_LOR12PM":0.15,"Output_2PM":"","Output_LOR2PM":"",'
+              '"LastUpdated":"14:32"}}',
               200,
             );
           }),
         );
 
-        final row = await service.fetchCastingRow(dcm: '1212', part: '3');
+        final row = await service.fetchCastingRow(
+          dcm: '1212',
+          part: '3',
+          shift: 'Day',
+        );
 
         expect(requested.queryParameters, {
           'action': 'row',
           'dcm': '1212',
           'part': '3',
+          'shift': 'Day',
         });
         expect(row!.value('Plan'), '300');
+        expect(row.value('MO'), 'JUL-0451');
         expect(row.value('Output_10AM'), '30');
         // Sheets returns LOR as a fraction; the badge shows a percentage.
         expect(row.lorLabel('Output_LOR10AM'), '10%');
@@ -110,36 +133,85 @@ void main() {
         ),
       );
 
-      final row = await service.fetchCastingRow(dcm: '1212', part: '1');
+      final row = await service.fetchCastingRow(
+        dcm: '1212',
+        part: '1',
+        shift: 'Day',
+      );
 
       expect(row!.lorLabel('Output_LOR10AM'), '33%');
     });
 
-    test('submit: posts secret + only the provided fields, no shift', () async {
-      late Map<String, dynamic> sent;
-      final service = SheetsService(
-        client: MockClient((request) async {
-          sent = jsonDecode(request.body) as Map<String, dynamic>;
-          return http.Response('{"status":"success"}', 200);
-        }),
-      );
+    test(
+      'submit: posts secret + only the provided fields, including Shift',
+      () async {
+        late Map<String, dynamic> sent;
+        final service = SheetsService(
+          client: MockClient((request) async {
+            sent = jsonDecode(request.body) as Map<String, dynamic>;
+            return http.Response('{"status":"success"}', 200);
+          }),
+        );
 
-      await service.submitCastingUpdate({
-        'DCM': '1212',
-        'PartNo': '1',
-        'Plan': '300',
-        'Output_10AM': '30',
-      });
+        await service.submitCastingUpdate({
+          'DCM': '1212',
+          'PartNo': '1',
+          'Shift': 'Night',
+          'Plan': '300',
+          'Output_8PM': '30',
+        });
 
-      expect(sent['secret'], 'hicom2026changeme');
-      expect(sent['module'], 'casting');
-      expect(sent['data'], {
-        'DCM': '1212',
-        'PartNo': '1',
-        'Plan': '300',
-        'Output_10AM': '30',
-      });
-    });
+        expect(sent['secret'], 'hicom2026changeme');
+        expect(sent['module'], 'casting');
+        expect(sent['data'], {
+          'DCM': '1212',
+          'PartNo': '1',
+          'Shift': 'Night',
+          'Plan': '300',
+          'Output_8PM': '30',
+        });
+      },
+    );
+
+    test(
+      'addCastingPart: posts the castingAddPart op with group/part/mo',
+      () async {
+        late Map<String, dynamic> sent;
+        final service = SheetsService(
+          client: MockClient((request) async {
+            sent = jsonDecode(request.body) as Map<String, dynamic>;
+            return http.Response('{"status":"success"}', 200);
+          }),
+        );
+
+        await service.addCastingPart(dcm: '1212', part: '11', mo: 'JUL-0451');
+
+        expect(sent['action'], 'config');
+        expect(sent['op'], 'castingAddPart');
+        expect(sent['group'], '1212');
+        expect(sent['part'], '11');
+        expect(sent['mo'], 'JUL-0451');
+      },
+    );
+
+    test(
+      'editCastingPart: omits mo when left unset (leaves it unchanged)',
+      () async {
+        late Map<String, dynamic> sent;
+        final service = SheetsService(
+          client: MockClient((request) async {
+            sent = jsonDecode(request.body) as Map<String, dynamic>;
+            return http.Response('{"status":"success"}', 200);
+          }),
+        );
+
+        await service.editCastingPart(dcm: '1212', part: '1', newPart: '1');
+
+        expect(sent['op'], 'castingEditPart');
+        expect(sent['newPart'], '1');
+        expect(sent.containsKey('mo'), isFalse);
+      },
+    );
 
     test('GET surfaces an explicit error envelope', () async {
       final service = SheetsService(
@@ -150,7 +222,7 @@ void main() {
       );
 
       await expectLater(
-        service.fetchCastingParts('9999'),
+        service.fetchCastingParts('9999', shift: 'Day'),
         throwsA(
           isA<SheetsSubmissionException>().having(
             (e) => e.message,

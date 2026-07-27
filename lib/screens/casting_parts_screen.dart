@@ -11,11 +11,12 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'casting_entry_screen.dart';
 
-/// Part selector for one DCM: fill-tank cards showing today's progress.
+/// Part selector for one DCM: fill-tank cards showing this shift's progress.
 class CastingPartsScreen extends StatefulWidget {
-  const CastingPartsScreen({super.key, required this.dcm});
+  const CastingPartsScreen({super.key, required this.dcm, required this.shift});
 
   final String dcm;
+  final String shift;
 
   @override
   State<CastingPartsScreen> createState() => _CastingPartsScreenState();
@@ -46,7 +47,10 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
       _error = null;
     });
     try {
-      final parts = await _sheetsService.fetchCastingParts(widget.dcm);
+      final parts = await _sheetsService.fetchCastingParts(
+        widget.dcm,
+        shift: widget.shift,
+      );
       if (!mounted) return;
       setState(() {
         _parts = parts;
@@ -65,8 +69,12 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                CastingEntryScreen(dcm: widget.dcm, part: part.part),
+            builder: (_) => CastingEntryScreen(
+              dcm: widget.dcm,
+              part: part.part,
+              shift: widget.shift,
+              mo: part.mo,
+            ),
           ),
         )
         // Fill % / timestamps change after logging — refresh on return.
@@ -91,33 +99,31 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final name = await promptText(context, title: 'Add Part', label: 'Part');
-    if (name == null) return;
+    final input = await promptCastingPart(context, title: 'Add Part');
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configAdd(
-        module: 'casting',
-        kind: 'part',
-        group: widget.dcm,
-        value: name,
+      () => _sheetsService.addCastingPart(
+        dcm: widget.dcm,
+        part: input.name,
+        mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
   }
 
-  Future<void> _renamePart(PartStatus part) async {
-    final name = await promptText(
+  Future<void> _editPart(PartStatus part) async {
+    final input = await promptCastingPart(
       context,
-      title: 'Rename Part',
-      label: 'Part',
-      initialValue: part.part,
+      title: 'Edit Part',
+      initialName: part.part,
+      initialMo: part.mo,
     );
-    if (name == null || name == part.part) return;
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configRename(
-        module: 'casting',
-        kind: 'part',
-        group: widget.dcm,
-        value: part.part,
-        newValue: name,
+      () => _sheetsService.editCastingPart(
+        dcm: widget.dcm,
+        part: part.part,
+        newPart: input.name,
+        mo: input.mo,
       ),
     );
   }
@@ -141,10 +147,21 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     );
   }
 
+  String _subtitleFor(PartStatus part) {
+    final mo = part.mo;
+    final updated = part.lastUpdated;
+    if (mo != null && updated != null) return 'MO $mo · $updated';
+    if (mo != null) return 'MO $mo';
+    if (updated != null) return 'Last updated: $updated';
+    return 'No entries yet · ${widget.shift.toLowerCase()} shift';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(subtitle: 'Casting — DCM ${widget.dcm}'),
+      appBar: HicomAppBar(
+        subtitle: 'Casting — DCM ${widget.dcm} · ${widget.shift} shift',
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -225,9 +242,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
                   Positioned.fill(
                     child: FillTankCard(
                       title: part.part,
-                      subtitle: part.lastUpdated != null
-                          ? 'Last updated: ${part.lastUpdated}'
-                          : 'No entries yet today',
+                      subtitle: _subtitleFor(part),
                       fillPercent: part.fillPercent,
                       onTap: () => _openPart(part),
                     ),
@@ -236,7 +251,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
                     top: 2,
                     right: 2,
                     child: CardMenuButton(
-                      onEdit: () => _renamePart(part),
+                      onEdit: () => _editPart(part),
                       onDelete: () => _deletePart(part),
                     ),
                   ),

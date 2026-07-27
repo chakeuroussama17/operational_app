@@ -1,13 +1,15 @@
 /// Data types for the Casting module's incremental logging API.
 ///
-/// The backend exposes (all on the webhook URL):
-///   GET  ?action=dashboard                    -> [DcmStatus]
-///   GET  ?action=parts&dcm=X                  -> [PartStatus]
-///   GET  ?action=row&dcm=X&part=Y&shift=Z     -> CastingRow | null
-///   POST {secret, data: {DCM, PartNo, Shift, ...only changed fields}}
+/// Casting is shift-aware (Day 8AM-6PM / Night 8PM-6AM, crossing midnight) —
+/// the only module with this schema; Secondary/Machining are unchanged. The
+/// backend exposes (all on the webhook URL):
+///   GET  ?action=dashboard&shift=Z             -> [DcmStatus]
+///   GET  ?action=parts&dcm=X&shift=Z           -> [PartStatus]
+///   GET  ?action=row&dcm=X&part=Y&shift=Z      -> CastingRow | null
+///   POST {secret, module:'casting', data: {DCM, PartNo, Shift, ...changed}}
 library;
 
-/// One of the six fixed time slots logged per shift.
+/// One of the six checkpoints logged for a given shift.
 class CastingSlot {
   const CastingSlot(this.label, this.outputKey, this.lorKey);
 
@@ -20,21 +22,43 @@ class CastingSlot {
   final String lorKey;
 }
 
-const List<CastingSlot> castingSlots = [
+/// Day shift: 8AM-6PM.
+const List<CastingSlot> castingDaySlots = [
+  CastingSlot('8 AM', 'Output_8AM', 'Output_LOR8AM'),
   CastingSlot('10 AM', 'Output_10AM', 'Output_LOR10AM'),
   CastingSlot('12 PM', 'Output_12PM', 'Output_LOR12PM'),
   CastingSlot('2 PM', 'Output_2PM', 'Output_LOR2PM'),
   CastingSlot('4 PM', 'Output_4PM', 'Output_LOR4PM'),
   CastingSlot('6 PM', 'Output_6PM', 'Output_LOR6PM'),
-  CastingSlot('8 PM', 'Output_8PM', 'Output_LOR8PM'),
 ];
 
-/// Dashboard card: one DCM machine and when it was last logged today.
+/// Night shift: 8PM-6AM, crossing midnight.
+const List<CastingSlot> castingNightSlots = [
+  CastingSlot('8 PM', 'Output_8PM', 'Output_LOR8PM'),
+  CastingSlot('10 PM', 'Output_10PM', 'Output_LOR10PM'),
+  CastingSlot('12 AM', 'Output_12AM', 'Output_LOR12AM'),
+  CastingSlot('2 AM', 'Output_2AM', 'Output_LOR2AM'),
+  CastingSlot('4 AM', 'Output_4AM', 'Output_LOR4AM'),
+  CastingSlot('6 AM', 'Output_6AM', 'Output_LOR6AM'),
+];
+
+List<CastingSlot> castingSlotsForShift(String shift) =>
+    shift == 'Night' ? castingNightSlots : castingDaySlots;
+
+/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
+/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
+/// override it (e.g. logging a late entry after shift changeover).
+String autoDetectCastingShift() {
+  final hour = DateTime.now().hour;
+  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+}
+
+/// Dashboard card: one DCM machine and when it was last logged this shift.
 class DcmStatus {
   const DcmStatus({required this.dcm, this.lastUpdated});
 
   final String dcm;
-  final String? lastUpdated; // "HH:mm" or null when nothing logged today
+  final String? lastUpdated; // "HH:mm" or null when nothing logged this shift
 
   factory DcmStatus.fromJson(Map<String, dynamic> json) => DcmStatus(
     dcm: cleanCell(json['dcm']) ?? '',
@@ -42,32 +66,36 @@ class DcmStatus {
   );
 }
 
-/// Part selector card: one part of a DCM, with today's completion level.
+/// Part selector card: one part of a DCM, with this shift's completion
+/// level and the part's current MO (manufacturing order) number.
 class PartStatus {
   const PartStatus({
     required this.part,
+    this.mo,
     this.lastUpdated,
     required this.fillPercent,
   });
 
   final String part;
+  final String? mo;
   final String? lastUpdated;
 
-  /// 0-100: how many of the six time slots are filled today.
+  /// 0-100: how many of this shift's six time slots are filled today.
   final int fillPercent;
 
   factory PartStatus.fromJson(Map<String, dynamic> json) {
     final raw = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
     return PartStatus(
       part: cleanCell(json['part']) ?? '',
+      mo: cleanCell(json['mo']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),
     );
   }
 }
 
-/// Today's saved row for a DCM + Part + Shift. Field access is by column
-/// name so the row survives backend column additions untouched.
+/// This shift's saved row for a DCM + Part. Field access is by column name
+/// so the row survives backend column additions untouched.
 class CastingRow {
   const CastingRow(this.raw);
 

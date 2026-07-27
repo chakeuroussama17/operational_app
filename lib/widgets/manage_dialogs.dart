@@ -39,6 +39,80 @@ Future<String?> promptText(
   return (result == null || result.isEmpty) ? null : result;
 }
 
+/// Result of [promptCastingPart]: the part name plus its MO (manufacturing
+/// order) number — Casting parts are the only ones with an MO field.
+class CastingPartInput {
+  const CastingPartInput({required this.name, required this.mo});
+
+  final String name;
+
+  /// '' if left blank (no MO set / clearing an existing one).
+  final String mo;
+}
+
+/// Add/edit dialog for a Casting part: name plus its MO number. Returns null
+/// if cancelled or the name was left empty.
+Future<CastingPartInput?> promptCastingPart(
+  BuildContext context, {
+  required String title,
+  String? initialName,
+  String? initialMo,
+}) async {
+  final nameController = TextEditingController(text: initialName ?? '');
+  final moController = TextEditingController(text: initialMo ?? '');
+  final result = await showDialog<CastingPartInput>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: nameController,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Part'),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: moController,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'MO number (optional)',
+              helperText: 'Manufacturing order — update monthly',
+            ),
+            onSubmitted: (_) => Navigator.of(dialogContext).pop(
+              CastingPartInput(
+                name: nameController.text.trim(),
+                mo: moController.text.trim(),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('CANCEL'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(
+            CastingPartInput(
+              name: nameController.text.trim(),
+              mo: moController.text.trim(),
+            ),
+          ),
+          child: const Text('SAVE'),
+        ),
+      ],
+    ),
+  );
+  nameController.dispose();
+  moController.dispose();
+  if (result == null || result.name.isEmpty) return null;
+  return result;
+}
+
 /// Confirmation dialog for a destructive delete. Returns true if confirmed.
 Future<bool?> confirmDelete(
   BuildContext context, {

@@ -24,7 +24,7 @@ class SheetsSubmissionException implements Exception {
 ///
 /// All three modules share one incremental upsert API, routed by a `module`
 /// field ("casting" | "secondary" | "machining"), each keyed by their own
-/// selectors + Date (no shift):
+/// selectors + Date:
 ///   GET  ?action=dashboard&module=X             -> top-level cards + last update
 ///   GET  ?action=parts&module=X&...             -> next-level cards
 ///   GET  ?action=row&module=X&...                -> today's saved row or null
@@ -34,11 +34,20 @@ class SheetsSubmissionException implements Exception {
 /// Machining adds a `?action=lines` step (Customer -> Part -> Line) since it
 /// is keyed by Customer + PartNo + Line + Date instead of two selectors.
 ///
+/// Casting alone is shift-aware: every dashboard/parts/row call also takes
+/// `shift` ("Day" | "Night"), and submitted data must include a `Shift`
+/// field — see casting_models.dart for why (real day/night shift schedule,
+/// not calendar midnight) and the two Casting-only config ops below for MO
+/// (manufacturing order) number management.
+///
 /// A separate Config API manages the list of valid groups/parts/lines
 /// itself (add/delete/rename), backing the manage/settings screens:
 ///   GET  ?action=config&module=X -> { groups, partsByGroup, lines }
 ///   POST { secret, action: 'config', op: 'add'|'delete'|'rename', module,
 ///          kind: 'group'|'part'|'line', group?, value, newValue? }
+///   POST { secret, action: 'config', op: 'castingAddPart'|'castingEditPart',
+///          group: dcm, part, newPart?, mo? } -- Casting parts only, since
+///          they alone carry an MO number alongside the name.
 class SheetsService {
   SheetsService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -46,36 +55,43 @@ class SheetsService {
 
   static const Duration _timeout = Duration(seconds: 20);
 
-  // ---------- Casting incremental API ----------
+  // ---------- Casting incremental API (shift-aware: Day or Night) ----------
 
-  Future<List<DcmStatus>> fetchCastingDashboard() async {
+  Future<List<DcmStatus>> fetchCastingDashboard({required String shift}) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'dashboard',
+      'shift': shift,
     });
     return _asList(
       decoded,
     ).whereType<Map<String, dynamic>>().map(DcmStatus.fromJson).toList();
   }
 
-  Future<List<PartStatus>> fetchCastingParts(String dcm) async {
+  Future<List<PartStatus>> fetchCastingParts(
+    String dcm, {
+    required String shift,
+  }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'parts',
       'dcm': dcm,
+      'shift': shift,
     });
     return _asList(
       decoded,
     ).whereType<Map<String, dynamic>>().map(PartStatus.fromJson).toList();
   }
 
-  /// Today's saved row for this DCM + Part, or null if none yet.
+  /// This shift's saved row for this DCM + Part, or null if none yet.
   Future<CastingRow?> fetchCastingRow({
     required String dcm,
     required String part,
+    required String shift,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'row',
       'dcm': dcm,
       'part': part,
+      'shift': shift,
     });
     if (decoded == null) return null;
     if (decoded is Map<String, dynamic>) {
@@ -89,14 +105,51 @@ class SheetsService {
     throw const SheetsSubmissionException('Unexpected server response.');
   }
 
-  /// Saves a partial casting update. [data] must contain DCM and PartNo plus
-  /// ONLY the fields the user filled/changed; the backend upserts today's row
-  /// and recalculates LOR%.
+  /// Saves a partial casting update. [data] must contain DCM, PartNo and
+  /// Shift plus ONLY the fields the user filled/changed; the backend upserts
+  /// this shift's row and recalculates LOR%.
   Future<void> submitCastingUpdate(Map<String, String> data) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'casting',
       'data': data,
+    });
+  }
+
+  /// Adds a new Casting part under [dcm], optionally with its current MO
+  /// (manufacturing order) number.
+  Future<void> addCastingPart({
+    required String dcm,
+    required String part,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'castingAddPart',
+      'group': dcm,
+      'part': part,
+      'mo': ?mo,
+    });
+  }
+
+  /// Renames a Casting part and/or updates its MO number. Only ever touches
+  /// the Config sheet — rows already logged keep whatever MO was snapshotted
+  /// onto them when they were created.
+  Future<void> editCastingPart({
+    required String dcm,
+    required String part,
+    required String newPart,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'castingEditPart',
+      'group': dcm,
+      'part': part,
+      'newPart': newPart,
+      'mo': ?mo,
     });
   }
 

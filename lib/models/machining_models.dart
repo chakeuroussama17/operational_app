@@ -1,11 +1,13 @@
 /// Data types for the Machining module's incremental logging API.
 ///
 /// One level deeper than Casting/Secondary: Customer -> Part -> Line -> entry
-/// (keyed by Customer + PartNo + Line + Date). Each time slot also carries a
-/// Rejection count alongside Output and its computed LOR%.
+/// (keyed by Customer + PartNo + Line + shift-date). Shift-aware like the
+/// others (Day 8AM-6PM / Night 8PM-6AM crossing midnight), MO number per part,
+/// and each time slot also carries a Rejection count alongside Output and its
+/// computed LOR%.
 library;
 
-/// One of the six fixed time slots logged per shift.
+/// One of the six checkpoints logged for a given shift.
 class MachiningSlot {
   const MachiningSlot(
     this.label,
@@ -26,14 +28,36 @@ class MachiningSlot {
   final String rejectionKey;
 }
 
-const List<MachiningSlot> machiningSlots = [
+/// Day shift: 8AM-6PM.
+const List<MachiningSlot> machiningDaySlots = [
+  MachiningSlot('8 AM', 'Output_8AM', 'Output_LOR8AM', 'Rejection_8AM'),
   MachiningSlot('10 AM', 'Output_10AM', 'Output_LOR10AM', 'Rejection_10AM'),
   MachiningSlot('12 PM', 'Output_12PM', 'Output_LOR12PM', 'Rejection_12PM'),
   MachiningSlot('2 PM', 'Output_2PM', 'Output_LOR2PM', 'Rejection_2PM'),
   MachiningSlot('4 PM', 'Output_4PM', 'Output_LOR4PM', 'Rejection_4PM'),
   MachiningSlot('6 PM', 'Output_6PM', 'Output_LOR6PM', 'Rejection_6PM'),
-  MachiningSlot('8 PM', 'Output_8PM', 'Output_LOR8PM', 'Rejection_8PM'),
 ];
+
+/// Night shift: 8PM-6AM, crossing midnight.
+const List<MachiningSlot> machiningNightSlots = [
+  MachiningSlot('8 PM', 'Output_8PM', 'Output_LOR8PM', 'Rejection_8PM'),
+  MachiningSlot('10 PM', 'Output_10PM', 'Output_LOR10PM', 'Rejection_10PM'),
+  MachiningSlot('12 AM', 'Output_12AM', 'Output_LOR12AM', 'Rejection_12AM'),
+  MachiningSlot('2 AM', 'Output_2AM', 'Output_LOR2AM', 'Rejection_2AM'),
+  MachiningSlot('4 AM', 'Output_4AM', 'Output_LOR4AM', 'Rejection_4AM'),
+  MachiningSlot('6 AM', 'Output_6AM', 'Output_LOR6AM', 'Rejection_6AM'),
+];
+
+List<MachiningSlot> machiningSlotsForShift(String shift) =>
+    shift == 'Night' ? machiningNightSlots : machiningDaySlots;
+
+/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
+/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
+/// override it (e.g. logging a late entry after shift changeover).
+String autoDetectMachiningShift() {
+  final hour = DateTime.now().hour;
+  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+}
 
 /// Dashboard card: one customer and when it was last logged today.
 class CustomerStatus {
@@ -48,17 +72,20 @@ class CustomerStatus {
   );
 }
 
-/// Part selector card: one part of a customer. Just a navigation step to the
-/// Line selector below it, so it carries no fill percentage of its own.
+/// Part selector card: one part of a customer, with its current MO
+/// (manufacturing order) number. A navigation step to the Line selector below
+/// it, so it carries no fill percentage of its own.
 class MachiningPartStatus {
-  const MachiningPartStatus({required this.part, this.lastUpdated});
+  const MachiningPartStatus({required this.part, this.mo, this.lastUpdated});
 
   final String part;
+  final String? mo;
   final String? lastUpdated;
 
   factory MachiningPartStatus.fromJson(Map<String, dynamic> json) =>
       MachiningPartStatus(
         part: cleanCell(json['part']) ?? '',
+        mo: cleanCell(json['mo']),
         lastUpdated: cleanCell(json['lastUpdated']),
       );
 }

@@ -2,8 +2,12 @@
  * HICOM Production Log — Apps Script reference.
  *
  * Unified incremental upsert backend for Casting, Secondary, and Machining.
- * Casting/Secondary are keyed by (DCM|Station) + Part + Date. Machining adds
- * a third selector, Line, so it is keyed by Customer + Part + Line + Date.
+ * ALL THREE now run the same real 2-shift schedule (Day 8AM-6PM, Night
+ * 8PM-6AM crossing midnight), each split into two per-shift sheet tabs with
+ * no Shift column, keyed by their selectors + shift-date (see getShiftDate).
+ * Casting/Secondary key on (DCM|Station) + Part; Machining adds a third
+ * selector, Line, so it keys on Customer + Part + Line. Parts in all three
+ * carry an MO number, snapshotted onto a row once at creation.
  *
  * The list of valid DCMs/Stations/Customers/Parts/Lines is no longer
  * hardcoded — it lives in a "Config" sheet tab so supervisors can add/edit/
@@ -20,9 +24,9 @@
  *   - Kind = "line": Machining only, global (not per-part). Group blank,
  *     Value = the line name (e.g. "Line 1").
  *   Module is stored lowercase ("casting" | "secondary" | "machining").
- *   MO (Casting parts only — see getConfigPartMo): the part's current
- *     manufacturing order number, editable from the app; blank/unused for
- *     every other row. Added by migrateCastingShiftSchema(), see below.
+ *   MO (part rows, all three modules — see getConfigPartMo): the part's
+ *     current manufacturing order number, editable from the app; blank/unused
+ *     for group/line rows. Added by the setup*ShiftSheets() migrations.
  *   Run seedDefaultConfig() once from the Apps Script editor (Run menu)
  *   after creating this tab to populate it with the current defaults.
  *
@@ -66,37 +70,50 @@
  *     Actual_12AM | LOR_12AM | Actual_2AM  | LOR_2AM  |
  *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
  *
- * Machining:
- *   Date | Customer | PartNo | Line | Plan |
- *   Output_10AM | Output_LOR10AM | Rejection_10AM |
- *   Output_12PM | Output_LOR12PM | Rejection_12PM |
- *   Output_2PM  | Output_LOR2PM  | Rejection_2PM  |
- *   Output_4PM  | Output_LOR4PM  | Rejection_4PM  |
- *   Output_6PM  | Output_LOR6PM  | Rejection_6PM  |
- *   Output_8PM  | Output_LOR8PM  | Rejection_8PM  | LastUpdated
+ * Machining (shift-split like the others — two tabs, keyed Customer+PartNo+
+ * Line+shift-date, MO per part, plus a Rejection_ count per slot. Run
+ * setupMachiningShiftSheets() once):
+ *
+ *   Machining_Day (Day shift, checkpoints 8AM-6PM):
+ *     Date | Customer | PartNo | Line | MO | Plan |
+ *     Output_8AM  | Output_LOR8AM  | Rejection_8AM  |
+ *     Output_10AM | Output_LOR10AM | Rejection_10AM |
+ *     Output_12PM | Output_LOR12PM | Rejection_12PM |
+ *     Output_2PM  | Output_LOR2PM  | Rejection_2PM  |
+ *     Output_4PM  | Output_LOR4PM  | Rejection_4PM  |
+ *     Output_6PM  | Output_LOR6PM  | Rejection_6PM  | LastUpdated
+ *
+ *   Machining_Night (Night shift, checkpoints 8PM-6AM crossing midnight):
+ *     Date | Customer | PartNo | Line | MO | Plan |
+ *     Output_8PM  | Output_LOR8PM  | Rejection_8PM  |
+ *     Output_10PM | Output_LOR10PM | Rejection_10PM |
+ *     Output_12AM | Output_LOR12AM | Rejection_12AM |
+ *     Output_2AM  | Output_LOR2AM  | Rejection_2AM  |
+ *     Output_4AM  | Output_LOR4AM  | Rejection_4AM  |
+ *     Output_6AM  | Output_LOR6AM  | Rejection_6AM  | LastUpdated
  *
  * After editing: Deploy > New deployment (editing an existing deployment's
  * version has not reliably gone live in testing — always cut a new one).
  */
 
 var SECRET_KEY = 'hicom2026changeme';
-var MACHINING_SHEET = 'Machining';
 var CONFIG_SHEET = 'Config';
-var OUTPUT_TIME_SLOTS = ['10AM', '12PM', '2PM', '4PM', '6PM', '8PM'];
 
-// Casting AND Secondary: real 2-shift schedule. Day checkpoints run 8AM-6PM;
-// Night checkpoints run 8PM-6AM (crossing midnight). Machining is unchanged
-// and still uses the single OUTPUT_TIME_SLOTS list above.
+// ALL THREE modules run the same real 2-shift schedule. Day checkpoints run
+// 8AM-6PM; Night checkpoints run 8PM-6AM (crossing midnight).
 //
 // Each shift is its OWN sheet tab (Casting_Day/Casting_Night,
-// Secondary_Day/Secondary_Night) so every row holds only its shift's six
-// checkpoints — no half-empty rows, and no Shift column (the tab the row
-// lives in IS the shift). Casting uses Output_/Output_LOR column prefixes;
-// Secondary uses Actual_/LOR_ — the slot TIMES are identical.
+// Secondary_Day/Secondary_Night, Machining_Day/Machining_Night) so every row
+// holds only its shift's six checkpoints — no half-empty rows, and no Shift
+// column (the tab the row lives in IS the shift). Column prefixes differ per
+// module (Casting Output_/Output_LOR; Secondary Actual_/LOR_; Machining
+// Output_/Output_LOR + Rejection_) but the slot TIMES are identical.
 var CASTING_DAY_SHEET = 'Casting_Day';
 var CASTING_NIGHT_SHEET = 'Casting_Night';
 var SECONDARY_DAY_SHEET = 'Secondary_Day';
 var SECONDARY_NIGHT_SHEET = 'Secondary_Night';
+var MACHINING_DAY_SHEET = 'Machining_Day';
+var MACHINING_NIGHT_SHEET = 'Machining_Night';
 var DAY_SLOTS = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM'];
 var NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
 // Back-compat aliases (Casting code referred to these names).
@@ -124,12 +141,31 @@ function getSecondarySheetForShift(shift) {
   return requireSheet(name, 'setupSecondaryShiftSheets');
 }
 
+// The sheet tab a Machining row lives in, chosen purely by shift.
+function getMachiningSheetForShift(shift) {
+  var name = shift === 'Night' ? MACHINING_NIGHT_SHEET : MACHINING_DAY_SHEET;
+  return requireSheet(name, 'setupMachiningShiftSheets');
+}
+
 // Header frame for a Casting shift sheet, built from that shift's slots.
 function castingHeadersForShift(shift) {
   var headers = ['Date', 'DCM', 'PartNo', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
+  });
+  headers.push('LastUpdated');
+  return headers;
+}
+
+// Header frame for a Machining shift sheet — like Casting but one level
+// deeper (Line) and with a Rejection_ column alongside each slot's output.
+function machiningHeadersForShift(shift) {
+  var headers = ['Date', 'Customer', 'PartNo', 'Line', 'MO', 'Plan'];
+  slotsForShift(shift).forEach(function (slot) {
+    headers.push('Output_' + slot);
+    headers.push('Output_LOR' + slot);
+    headers.push('Rejection_' + slot);
   });
   headers.push('LastUpdated');
   return headers;
@@ -168,7 +204,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'SECONDARY-2SHEET-v3';
+var BACKEND_VERSION = 'MACHINING-2SHEET-v4';
 
 function doGet(e) {
   try {
@@ -179,11 +215,15 @@ function doGet(e) {
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
 
     if (module === 'machining') {
-      if (action === 'dashboard') return jsonResponse(getMachiningDashboard());
-      if (action === 'parts') return jsonResponse(getMachiningParts(e.parameter.customer));
-      if (action === 'lines') return jsonResponse(getMachiningLines(e.parameter.customer, e.parameter.part));
+      // Machining is now shift-aware too (Machining_Day/Machining_Night) and
+      // one level deeper: Customer -> Part -> Line -> entry. Every call
+      // carries a shift.
+      var mShift = e.parameter.shift;
+      if (action === 'dashboard') return jsonResponse(getMachiningDashboard(mShift));
+      if (action === 'parts') return jsonResponse(getMachiningParts(e.parameter.customer, mShift));
+      if (action === 'lines') return jsonResponse(getMachiningLines(e.parameter.customer, e.parameter.part, mShift));
       if (action === 'row') {
-        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, e.parameter.line));
+        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, e.parameter.line, mShift));
       }
     } else if (module === 'secondary') {
       // Secondary is now shift-aware too (Secondary_Day/Secondary_Night),
@@ -221,13 +261,14 @@ function doPost(e) {
       return jsonResponse({ status: 'error', message: 'Unauthorized' });
     }
     if (payload.action === 'config') {
-      // Casting/Secondary part ops that also carry an MO number — everything
-      // else (groups, lines, Machining parts) stays on the generic
-      // configMutate, untouched.
+      // Part ops that also carry an MO number (all three modules now) —
+      // everything else (groups, lines) stays on the generic configMutate.
       if (payload.op === 'castingAddPart') return jsonResponse(addPartWithMo('casting', payload));
       if (payload.op === 'castingEditPart') return jsonResponse(editPartWithMo('casting', payload));
       if (payload.op === 'secondaryAddPart') return jsonResponse(addPartWithMo('secondary', payload));
       if (payload.op === 'secondaryEditPart') return jsonResponse(editPartWithMo('secondary', payload));
+      if (payload.op === 'machiningAddPart') return jsonResponse(addPartWithMo('machining', payload));
+      if (payload.op === 'machiningEditPart') return jsonResponse(editPartWithMo('machining', payload));
       return jsonResponse(configMutate(payload));
     }
     if (payload.module === 'casting') return jsonResponse(upsertCastingRow(payload.data));
@@ -543,16 +584,22 @@ function editPartWithMo(module, payload) {
   return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
 
-// ---------- Machining: reads (Customer -> Part -> Line -> entry) ----------
+// ---------- Machining: reads (shift-aware — Customer -> Part -> Line -> entry) ----------
+//
+// Now mirrors Casting/Secondary: two per-shift sheets (Machining_Day/
+// Machining_Night), keyed by Customer + PartNo + Line + shift-date. Adds the
+// Line dimension and a Rejection_ count per slot. MO is per-PART (scoped to
+// Customer+Part) and so is shared across all of that part's lines.
 
-function getMachiningDashboard() {
-  var rows = getAllRowsAsObjects(getModuleSheet('machining'));
-  var today = getTodayString();
+function getMachiningDashboard(shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
   var customers = getConfigGroups('machining');
   var result = customers.map(function (customer) {
     var latest = null;
     rows.forEach(function (r) {
-      if (String(r.Customer) === customer && formatDateOnly(r.Date) === today && r.LastUpdated) {
+      if (String(r.Customer) === customer && formatDateOnly(r.Date) === shiftDate && r.LastUpdated) {
         if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
       }
     });
@@ -561,35 +608,42 @@ function getMachiningDashboard() {
   return { status: 'success', data: result };
 }
 
-function getMachiningParts(customer) {
-  var rows = getAllRowsAsObjects(getModuleSheet('machining'));
-  var today = getTodayString();
+function getMachiningParts(customer, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
   var parts = getConfigParts('machining', customer);
   var result = parts.map(function (part) {
     var latest = null;
     rows.forEach(function (r) {
       if (String(r.Customer) === customer && String(r.PartNo) === part &&
-          formatDateOnly(r.Date) === today && r.LastUpdated) {
+          formatDateOnly(r.Date) === shiftDate && r.LastUpdated) {
         if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
       }
     });
-    return { part: part, lastUpdated: latest ? hhmm(latest) : null };
+    return {
+      part: part,
+      mo: getConfigPartMo('machining', customer, part),
+      lastUpdated: latest ? hhmm(latest) : null,
+    };
   });
   return { status: 'success', data: result };
 }
 
-function getMachiningLines(customer, part) {
-  var rows = getAllRowsAsObjects(getModuleSheet('machining'));
-  var today = getTodayString();
+function getMachiningLines(customer, part, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
+  var slots = slotsForShift(shift);
   var lines = getConfigLines();
   var result = lines.map(function (line) {
     var match = rows.find(function (r) {
       return String(r.Customer) === customer && String(r.PartNo) === part &&
-        String(r.Line) === line && formatDateOnly(r.Date) === today;
+        String(r.Line) === line && formatDateOnly(r.Date) === shiftDate;
     });
     var filled = 0;
     if (match) {
-      OUTPUT_TIME_SLOTS.forEach(function (slot) {
+      slots.forEach(function (slot) {
         var v = match['Output_' + slot];
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
@@ -597,47 +651,57 @@ function getMachiningLines(customer, part) {
     return {
       part: line,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
-      fillPercent: match ? Math.round((filled / OUTPUT_TIME_SLOTS.length) * 100) : 0,
+      fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
     };
   });
   return { status: 'success', data: result };
 }
 
-function getMachiningRow(customer, part, line) {
-  var rows = getAllRowsAsObjects(getModuleSheet('machining'));
-  var today = getTodayString();
+function getMachiningRow(customer, part, line, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
   var match = rows.find(function (r) {
     return String(r.Customer) === customer && String(r.PartNo) === part &&
-      String(r.Line) === line && formatDateOnly(r.Date) === today;
+      String(r.Line) === line && formatDateOnly(r.Date) === shiftDate;
   });
   if (!match) return { status: 'success', data: null };
   delete match._rowNum;
   return { status: 'success', data: match };
 }
 
-// ---------- Machining: upsert (partial merge, adds Rejection per slot) ----------
+// ---------- Machining: upsert (per-shift sheet, snapshots MO, Rejection per slot) ----------
 
 function upsertMachiningRow(data) {
-  var sheet = getModuleSheet('machining');
+  // `data.Shift` is sent by the app only to pick the sheet — never stored.
+  var shift = data.Shift === 'Night' ? 'Night' : 'Day';
+  var sheet = getMachiningSheetForShift(shift);
   var headers = getHeaders(sheet);
   var rows = getAllRowsAsObjects(sheet);
-  var today = getTodayString();
+  var shiftDate = getShiftDate(shift);
+  var slots = slotsForShift(shift);
 
   var existing = rows.find(function (r) {
     return String(r.Customer) === String(data.Customer) &&
       String(r.PartNo) === String(data.PartNo) &&
       String(r.Line) === String(data.Line) &&
-      formatDateOnly(r.Date) === today;
+      formatDateOnly(r.Date) === shiftDate;
   });
 
   var merged = existing ? Object.assign({}, existing) : {};
-  merged.Date = today;
+  merged.Date = shiftDate;
   merged.Customer = data.Customer;
   merged.PartNo = data.PartNo;
   merged.Line = data.Line;
+  if (!existing) {
+    // Snapshot the part's currently-configured MO onto the row once, at
+    // creation — later Config MO edits never rewrite already-logged rows.
+    // MO is per-part, so every line of a part logs the same MO.
+    merged.MO = getConfigPartMo('machining', data.Customer, data.PartNo);
+  }
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
-  OUTPUT_TIME_SLOTS.forEach(function (slot) {
+  slots.forEach(function (slot) {
     var outKey = 'Output_' + slot;
     var lorKey = 'Output_LOR' + slot;
     var rejKey = 'Rejection_' + slot;
@@ -752,20 +816,21 @@ function getAnalytics(module, days) {
   if (!days || days < 1) days = 14;
   if (days > 90) days = 90;
 
-  // Casting and Secondary each live in two sheets (Day + Night); read and
-  // concatenate both so a day's total reflects both shifts. Both shifts share
-  // the same shift-date, so grouping by Date alone (below) already merges them
-  // into one bucket. A day row has no night slot columns (and vice versa), so
-  // the union of outputKeys/lorKeys below simply skips the columns a row lacks.
+  // Every module now lives in two sheets (Day + Night); read and concatenate
+  // both so a day's total reflects both shifts. Both shifts share the same
+  // shift-date, so grouping by Date alone (below) already merges them into one
+  // bucket. A day row has no night slot columns (and vice versa), so the union
+  // of outputKeys/lorKeys below simply skips the columns a given row lacks.
   var rows;
-  if (module === 'casting') {
-    rows = getAllRowsAsObjects(getCastingSheetForShift('Day'))
-      .concat(getAllRowsAsObjects(getCastingSheetForShift('Night')));
-  } else if (module === 'secondary') {
+  if (module === 'secondary') {
     rows = getAllRowsAsObjects(getSecondarySheetForShift('Day'))
       .concat(getAllRowsAsObjects(getSecondarySheetForShift('Night')));
+  } else if (module === 'machining') {
+    rows = getAllRowsAsObjects(getMachiningSheetForShift('Day'))
+      .concat(getAllRowsAsObjects(getMachiningSheetForShift('Night')));
   } else {
-    rows = getAllRowsAsObjects(getModuleSheet(module));
+    rows = getAllRowsAsObjects(getCastingSheetForShift('Day'))
+      .concat(getAllRowsAsObjects(getCastingSheetForShift('Night')));
   }
   var tz = Session.getScriptTimeZone();
 
@@ -778,16 +843,14 @@ function getAnalytics(module, days) {
 
   var outputPrefix = (module === 'secondary') ? 'Actual_' : 'Output_';
   var lorPrefix = (module === 'secondary') ? 'LOR_' : 'Output_LOR';
-  // Casting and Secondary split into Day+Night shift columns — sum the full
-  // union so a day's total reflects both shifts. Both shifts share the same
-  // shift-date, so grouping by Date alone (below) puts them in one bucket.
-  var timeSlots = (module === 'casting' || module === 'secondary')
-    ? DAY_SLOTS.concat(NIGHT_SLOTS)
-    : OUTPUT_TIME_SLOTS;
+  // All modules split into Day+Night shift columns — sum the full union so a
+  // day's total reflects both shifts. Both shifts share the same shift-date,
+  // so grouping by Date alone (below) puts them in one bucket.
+  var timeSlots = DAY_SLOTS.concat(NIGHT_SLOTS);
   var outputKeys = timeSlots.map(function (s) { return outputPrefix + s; });
   var lorKeys = timeSlots.map(function (s) { return lorPrefix + s; });
   var rejectionKeys = (module === 'machining')
-    ? OUTPUT_TIME_SLOTS.map(function (s) { return 'Rejection_' + s; })
+    ? timeSlots.map(function (s) { return 'Rejection_' + s; })
     : [];
 
   var byDate = {};
@@ -1017,6 +1080,13 @@ function setupSecondaryShiftSheets() {
   ]);
 }
 
+function setupMachiningShiftSheets() {
+  createShiftSheets([
+    { name: MACHINING_DAY_SHEET, headers: machiningHeadersForShift('Day') },
+    { name: MACHINING_NIGHT_SHEET, headers: machiningHeadersForShift('Night') },
+  ]);
+}
+
 function createShiftSheets(specs) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var log = [];
@@ -1052,12 +1122,8 @@ function createShiftSheets(specs) {
 
 // ---------- Helpers ----------
 
-// Machining only now. Casting and Secondary are each split across two shift
-// sheets — use getCastingSheetForShift/getSecondarySheetForShift for them.
-function getModuleSheet(module) {
-  if (module === 'machining') return requireSheet(MACHINING_SHEET);
-  throw new Error('getModuleSheet: unsupported module "' + module + '"');
-}
+// Every module is now split across two per-shift sheets — use
+// getCastingSheetForShift / getSecondarySheetForShift / getMachiningSheetForShift.
 
 function requireSheet(sheetName, setupFn) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);

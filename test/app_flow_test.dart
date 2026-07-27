@@ -201,6 +201,7 @@ void main() {
           customer: 'Mazda',
           part: '1',
           line: 'Line 1',
+          shift: 'Day',
         ),
       ),
     );
@@ -212,9 +213,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    expect(find.text('Output — 10 AM'), findsOneWidget);
+    // Day shift slots run 8 AM - 6 PM.
+    expect(find.text('Output — 8 AM'), findsOneWidget);
     expect(find.text('Rejection — 10 AM'), findsOneWidget);
-    expect(find.text('Output — 8 PM'), findsOneWidget);
+    expect(find.text('Output — 6 PM'), findsOneWidget);
     expect(find.text('LOR'), findsNWidgets(6));
 
     // Submitting with no values entered is a no-op with a hint.
@@ -245,6 +247,7 @@ void main() {
           customer: 'Mazda',
           part: '1',
           line: 'Line 1',
+          shift: 'Day',
         ),
       ),
     );

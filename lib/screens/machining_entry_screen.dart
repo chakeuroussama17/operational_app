@@ -8,20 +8,28 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
 
-/// Data entry for one Customer + Part + Line. Pre-fills today's saved
-/// values, lets the supervisor fill any subset of time slots, and submits
-/// only the fields that changed — the backend upserts and recalculates LOR%.
+/// Data entry for one Customer + Part + Line + Shift. Pre-fills this shift's
+/// saved values, lets the supervisor fill any subset of time slots, and
+/// submits only the fields that changed — the backend upserts and
+/// recalculates LOR%.
 class MachiningEntryScreen extends StatefulWidget {
   const MachiningEntryScreen({
     super.key,
     required this.customer,
     required this.part,
     required this.line,
+    required this.shift,
+    this.mo,
   });
 
   final String customer;
   final String part;
   final String line;
+  final String shift;
+
+  /// The part's MO (manufacturing order) number — shown as read-only context.
+  /// Edit it from the part's Edit action on the Parts screen.
+  final String? mo;
 
   @override
   State<MachiningEntryScreen> createState() => _MachiningEntryScreenState();
@@ -31,13 +39,14 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   final _formKey = GlobalKey<FormState>();
   final _sheetsService = SheetsService();
 
+  late final List<MachiningSlot> _slots = machiningSlotsForShift(widget.shift);
+
   final _planController = TextEditingController();
-  final Map<String, TextEditingController> _outputControllers = {
-    for (final slot in machiningSlots) slot.outputKey: TextEditingController(),
+  late final Map<String, TextEditingController> _outputControllers = {
+    for (final slot in _slots) slot.outputKey: TextEditingController(),
   };
-  final Map<String, TextEditingController> _rejectionControllers = {
-    for (final slot in machiningSlots)
-      slot.rejectionKey: TextEditingController(),
+  late final Map<String, TextEditingController> _rejectionControllers = {
+    for (final slot in _slots) slot.rejectionKey: TextEditingController(),
   };
 
   /// Backend-computed LOR% labels, keyed by lorKey.
@@ -79,11 +88,12 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         customer: widget.customer,
         part: widget.part,
         line: widget.line,
+        shift: widget.shift,
       );
       if (!mounted) return;
       setState(() {
         _planController.text = row?.value('Plan') ?? '';
-        for (final slot in machiningSlots) {
+        for (final slot in _slots) {
           _outputControllers[slot.outputKey]!.text =
               row?.value(slot.outputKey) ?? '';
           _rejectionControllers[slot.rejectionKey]!.text =
@@ -106,7 +116,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
 
   Map<String, String> _currentValues() => {
     'Plan': _planController.text.trim(),
-    for (final slot in machiningSlots) ...{
+    for (final slot in _slots) ...{
       slot.outputKey: _outputControllers[slot.outputKey]!.text.trim(),
       slot.rejectionKey: _rejectionControllers[slot.rejectionKey]!.text.trim(),
     },
@@ -148,6 +158,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         'Customer': widget.customer,
         'PartNo': widget.part,
         'Line': widget.line,
+        'Shift': widget.shift,
         ...changed,
       });
       if (!mounted) return;
@@ -169,7 +180,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     return Scaffold(
       appBar: HicomAppBar(
         subtitle:
-            'Machining — ${widget.customer} · Part ${widget.part} · ${widget.line}',
+            'Machining — ${widget.customer} · Part ${widget.part} · '
+            '${widget.line} · ${widget.shift} shift',
       ),
       body: SafeArea(
         child: _loading
@@ -187,6 +199,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         customer: widget.customer,
                         part: widget.part,
                         line: widget.line,
+                        shift: widget.shift,
+                        mo: widget.mo,
                       ),
                       if (_loadError != null) ...[
                         const SizedBox(height: 14),
@@ -198,7 +212,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         controller: _planController,
                         required: false,
                       ),
-                      for (final slot in machiningSlots) ...[
+                      for (final slot in _slots) ...[
                         const SizedBox(height: AppDimens.fieldSpacing),
                         _SlotBlock(
                           slot: slot,
@@ -224,18 +238,23 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   }
 }
 
-/// Customer / Part / Line context chips so the supervisor always knows
-/// where this entry is going.
+/// Customer / Part / Line / Shift / MO context chips so the supervisor always
+/// knows where this entry is going. MO is read-only here — edit it from the
+/// part's Edit action on the Parts screen.
 class _ContextHeader extends StatelessWidget {
   const _ContextHeader({
     required this.customer,
     required this.part,
     required this.line,
+    required this.shift,
+    this.mo,
   });
 
   final String customer;
   final String part;
   final String line;
+  final String shift;
+  final String? mo;
 
   @override
   Widget build(BuildContext context) {
@@ -269,6 +288,11 @@ class _ContextHeader extends StatelessWidget {
         chip(Icons.precision_manufacturing_rounded, customer),
         chip(Icons.tag_rounded, 'Part $part'),
         chip(Icons.linear_scale_rounded, line),
+        chip(
+          shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+          '$shift shift',
+        ),
+        if (mo != null) chip(Icons.description_outlined, 'MO $mo'),
       ],
     );
   }

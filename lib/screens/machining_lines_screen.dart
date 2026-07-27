@@ -20,10 +20,17 @@ class MachiningLinesScreen extends StatefulWidget {
     super.key,
     required this.customer,
     required this.part,
+    required this.shift,
+    this.mo,
   });
 
   final String customer;
   final String part;
+  final String shift;
+
+  /// The part's MO (manufacturing order) number — passed straight through to
+  /// the entry screen for read-only context. MO is per-part, not per-line.
+  final String? mo;
 
   @override
   State<MachiningLinesScreen> createState() => _MachiningLinesScreenState();
@@ -57,6 +64,7 @@ class _MachiningLinesScreenState extends State<MachiningLinesScreen> {
       final lines = await _sheetsService.fetchMachiningLines(
         customer: widget.customer,
         part: widget.part,
+        shift: widget.shift,
       );
       if (!mounted) return;
       setState(() {
@@ -80,6 +88,8 @@ class _MachiningLinesScreenState extends State<MachiningLinesScreen> {
               customer: widget.customer,
               part: widget.part,
               line: line.line,
+              shift: widget.shift,
+              mo: widget.mo,
             ),
           ),
         )
@@ -155,7 +165,9 @@ class _MachiningLinesScreenState extends State<MachiningLinesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: HicomAppBar(
-        subtitle: 'Machining — ${widget.customer} · Part ${widget.part}',
+        subtitle:
+            'Machining — ${widget.customer} · Part ${widget.part} · '
+            '${widget.shift} shift',
       ),
       body: SafeArea(
         child: Column(

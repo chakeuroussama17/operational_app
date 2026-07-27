@@ -390,8 +390,8 @@ void main() {
     });
   });
 
-  group('machining incremental API', () {
-    test('dashboard: passes module param, parses customer cards', () async {
+  group('machining incremental API (shift-aware)', () {
+    test('dashboard: passes module+shift, parses customer cards', () async {
       late Uri requested;
       final service = SheetsService(
         client: MockClient((request) async {
@@ -405,11 +405,12 @@ void main() {
         }),
       );
 
-      final customers = await service.fetchMachiningDashboard();
+      final customers = await service.fetchMachiningDashboard(shift: 'Day');
 
       expect(requested.queryParameters, {
         'action': 'dashboard',
         'module': 'machining',
+        'shift': 'Day',
       });
       expect(customers, hasLength(2));
       expect(customers[0].customer, 'Mazda');
@@ -417,36 +418,36 @@ void main() {
       expect(customers[1].lastUpdated, isNull);
     });
 
-    test(
-      'parts: passes customer param, parses part cards (no fillPercent)',
-      () async {
-        late Uri requested;
-        final service = SheetsService(
-          client: MockClient((request) async {
-            requested = request.url;
-            return http.Response(
-              '{"status":"success","data":['
-              '{"part":"1","lastUpdated":"08:00"},'
-              '{"part":"2","lastUpdated":null}]}',
-              200,
-            );
-          }),
-        );
+    test('parts: passes customer+shift, parses part cards + MO', () async {
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            '{"status":"success","data":['
+            '{"part":"1","mo":"MACH-77","lastUpdated":"08:00"},'
+            '{"part":"2","lastUpdated":null}]}',
+            200,
+          );
+        }),
+      );
 
-        final parts = await service.fetchMachiningParts('Mazda');
+      final parts = await service.fetchMachiningParts('Mazda', shift: 'Night');
 
-        expect(requested.queryParameters, {
-          'action': 'parts',
-          'module': 'machining',
-          'customer': 'Mazda',
-        });
-        expect(parts[0].part, '1');
-        expect(parts[0].lastUpdated, '08:00');
-        expect(parts[1].lastUpdated, isNull);
-      },
-    );
+      expect(requested.queryParameters, {
+        'action': 'parts',
+        'module': 'machining',
+        'customer': 'Mazda',
+        'shift': 'Night',
+      });
+      expect(parts[0].part, '1');
+      expect(parts[0].mo, 'MACH-77');
+      expect(parts[0].lastUpdated, '08:00');
+      expect(parts[1].mo, isNull);
+      expect(parts[1].lastUpdated, isNull);
+    });
 
-    test('lines: passes customer+part params, clamps fillPercent', () async {
+    test('lines: passes customer+part+shift, clamps fillPercent', () async {
       late Uri requested;
       final service = SheetsService(
         client: MockClient((request) async {
@@ -463,6 +464,7 @@ void main() {
       final lines = await service.fetchMachiningLines(
         customer: 'Mazda',
         part: '1',
+        shift: 'Day',
       );
 
       expect(requested.queryParameters, {
@@ -470,6 +472,7 @@ void main() {
         'module': 'machining',
         'customer': 'Mazda',
         'part': '1',
+        'shift': 'Day',
       });
       expect(lines[0].line, 'Line 1');
       expect(lines[0].fillPercent, 33);
@@ -489,13 +492,14 @@ void main() {
         customer: 'Mazda',
         part: '1',
         line: 'Line 1',
+        shift: 'Day',
       );
 
       expect(row, isNull);
     });
 
     test(
-      'row: unwraps envelope, normalises numbers, formats LOR and Rejection',
+      'row: passes shift, normalises numbers, formats LOR + Rejection + MO',
       () async {
         late Uri requested;
         final service = SheetsService(
@@ -503,9 +507,10 @@ void main() {
             requested = request.url;
             return http.Response(
               '{"status":"success","data":{"Date":"2026-07-23",'
-              '"Customer":"Mazda","PartNo":"1","Line":"Line 1","Plan":300,'
-              '"Output_10AM":30,"Output_LOR10AM":0.1,"Rejection_10AM":2,'
-              '"Output_12PM":"","Output_LOR12PM":"","Rejection_12PM":"",'
+              '"Customer":"Mazda","PartNo":"1","Line":"Line 1","MO":"MACH-77",'
+              '"Plan":300,'
+              '"Output_8AM":30,"Output_LOR8AM":0.1,"Rejection_8AM":2,'
+              '"Output_10AM":"","Output_LOR10AM":"","Rejection_10AM":"",'
               '"LastUpdated":"14:32"}}',
               200,
             );
@@ -516,6 +521,7 @@ void main() {
           customer: 'Mazda',
           part: '1',
           line: 'Line 1',
+          shift: 'Day',
         );
 
         expect(requested.queryParameters, {
@@ -524,17 +530,19 @@ void main() {
           'customer': 'Mazda',
           'part': '1',
           'line': 'Line 1',
+          'shift': 'Day',
         });
         expect(row!.value('Plan'), '300');
-        expect(row.value('Output_10AM'), '30');
-        expect(row.lorLabel('Output_LOR10AM'), '10%');
-        expect(row.value('Rejection_10AM'), '2');
-        expect(row.value('Output_12PM'), isNull); // blank cell
+        expect(row.value('MO'), 'MACH-77');
+        expect(row.value('Output_8AM'), '30');
+        expect(row.lorLabel('Output_LOR8AM'), '10%');
+        expect(row.value('Rejection_8AM'), '2');
+        expect(row.value('Output_10AM'), isNull); // blank cell
         expect(row.value('Rejection_4PM'), isNull); // absent cell
       },
     );
 
-    test('submit: posts secret + module + only the provided fields', () async {
+    test('submit: posts module=machining and includes Shift', () async {
       late Map<String, dynamic> sent;
       final service = SheetsService(
         client: MockClient((request) async {
@@ -547,9 +555,10 @@ void main() {
         'Customer': 'Mazda',
         'PartNo': '1',
         'Line': 'Line 1',
+        'Shift': 'Night',
         'Plan': '300',
-        'Output_10AM': '30',
-        'Rejection_10AM': '2',
+        'Output_8PM': '30',
+        'Rejection_8PM': '2',
       });
 
       expect(sent['secret'], 'hicom2026changeme');
@@ -558,10 +567,53 @@ void main() {
         'Customer': 'Mazda',
         'PartNo': '1',
         'Line': 'Line 1',
+        'Shift': 'Night',
         'Plan': '300',
-        'Output_10AM': '30',
-        'Rejection_10AM': '2',
+        'Output_8PM': '30',
+        'Rejection_8PM': '2',
       });
+    });
+
+    test('addMachiningPart: posts the machiningAddPart op with mo', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.addMachiningPart(
+        customer: 'Mazda',
+        part: '9',
+        mo: 'MACH-09',
+      );
+
+      expect(sent['action'], 'config');
+      expect(sent['op'], 'machiningAddPart');
+      expect(sent['group'], 'Mazda');
+      expect(sent['part'], '9');
+      expect(sent['mo'], 'MACH-09');
+    });
+
+    test('editMachiningPart: omits mo when left unset', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.editMachiningPart(
+        customer: 'Mazda',
+        part: '1',
+        newPart: '1',
+      );
+
+      expect(sent['op'], 'machiningEditPart');
+      expect(sent['newPart'], '1');
+      expect(sent.containsKey('mo'), isFalse);
     });
 
     test('GET surfaces an explicit error envelope', () async {
@@ -575,7 +627,7 @@ void main() {
       );
 
       await expectLater(
-        service.fetchMachiningParts('Nobody'),
+        service.fetchMachiningParts('Nobody', shift: 'Day'),
         throwsA(
           isA<SheetsSubmissionException>().having(
             (e) => e.message,

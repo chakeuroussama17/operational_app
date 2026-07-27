@@ -14,9 +14,14 @@ import 'machining_lines_screen.dart';
 /// the level that actually opens the entry form, so these are plain cards
 /// rather than fill-tanks.
 class MachiningPartsScreen extends StatefulWidget {
-  const MachiningPartsScreen({super.key, required this.customer});
+  const MachiningPartsScreen({
+    super.key,
+    required this.customer,
+    required this.shift,
+  });
 
   final String customer;
+  final String shift;
 
   @override
   State<MachiningPartsScreen> createState() => _MachiningPartsScreenState();
@@ -47,7 +52,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       _error = null;
     });
     try {
-      final parts = await _sheetsService.fetchMachiningParts(widget.customer);
+      final parts = await _sheetsService.fetchMachiningParts(
+        widget.customer,
+        shift: widget.shift,
+      );
       if (!mounted) return;
       setState(() {
         _parts = parts;
@@ -69,6 +77,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
             builder: (_) => MachiningLinesScreen(
               customer: widget.customer,
               part: part.part,
+              shift: widget.shift,
+              mo: part.mo,
             ),
           ),
         )
@@ -93,33 +103,31 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final name = await promptText(context, title: 'Add Part', label: 'Part');
-    if (name == null) return;
+    final input = await promptPartWithMo(context, title: 'Add Part');
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configAdd(
-        module: 'machining',
-        kind: 'part',
-        group: widget.customer,
-        value: name,
+      () => _sheetsService.addMachiningPart(
+        customer: widget.customer,
+        part: input.name,
+        mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
   }
 
-  Future<void> _renamePart(MachiningPartStatus part) async {
-    final name = await promptText(
+  Future<void> _editPart(MachiningPartStatus part) async {
+    final input = await promptPartWithMo(
       context,
-      title: 'Rename Part',
-      label: 'Part',
-      initialValue: part.part,
+      title: 'Edit Part',
+      initialName: part.part,
+      initialMo: part.mo,
     );
-    if (name == null || name == part.part) return;
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configRename(
-        module: 'machining',
-        kind: 'part',
-        group: widget.customer,
-        value: part.part,
-        newValue: name,
+      () => _sheetsService.editMachiningPart(
+        customer: widget.customer,
+        part: part.part,
+        newPart: input.name,
+        mo: input.mo,
       ),
     );
   }
@@ -146,7 +154,9 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(subtitle: 'Machining — ${widget.customer}'),
+      appBar: HicomAppBar(
+        subtitle: 'Machining — ${widget.customer} · ${widget.shift} shift',
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -228,7 +238,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
                     top: 2,
                     right: 2,
                     child: CardMenuButton(
-                      onEdit: () => _renamePart(part),
+                      onEdit: () => _editPart(part),
                       onDelete: () => _deletePart(part),
                     ),
                   ),
@@ -240,6 +250,16 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       ),
     );
   }
+}
+
+/// "MO X · HH:mm" / "MO X" / "Last updated: HH:mm" / "No entries yet today".
+String _partSubtitle(MachiningPartStatus part) {
+  final mo = part.mo;
+  final updated = part.lastUpdated;
+  if (mo != null && updated != null) return 'MO $mo · $updated';
+  if (mo != null) return 'MO $mo';
+  if (updated != null) return 'Last updated: $updated';
+  return 'No entries yet today';
 }
 
 class _PartCard extends StatelessWidget {
@@ -278,9 +298,7 @@ class _PartCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                part.lastUpdated != null
-                    ? 'Last updated: ${part.lastUpdated}'
-                    : 'No entries yet today',
+                _partSubtitle(part),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12.5,

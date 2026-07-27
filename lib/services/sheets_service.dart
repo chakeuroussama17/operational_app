@@ -24,31 +24,30 @@ class SheetsSubmissionException implements Exception {
 ///
 /// All three modules share one incremental upsert API, routed by a `module`
 /// field ("casting" | "secondary" | "machining"), each keyed by their own
-/// selectors + Date:
-///   GET  ?action=dashboard&module=X             -> top-level cards + last update
-///   GET  ?action=parts&module=X&...             -> next-level cards
-///   GET  ?action=row&module=X&...                -> today's saved row or null
-///   POST { "secret": ..., "module": X, "data": { ...only changed fields } }
-///        -> backend upserts today's row and recalculates LOR%
+/// selectors + shift-date:
+///   GET  ?action=dashboard&module=X&shift=Z     -> top-level cards + last update
+///   GET  ?action=parts&module=X&shift=Z&...     -> next-level cards
+///   GET  ?action=row&module=X&shift=Z&...        -> this shift's saved row/null
+///   POST { "secret": ..., "module": X, "data": { Shift, ...changed fields } }
+///        -> backend upserts this shift's row and recalculates LOR%
 ///
 /// Machining adds a `?action=lines` step (Customer -> Part -> Line) since it
-/// is keyed by Customer + PartNo + Line + Date instead of two selectors.
+/// is keyed by Customer + PartNo + Line instead of two selectors.
 ///
-/// Casting AND Secondary are shift-aware: every dashboard/parts/row call also
-/// takes `shift` ("Day" | "Night"), and submitted data must include a `Shift`
-/// field — see casting_models.dart / secondary_models.dart for why (real
-/// day/night shift schedule, not calendar midnight). Both also carry an MO
-/// (manufacturing order) number per part (see the config ops below).
-/// Machining is unchanged (single sheet, no shift, no MO).
+/// ALL THREE modules are now shift-aware: every dashboard/parts/row call takes
+/// `shift` ("Day" | "Night") and submitted data must include a `Shift` field —
+/// see casting_models.dart for why (real day/night schedule, not calendar
+/// midnight). All three also carry an MO (manufacturing order) number per part
+/// (see the config ops below).
 ///
 /// A separate Config API manages the list of valid groups/parts/lines
 /// itself (add/delete/rename), backing the manage/settings screens:
 ///   GET  ?action=config&module=X -> { groups, partsByGroup, lines }
 ///   POST { secret, action: 'config', op: 'add'|'delete'|'rename', module,
 ///          kind: 'group'|'part'|'line', group?, value, newValue? }
-///   POST { secret, action: 'config', op: `castingAddPart`/`castingEditPart`
-///          or `secondaryAddPart`/`secondaryEditPart`, group, part, newPart?,
-///          mo? } -- Casting/Secondary parts only, since they carry an MO.
+///   POST { secret, action: 'config', op: `<module>AddPart`/`<module>EditPart`
+///          (casting|secondary|machining), group, part, newPart?, mo? } --
+///          part rows in all three modules carry an MO number.
 class SheetsService {
   SheetsService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -257,23 +256,30 @@ class SheetsService {
     });
   }
 
-  // ---------- Machining incremental API ----------
+  // ---------- Machining incremental API (shift-aware: Day or Night) ----------
 
-  Future<List<CustomerStatus>> fetchMachiningDashboard() async {
+  Future<List<CustomerStatus>> fetchMachiningDashboard({
+    required String shift,
+  }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'dashboard',
       'module': 'machining',
+      'shift': shift,
     });
     return _asList(
       decoded,
     ).whereType<Map<String, dynamic>>().map(CustomerStatus.fromJson).toList();
   }
 
-  Future<List<MachiningPartStatus>> fetchMachiningParts(String customer) async {
+  Future<List<MachiningPartStatus>> fetchMachiningParts(
+    String customer, {
+    required String shift,
+  }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'parts',
       'module': 'machining',
       'customer': customer,
+      'shift': shift,
     });
     return _asList(decoded)
         .whereType<Map<String, dynamic>>()
@@ -284,12 +290,14 @@ class SheetsService {
   Future<List<MachiningLineStatus>> fetchMachiningLines({
     required String customer,
     required String part,
+    required String shift,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'lines',
       'module': 'machining',
       'customer': customer,
       'part': part,
+      'shift': shift,
     });
     return _asList(decoded)
         .whereType<Map<String, dynamic>>()
@@ -297,11 +305,12 @@ class SheetsService {
         .toList();
   }
 
-  /// Today's saved row for this Customer + Part + Line, or null if none yet.
+  /// This shift's saved row for this Customer + Part + Line, or null if none.
   Future<MachiningRow?> fetchMachiningRow({
     required String customer,
     required String part,
     required String line,
+    required String shift,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'row',
@@ -309,6 +318,7 @@ class SheetsService {
       'customer': customer,
       'part': part,
       'line': line,
+      'shift': shift,
     });
     if (decoded == null) return null;
     if (decoded is Map<String, dynamic>) {
@@ -321,13 +331,49 @@ class SheetsService {
     throw const SheetsSubmissionException('Unexpected server response.');
   }
 
-  /// Saves a partial machining update. [data] must contain Customer, PartNo
-  /// and Line plus ONLY the fields the user filled/changed.
+  /// Saves a partial machining update. [data] must contain Customer, PartNo,
+  /// Line and Shift plus ONLY the fields the user filled/changed.
   Future<void> submitMachiningUpdate(Map<String, String> data) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'machining',
       'data': data,
+    });
+  }
+
+  /// Adds a new Machining part under [customer], optionally with its current
+  /// MO (manufacturing order) number. MO is per-part — shared by all its lines.
+  Future<void> addMachiningPart({
+    required String customer,
+    required String part,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'machiningAddPart',
+      'group': customer,
+      'part': part,
+      'mo': ?mo,
+    });
+  }
+
+  /// Renames a Machining part and/or updates its MO number. Only ever touches
+  /// the Config sheet — rows already logged keep the MO snapshotted onto them.
+  Future<void> editMachiningPart({
+    required String customer,
+    required String part,
+    required String newPart,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'machiningEditPart',
+      'group': customer,
+      'part': part,
+      'newPart': newPart,
+      'mo': ?mo,
     });
   }
 

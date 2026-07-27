@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbzf6SFx8qTmo3vCYZzS83LZDx_Ir5eX_5K-Ct7RoKGAhMmuc4qJKcmAJqaa3xBlFbJeOg/exec';
+    'https://script.google.com/macros/s/AKfycbyR4WoPrEFueCM_lWq9Keuc6VrEGd8WE0jmmh9kouyLL6islThCv169fIXjmxcMRytrzA/exec';
 
 /// Shared secret checked by the Apps Script doPost (its SECRET_KEY).
 /// Sent as a top-level "secret" field with every submission.

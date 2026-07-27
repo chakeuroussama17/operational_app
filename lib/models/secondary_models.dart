@@ -1,10 +1,11 @@
 /// Data types for the Secondary module's incremental logging API.
 ///
-/// Similar to Casting but with different column names:
+/// Mirrors Casting (shift-aware, Day 8AM-6PM / Night 8PM-6AM crossing
+/// midnight, MO number per part) but with different column names:
 ///   DCM → Station, Output_* → Actual_*, Output_LOR* → LOR_*
 library;
 
-/// One of the six fixed time slots logged per shift.
+/// One of the six checkpoints logged for a given shift.
 class SecondarySlot {
   const SecondarySlot(this.label, this.actualKey, this.lorKey);
 
@@ -17,14 +18,36 @@ class SecondarySlot {
   final String lorKey;
 }
 
-const List<SecondarySlot> secondarySlots = [
+/// Day shift: 8AM-6PM.
+const List<SecondarySlot> secondaryDaySlots = [
+  SecondarySlot('8 AM', 'Actual_8AM', 'LOR_8AM'),
   SecondarySlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
   SecondarySlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
   SecondarySlot('2 PM', 'Actual_2PM', 'LOR_2PM'),
   SecondarySlot('4 PM', 'Actual_4PM', 'LOR_4PM'),
   SecondarySlot('6 PM', 'Actual_6PM', 'LOR_6PM'),
-  SecondarySlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
 ];
+
+/// Night shift: 8PM-6AM, crossing midnight.
+const List<SecondarySlot> secondaryNightSlots = [
+  SecondarySlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
+  SecondarySlot('10 PM', 'Actual_10PM', 'LOR_10PM'),
+  SecondarySlot('12 AM', 'Actual_12AM', 'LOR_12AM'),
+  SecondarySlot('2 AM', 'Actual_2AM', 'LOR_2AM'),
+  SecondarySlot('4 AM', 'Actual_4AM', 'LOR_4AM'),
+  SecondarySlot('6 AM', 'Actual_6AM', 'LOR_6AM'),
+];
+
+List<SecondarySlot> secondarySlotsForShift(String shift) =>
+    shift == 'Night' ? secondaryNightSlots : secondaryDaySlots;
+
+/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
+/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
+/// override it (e.g. logging a late entry after shift changeover).
+String autoDetectSecondaryShift() {
+  final hour = DateTime.now().hour;
+  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+}
 
 /// Dashboard card: one Station and when it was last logged today.
 class StationStatus {
@@ -39,24 +62,28 @@ class StationStatus {
   );
 }
 
-/// Part selector card: one part of a Station, with today's completion level.
+/// Part selector card: one part of a Station, with this shift's completion
+/// level and the part's current MO (manufacturing order) number.
 class SecondaryPartStatus {
   const SecondaryPartStatus({
     required this.part,
+    this.mo,
     this.lastUpdated,
     required this.fillPercent,
   });
 
   final String part;
+  final String? mo;
   final String? lastUpdated;
 
-  /// 0-100: how many of the six time slots are filled today.
+  /// 0-100: how many of this shift's six time slots are filled today.
   final int fillPercent;
 
   factory SecondaryPartStatus.fromJson(Map<String, dynamic> json) {
     final raw = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
     return SecondaryPartStatus(
       part: cleanCell(json['part']) ?? '',
+      mo: cleanCell(json['mo']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),
     );

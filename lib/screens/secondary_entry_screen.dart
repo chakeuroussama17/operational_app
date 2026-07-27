@@ -8,18 +8,26 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
 
-/// Data entry for one Station + Part. Pre-fills today's saved values, lets the
-/// supervisor fill any subset of time slots, and submits only the fields
-/// that changed — the backend upserts and recalculates LOR%.
+/// Data entry for one Station + Part + Shift. Pre-fills this shift's saved
+/// values, lets the supervisor fill any subset of time slots, and submits
+/// only the fields that changed — the backend upserts and recalculates LOR%.
 class SecondaryEntryScreen extends StatefulWidget {
   const SecondaryEntryScreen({
     super.key,
     required this.station,
     required this.part,
+    required this.shift,
+    this.mo,
   });
 
   final String station;
   final String part;
+  final String shift;
+
+  /// The part's MO (manufacturing order) number, as of when the Parts screen
+  /// loaded it — shown as read-only context, not editable here (see the
+  /// part's Edit action on the Parts screen for that).
+  final String? mo;
 
   @override
   State<SecondaryEntryScreen> createState() => _SecondaryEntryScreenState();
@@ -29,9 +37,11 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
   final _formKey = GlobalKey<FormState>();
   final _sheetsService = SheetsService();
 
+  late final List<SecondarySlot> _slots = secondarySlotsForShift(widget.shift);
+
   final _planController = TextEditingController();
-  final Map<String, TextEditingController> _slotControllers = {
-    for (final slot in secondarySlots) slot.actualKey: TextEditingController(),
+  late final Map<String, TextEditingController> _slotControllers = {
+    for (final slot in _slots) slot.actualKey: TextEditingController(),
   };
 
   /// Backend-computed LOR% labels, keyed by lorKey.
@@ -69,11 +79,12 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
       final row = await _sheetsService.fetchSecondaryRow(
         station: widget.station,
         part: widget.part,
+        shift: widget.shift,
       );
       if (!mounted) return;
       setState(() {
         _planController.text = row?.value('Plan') ?? '';
-        for (final slot in secondarySlots) {
+        for (final slot in _slots) {
           _slotControllers[slot.actualKey]!.text =
               row?.value(slot.actualKey) ?? '';
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
@@ -94,7 +105,7 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
 
   Map<String, String> _currentValues() => {
     'Plan': _planController.text.trim(),
-    for (final slot in secondarySlots)
+    for (final slot in _slots)
       slot.actualKey: _slotControllers[slot.actualKey]!.text.trim(),
   };
 
@@ -133,6 +144,7 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
       await _sheetsService.submitSecondaryUpdate({
         'Station': widget.station,
         'PartNo': widget.part,
+        'Shift': widget.shift,
         ...changed,
       });
       if (!mounted) return;
@@ -153,7 +165,9 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: HicomAppBar(
-        subtitle: 'Secondary — ${widget.station} · Part ${widget.part}',
+        subtitle:
+            'Secondary — ${widget.station} · Part ${widget.part} · '
+            '${widget.shift} shift',
       ),
       body: SafeArea(
         child: _loading
@@ -170,6 +184,8 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
                       _ContextHeader(
                         station: widget.station,
                         part: widget.part,
+                        shift: widget.shift,
+                        mo: widget.mo,
                       ),
                       if (_loadError != null) ...[
                         const SizedBox(height: 14),
@@ -181,7 +197,7 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
                         controller: _planController,
                         required: false,
                       ),
-                      for (final slot in secondarySlots) ...[
+                      for (final slot in _slots) ...[
                         const SizedBox(height: AppDimens.fieldSpacing),
                         _SlotRow(
                           slot: slot,
@@ -205,13 +221,21 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
   }
 }
 
-/// Station / Part context chips so the supervisor always knows where this
-/// entry is going.
+/// Station / Part / Shift / MO context chips so the supervisor always knows
+/// where this entry is going. MO is read-only here — edit it from the part's
+/// Edit action on the Parts screen.
 class _ContextHeader extends StatelessWidget {
-  const _ContextHeader({required this.station, required this.part});
+  const _ContextHeader({
+    required this.station,
+    required this.part,
+    required this.shift,
+    this.mo,
+  });
 
   final String station;
   final String part;
+  final String shift;
+  final String? mo;
 
   @override
   Widget build(BuildContext context) {
@@ -244,6 +268,11 @@ class _ContextHeader extends StatelessWidget {
       children: [
         chip(Icons.handyman_rounded, station),
         chip(Icons.tag_rounded, 'Part $part'),
+        chip(
+          shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+          '$shift shift',
+        ),
+        if (mo != null) chip(Icons.description_outlined, 'MO $mo'),
       ],
     );
   }

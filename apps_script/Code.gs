@@ -39,7 +39,7 @@
  *
  *   Casting_Night (Night shift, checkpoints 8PM-6AM crossing midnight —
  *   post-midnight checkpoints file under the date the shift STARTED, see
- *   getCastingShiftDate):
+ *   getShiftDate):
  *     Date | DCM | PartNo | MO | Plan |
  *     Output_8PM  | Output_LOR8PM  | Output_10PM | Output_LOR10PM |
  *     Output_12AM | Output_LOR12AM | Output_2AM  | Output_LOR2AM  |
@@ -50,11 +50,21 @@
  *     edits, so historical rows keep whatever MO was active when logged.
  *   - Combined daily totals (Dashboard analytics) sum both sheets by Date.
  *
- * Secondary:
- *   Date | Station | PartNo | Plan |
- *   Actual_10AM | LOR_10AM | Actual_12PM | LOR_12PM |
- *   Actual_2PM  | LOR_2PM  | Actual_4PM  | LOR_4PM  |
- *   Actual_6PM  | LOR_6PM  | Actual_8PM  | LOR_8PM  | LastUpdated
+ * Secondary (shift-split like Casting — two tabs, keyed by Station+PartNo+
+ * shift-date, Actual_/LOR_ prefixes, MO number per part. Run
+ * setupSecondaryShiftSheets() once):
+ *
+ *   Secondary_Day (Day shift, checkpoints 8AM-6PM):
+ *     Date | Station | PartNo | MO | Plan |
+ *     Actual_8AM  | LOR_8AM  | Actual_10AM | LOR_10AM |
+ *     Actual_12PM | LOR_12PM | Actual_2PM  | LOR_2PM  |
+ *     Actual_4PM  | LOR_4PM  | Actual_6PM  | LOR_6PM  | LastUpdated
+ *
+ *   Secondary_Night (Night shift, checkpoints 8PM-6AM crossing midnight):
+ *     Date | Station | PartNo | MO | Plan |
+ *     Actual_8PM  | LOR_8PM  | Actual_10PM | LOR_10PM |
+ *     Actual_12AM | LOR_12AM | Actual_2AM  | LOR_2AM  |
+ *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
  *
  * Machining:
  *   Date | Customer | PartNo | Line | Plan |
@@ -70,43 +80,54 @@
  */
 
 var SECRET_KEY = 'hicom2026changeme';
-var SECONDARY_SHEET = 'Secondary';
 var MACHINING_SHEET = 'Machining';
 var CONFIG_SHEET = 'Config';
 var OUTPUT_TIME_SLOTS = ['10AM', '12PM', '2PM', '4PM', '6PM', '8PM'];
 
-// Casting ONLY: real 2-shift schedule. Day checkpoints run 8AM-6PM; Night
-// checkpoints run 8PM-6AM (crossing midnight). Secondary/Machining are
-// unchanged and still use the single OUTPUT_TIME_SLOTS list above.
+// Casting AND Secondary: real 2-shift schedule. Day checkpoints run 8AM-6PM;
+// Night checkpoints run 8PM-6AM (crossing midnight). Machining is unchanged
+// and still uses the single OUTPUT_TIME_SLOTS list above.
 //
-// Each shift is its OWN sheet tab (Casting_Day / Casting_Night) so every row
-// holds only its shift's six checkpoints — no half-empty rows, and no Shift
-// column (the tab the row lives in IS the shift). Both sheets carry the same
-// Date/DCM/PartNo/MO/Plan/.../LastUpdated frame; only the slot columns differ.
+// Each shift is its OWN sheet tab (Casting_Day/Casting_Night,
+// Secondary_Day/Secondary_Night) so every row holds only its shift's six
+// checkpoints — no half-empty rows, and no Shift column (the tab the row
+// lives in IS the shift). Casting uses Output_/Output_LOR column prefixes;
+// Secondary uses Actual_/LOR_ — the slot TIMES are identical.
 var CASTING_DAY_SHEET = 'Casting_Day';
 var CASTING_NIGHT_SHEET = 'Casting_Night';
-var CASTING_DAY_SLOTS = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM'];
-var CASTING_NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
+var SECONDARY_DAY_SHEET = 'Secondary_Day';
+var SECONDARY_NIGHT_SHEET = 'Secondary_Night';
+var DAY_SLOTS = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM'];
+var NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
+// Back-compat aliases (Casting code referred to these names).
+var CASTING_DAY_SLOTS = DAY_SLOTS;
+var CASTING_NIGHT_SLOTS = NIGHT_SLOTS;
 
+function slotsForShift(shift) {
+  return shift === 'Night' ? NIGHT_SLOTS : DAY_SLOTS;
+}
+// Alias kept so existing Casting call sites read naturally.
 function castingSlotsForShift(shift) {
-  return shift === 'Night' ? CASTING_NIGHT_SLOTS : CASTING_DAY_SLOTS;
+  return slotsForShift(shift);
 }
 
 // The sheet tab a Casting row lives in, chosen purely by shift. This replaces
 // the old single 'Casting' sheet + Shift column.
 function getCastingSheetForShift(shift) {
   var name = shift === 'Night' ? CASTING_NIGHT_SHEET : CASTING_DAY_SHEET;
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
-  if (!sheet) {
-    throw new Error(name + ' sheet tab not found — run setupCastingShiftSheets() once');
-  }
-  return sheet;
+  return requireSheet(name, 'setupCastingShiftSheets');
+}
+
+// The sheet tab a Secondary row lives in, chosen purely by shift.
+function getSecondarySheetForShift(shift) {
+  var name = shift === 'Night' ? SECONDARY_NIGHT_SHEET : SECONDARY_DAY_SHEET;
+  return requireSheet(name, 'setupSecondaryShiftSheets');
 }
 
 // Header frame for a Casting shift sheet, built from that shift's slots.
 function castingHeadersForShift(shift) {
   var headers = ['Date', 'DCM', 'PartNo', 'MO', 'Plan'];
-  castingSlotsForShift(shift).forEach(function (slot) {
+  slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
@@ -114,12 +135,25 @@ function castingHeadersForShift(shift) {
   return headers;
 }
 
-// The "business date" a Casting row belongs to. Day shift never crosses
+// Header frame for a Secondary shift sheet — same shape as Casting but keyed
+// by Station and using the Actual_/LOR_ column prefixes.
+function secondaryHeadersForShift(shift) {
+  var headers = ['Date', 'Station', 'PartNo', 'MO', 'Plan'];
+  slotsForShift(shift).forEach(function (slot) {
+    headers.push('Actual_' + slot);
+    headers.push('LOR_' + slot);
+  });
+  headers.push('LastUpdated');
+  return headers;
+}
+
+// The "business date" a shift row belongs to. Day shift never crosses
 // midnight, so it's always today. Night shift starts in the evening and
 // runs past midnight — its early-morning checkpoints (12AM/2AM/4AM/6AM)
 // must still be filed under the date the shift STARTED (yesterday evening),
-// not the calendar day they happen to be typed in on.
-function getCastingShiftDate(shift) {
+// not the calendar day they happen to be typed in on. Shared by Casting and
+// Secondary (both run the same 2-shift schedule).
+function getShiftDate(shift) {
   var tz = Session.getScriptTimeZone();
   var now = new Date();
   if (shift === 'Night') {
@@ -134,7 +168,7 @@ function getCastingShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'CASTING-2SHEET-v2';
+var BACKEND_VERSION = 'SECONDARY-2SHEET-v3';
 
 function doGet(e) {
   try {
@@ -151,19 +185,23 @@ function doGet(e) {
       if (action === 'row') {
         return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, e.parameter.line));
       }
-    } else if (!module || module === 'casting') {
-      // Casting has its own dedicated shift-aware functions (see below) —
-      // Secondary still runs on the generic getDashboard/getParts/getRow.
+    } else if (module === 'secondary') {
+      // Secondary is now shift-aware too (Secondary_Day/Secondary_Night),
+      // mirroring Casting — every call carries a shift.
+      var sShift = e.parameter.shift;
+      if (action === 'dashboard') return jsonResponse(getSecondaryDashboard(sShift));
+      if (action === 'parts') return jsonResponse(getSecondaryParts(e.parameter.station, sShift));
+      if (action === 'row') {
+        return jsonResponse(getSecondaryRow(e.parameter.station, e.parameter.part, sShift));
+      }
+    } else {
+      // Default / casting: its own dedicated shift-aware functions.
       var shift = e.parameter.shift;
       if (action === 'dashboard') return jsonResponse(getCastingDashboard(shift));
       if (action === 'parts') return jsonResponse(getCastingParts(e.parameter.dcm, shift));
       if (action === 'row') {
         return jsonResponse(getCastingRow(e.parameter.dcm, e.parameter.part, shift));
       }
-    } else {
-      if (action === 'dashboard') return jsonResponse(getDashboard(module));
-      if (action === 'parts') return jsonResponse(getParts(module, e.parameter.station));
-      if (action === 'row') return jsonResponse(getRow(module, e.parameter.station, e.parameter.part));
     }
 
     return jsonResponse({
@@ -183,15 +221,17 @@ function doPost(e) {
       return jsonResponse({ status: 'error', message: 'Unauthorized' });
     }
     if (payload.action === 'config') {
-      // Casting-only part ops that also carry an MO number — everything
-      // else (groups, lines, Secondary/Machining parts) stays on the
-      // generic configMutate, untouched.
-      if (payload.op === 'castingAddPart') return jsonResponse(castingAddPart(payload));
-      if (payload.op === 'castingEditPart') return jsonResponse(castingEditPart(payload));
+      // Casting/Secondary part ops that also carry an MO number — everything
+      // else (groups, lines, Machining parts) stays on the generic
+      // configMutate, untouched.
+      if (payload.op === 'castingAddPart') return jsonResponse(addPartWithMo('casting', payload));
+      if (payload.op === 'castingEditPart') return jsonResponse(editPartWithMo('casting', payload));
+      if (payload.op === 'secondaryAddPart') return jsonResponse(addPartWithMo('secondary', payload));
+      if (payload.op === 'secondaryEditPart') return jsonResponse(editPartWithMo('secondary', payload));
       return jsonResponse(configMutate(payload));
     }
     if (payload.module === 'casting') return jsonResponse(upsertCastingRow(payload.data));
-    if (payload.module === 'secondary') return jsonResponse(upsertRow('secondary', payload.data));
+    if (payload.module === 'secondary') return jsonResponse(upsertSecondaryRow(payload.data));
     if (payload.module === 'machining') return jsonResponse(upsertMachiningRow(payload.data));
     return jsonResponse({ status: 'error', message: 'Unknown module' });
   } catch (err) {
@@ -199,100 +239,100 @@ function doPost(e) {
   }
 }
 
-// ---------- Reads (Secondary) ----------
+// ---------- Secondary: reads (shift-aware — Day/Night, separate sheets) -----
+//
+// Mirror of the Casting reads: keyed by Station + PartNo + shift-date within
+// a per-shift sheet (Secondary_Day/Secondary_Night). Column prefixes are
+// Actual_/LOR_ instead of Casting's Output_/Output_LOR.
 
-// Secondary only now — Casting has its own shift-aware getCastingDashboard.
-function getDashboard(module) {
-  module = module || 'secondary';
-  var sheet = getModuleSheet(module);
-  var rows = getAllRowsAsObjects(sheet);
-  var today = getTodayString();
-  var groups = getConfigGroups(module);
-  var keyName = (module === 'secondary') ? 'Station' : 'DCM';
-
-  var result = groups.map(function (key) {
-    var latest = null;
-    rows.forEach(function (r) {
-      if (String(r[keyName]) === key && formatDateOnly(r.Date) === today && r.LastUpdated) {
-        if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
-      }
+function getSecondaryDashboard(shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getSecondarySheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
+  var groups = getConfigGroups('secondary');
+  var result = groups.map(function (station) {
+    var match = rows.find(function (r) {
+      return String(r.Station) === station && formatDateOnly(r.Date) === shiftDate;
     });
-    return {
-      dcm: key,
-      lastUpdated: latest ? hhmm(latest) : null
-    };
+    // Key stays `dcm` in the JSON so StationStatus.fromJson (which reads
+    // json['dcm']) is unchanged — the app maps it to `station`.
+    return { dcm: station, lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null };
   });
   return { status: 'success', data: result };
 }
 
-// Secondary only now — Casting has its own shift-aware getCastingParts.
-function getParts(module, key) {
-  module = module || 'secondary';
-  var sheet = getModuleSheet(module);
-  var rows = getAllRowsAsObjects(sheet);
-  var today = getTodayString();
-  var parts = getConfigParts(module, key);
-  var keyName = (module === 'secondary') ? 'Station' : 'DCM';
-
+function getSecondaryParts(station, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getSecondarySheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
+  var slots = slotsForShift(shift);
+  var parts = getConfigParts('secondary', station);
   var result = parts.map(function (part) {
     var match = rows.find(function (r) {
-      return String(r[keyName]) === key && String(r.PartNo) === part && formatDateOnly(r.Date) === today;
+      return String(r.Station) === station && String(r.PartNo) === part &&
+        formatDateOnly(r.Date) === shiftDate;
     });
     var filled = 0;
     if (match) {
-      OUTPUT_TIME_SLOTS.forEach(function (slot) {
-        var outputKey = (module === 'secondary') ? 'Actual_' + slot : 'Output_' + slot;
-        var v = match[outputKey];
+      slots.forEach(function (slot) {
+        var v = match['Actual_' + slot];
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
     return {
       part: part,
+      mo: getConfigPartMo('secondary', station, part),
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
-      fillPercent: match ? Math.round((filled / OUTPUT_TIME_SLOTS.length) * 100) : 0,
+      fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
     };
   });
   return { status: 'success', data: result };
 }
 
-function getRow(module, key, part) {
-  var sheet = getModuleSheet(module);
-  var rows = getAllRowsAsObjects(sheet);
-  var today = getTodayString();
-  var keyName = (module === 'secondary') ? 'Station' : 'DCM';
-
+function getSecondaryRow(station, part, shift) {
+  shift = shift === 'Night' ? 'Night' : 'Day';
+  var rows = getAllRowsAsObjects(getSecondarySheetForShift(shift));
+  var shiftDate = getShiftDate(shift);
   var match = rows.find(function (r) {
-    return String(r[keyName]) === key && String(r.PartNo) === part && formatDateOnly(r.Date) === today;
+    return String(r.Station) === station && String(r.PartNo) === part &&
+      formatDateOnly(r.Date) === shiftDate;
   });
   if (!match) return { status: 'success', data: null };
   delete match._rowNum;
   return { status: 'success', data: match };
 }
 
-// ---------- Upsert (Secondary) ----------
+// ---------- Secondary: upsert (per-shift sheet, snapshots MO once) ----------
 
-function upsertRow(module, data) {
-  var sheet = getModuleSheet(module);
+function upsertSecondaryRow(data) {
+  // `data.Shift` is sent by the app only to pick the sheet — never stored.
+  var shift = data.Shift === 'Night' ? 'Night' : 'Day';
+  var sheet = getSecondarySheetForShift(shift);
   var headers = getHeaders(sheet);
   var rows = getAllRowsAsObjects(sheet);
-  var today = getTodayString();
-  var keyName = (module === 'secondary') ? 'Station' : 'DCM';
+  var shiftDate = getShiftDate(shift);
+  var slots = slotsForShift(shift);
 
   var existing = rows.find(function (r) {
-    return String(r[keyName]) === String(data[keyName]) &&
+    return String(r.Station) === String(data.Station) &&
       String(r.PartNo) === String(data.PartNo) &&
-      formatDateOnly(r.Date) === today;
+      formatDateOnly(r.Date) === shiftDate;
   });
 
   var merged = existing ? Object.assign({}, existing) : {};
-  merged.Date = today;
-  merged[keyName] = data[keyName];
+  merged.Date = shiftDate;
+  merged.Station = data.Station;
   merged.PartNo = data.PartNo;
+  if (!existing) {
+    // Snapshot the part's currently-configured MO onto the row once, at
+    // creation — later Config MO edits never rewrite already-logged rows.
+    merged.MO = getConfigPartMo('secondary', data.Station, data.PartNo);
+  }
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
-  OUTPUT_TIME_SLOTS.forEach(function (slot) {
-    var outKey = (module === 'secondary') ? 'Actual_' + slot : 'Output_' + slot;
-    var lorKey = (module === 'secondary') ? 'LOR_' + slot : 'Output_LOR' + slot;
+  slots.forEach(function (slot) {
+    var outKey = 'Actual_' + slot;
+    var lorKey = 'LOR_' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
       var plan = parseFloat(merged.Plan);
@@ -320,18 +360,17 @@ function upsertRow(module, data) {
   };
 }
 
-// ---------- Casting: reads (shift-aware — Day/Night, separate rows) ----------
+// ---------- Casting: reads (shift-aware — Day/Night, separate sheets) -------
 //
-// Casting is keyed by DCM + PartNo + Shift + shift-date (see
-// getCastingShiftDate above), NOT plain calendar date like the other
-// modules. Each shift only ever reads/writes its own 6 columns
-// (castingSlotsForShift), so a Day row and a Night row for the same
-// DCM+Part+date live side by side without colliding.
+// Casting is keyed by DCM + PartNo + shift-date (see getShiftDate above)
+// within a per-shift sheet, NOT plain calendar date like Machining. Each
+// shift lives in its own tab (Casting_Day/Casting_Night), so a Day row and a
+// Night row for the same DCM+Part+date never collide.
 
 function getCastingDashboard(shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getCastingSheetForShift(shift));
-  var shiftDate = getCastingShiftDate(shift);
+  var shiftDate = getShiftDate(shift);
   var groups = getConfigGroups('casting');
   var result = groups.map(function (dcm) {
     var match = rows.find(function (r) {
@@ -345,7 +384,7 @@ function getCastingDashboard(shift) {
 function getCastingParts(dcm, shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getCastingSheetForShift(shift));
-  var shiftDate = getCastingShiftDate(shift);
+  var shiftDate = getShiftDate(shift);
   var slots = castingSlotsForShift(shift);
   var parts = getConfigParts('casting', dcm);
   var result = parts.map(function (part) {
@@ -373,7 +412,7 @@ function getCastingParts(dcm, shift) {
 function getCastingRow(dcm, part, shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getCastingSheetForShift(shift));
-  var shiftDate = getCastingShiftDate(shift);
+  var shiftDate = getShiftDate(shift);
   var match = rows.find(function (r) {
     return String(r.DCM) === dcm && String(r.PartNo) === part &&
       formatDateOnly(r.Date) === shiftDate;
@@ -392,7 +431,7 @@ function upsertCastingRow(data) {
   var sheet = getCastingSheetForShift(shift);
   var headers = getHeaders(sheet);
   var rows = getAllRowsAsObjects(sheet);
-  var shiftDate = getCastingShiftDate(shift);
+  var shiftDate = getShiftDate(shift);
   var slots = castingSlotsForShift(shift);
 
   var existing = rows.find(function (r) {
@@ -459,30 +498,33 @@ function getConfigPartMo(module, group, part) {
   return match && match.MO ? String(match.MO) : '';
 }
 
-function castingAddPart(payload) {
-  var dcm = String(payload.group || '');
+// Shared by Casting (group=DCM) and Secondary (group=Station) — the only two
+// modules whose parts carry an MO number. `module` decides which Config rows
+// are matched/written; the wire ops are castingAddPart/secondaryAddPart etc.
+function addPartWithMo(module, payload) {
+  var group = String(payload.group || '');
   var part = String(payload.part || '').trim();
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : '';
-  if (!dcm || !part) return { status: 'error', message: 'group and part are required' };
+  if (!group || !part) return { status: 'error', message: 'group and part are required' };
 
   var sheet = getConfigSheet();
   var rows = getAllRowsAsObjects(sheet);
   var dup = rows.some(function (r) {
-    return String(r.Module).toLowerCase() === 'casting' && r.Kind === 'part' &&
-      String(r.Group) === dcm && String(r.Value) === part;
+    return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
+      String(r.Group) === group && String(r.Value) === part;
   });
   if (dup) return { status: 'error', message: 'Already exists' };
-  sheet.appendRow(['casting', 'part', dcm, part, mo]);
+  sheet.appendRow([module, 'part', group, part, mo]);
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
 }
 
-function castingEditPart(payload) {
-  var dcm = String(payload.group || '');
+function editPartWithMo(module, payload) {
+  var group = String(payload.group || '');
   var part = String(payload.part || '');
   var newPart = payload.newPart !== undefined && payload.newPart !== null ? String(payload.newPart).trim() : part;
   // null (not just empty string) means "leave MO unchanged".
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : null;
-  if (!dcm || !part || !newPart) {
+  if (!group || !part || !newPart) {
     return { status: 'error', message: 'group, part and newPart are required' };
   }
 
@@ -492,8 +534,8 @@ function castingEditPart(payload) {
   var moCol = headers.indexOf('MO') + 1;
   var rows = getAllRowsAsObjects(sheet);
   var match = rows.find(function (r) {
-    return String(r.Module).toLowerCase() === 'casting' && r.Kind === 'part' &&
-      String(r.Group) === dcm && String(r.Value) === part;
+    return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
+      String(r.Group) === group && String(r.Value) === part;
   });
   if (!match) return { status: 'error', message: 'Not found' };
   if (newPart !== part) sheet.getRange(match._rowNum, valueCol).setValue(newPart);
@@ -710,15 +752,18 @@ function getAnalytics(module, days) {
   if (!days || days < 1) days = 14;
   if (days > 90) days = 90;
 
-  // Casting lives in two sheets (Day + Night); read and concatenate both so a
-  // day's total reflects both shifts. Both shifts share the same shift-date,
-  // so grouping by Date alone (below) already merges them into one bucket.
-  // A day row has no night slot columns (and vice versa), so the union of
-  // outputKeys/lorKeys below simply skips the columns a given row lacks.
+  // Casting and Secondary each live in two sheets (Day + Night); read and
+  // concatenate both so a day's total reflects both shifts. Both shifts share
+  // the same shift-date, so grouping by Date alone (below) already merges them
+  // into one bucket. A day row has no night slot columns (and vice versa), so
+  // the union of outputKeys/lorKeys below simply skips the columns a row lacks.
   var rows;
   if (module === 'casting') {
     rows = getAllRowsAsObjects(getCastingSheetForShift('Day'))
       .concat(getAllRowsAsObjects(getCastingSheetForShift('Night')));
+  } else if (module === 'secondary') {
+    rows = getAllRowsAsObjects(getSecondarySheetForShift('Day'))
+      .concat(getAllRowsAsObjects(getSecondarySheetForShift('Night')));
   } else {
     rows = getAllRowsAsObjects(getModuleSheet(module));
   }
@@ -733,12 +778,11 @@ function getAnalytics(module, days) {
 
   var outputPrefix = (module === 'secondary') ? 'Actual_' : 'Output_';
   var lorPrefix = (module === 'secondary') ? 'LOR_' : 'Output_LOR';
-  // Casting alone splits into Day+Night shift columns (see
-  // CASTING_DAY_SLOTS/CASTING_NIGHT_SLOTS) — sum the full union so a day's
-  // total reflects both shifts. Both shifts share the same shift-date, so
-  // grouping by Date alone (below) already puts them in the same bucket.
-  var timeSlots = module === 'casting'
-    ? CASTING_DAY_SLOTS.concat(CASTING_NIGHT_SLOTS)
+  // Casting and Secondary split into Day+Night shift columns — sum the full
+  // union so a day's total reflects both shifts. Both shifts share the same
+  // shift-date, so grouping by Date alone (below) puts them in one bucket.
+  var timeSlots = (module === 'casting' || module === 'secondary')
+    ? DAY_SLOTS.concat(NIGHT_SLOTS)
     : OUTPUT_TIME_SLOTS;
   var outputKeys = timeSlots.map(function (s) { return outputPrefix + s; });
   var lorKeys = timeSlots.map(function (s) { return lorPrefix + s; });
@@ -949,32 +993,35 @@ function seedDefaultConfig() {
   Logger.log('Seeded ' + rows.length + ' config rows.');
 }
 
-// ---------- One-time setup: run manually to add Casting Shift/MO support ----------
+// ---------- One-time setup: run manually to create the shift sheet tabs ----------
 //
-// Appends the new columns the Casting shift+MO feature needs — MO, Shift,
-// and the 6 new AM/PM time-slot columns — to the END of the Casting sheet's
-// header row, and adds an MO column to Config. Column ORDER never matters
-// to this backend (every read/write is by header NAME), so appending at the
-// end is always safe and never disturbs a single existing data cell.
-// Idempotent — skips any column that's already there, so it's safe to run
-// more than once (e.g. if you add the two tabs at different times).
-//
-// Run this ONCE from the Apps Script editor (select it in the function
-// dropdown, click Run) after redeploying this version.
-// ONE-TIME setup for the two-sheet Casting shift model. Run once from the
-// Apps Script editor (Run menu) after pasting this code. Idempotent: creates
-// Casting_Day and Casting_Night with the correct header row only if they don't
-// already exist, and ensures Config has its MO column. Never touches existing
-// data, and never deletes the old single 'Casting' sheet — remove that
-// yourself once you've confirmed the two new sheets work.
+// Each of these creates a module's two shift tabs (…_Day / …_Night) with the
+// correct header row, and ensures Config has its MO column. Run the one you
+// need ONCE from the Apps Script editor (pick it in the function dropdown,
+// click Run) after pasting this code. Idempotent: skips a tab that already
+// exists (only refreshing its header row if it drifted), never touches
+// existing data, and never deletes the old single-sheet tab — remove that
+// yourself once you've confirmed the two new tabs work.
+
 function setupCastingShiftSheets() {
+  createShiftSheets([
+    { name: CASTING_DAY_SHEET, headers: castingHeadersForShift('Day') },
+    { name: CASTING_NIGHT_SHEET, headers: castingHeadersForShift('Night') },
+  ]);
+}
+
+function setupSecondaryShiftSheets() {
+  createShiftSheets([
+    { name: SECONDARY_DAY_SHEET, headers: secondaryHeadersForShift('Day') },
+    { name: SECONDARY_NIGHT_SHEET, headers: secondaryHeadersForShift('Night') },
+  ]);
+}
+
+function createShiftSheets(specs) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var log = [];
 
-  [
-    { name: CASTING_DAY_SHEET, shift: 'Day' },
-    { name: CASTING_NIGHT_SHEET, shift: 'Night' },
-  ].forEach(function (spec) {
+  specs.forEach(function (spec) {
     var sheet = ss.getSheetByName(spec.name);
     if (!sheet) {
       sheet = ss.insertSheet(spec.name);
@@ -983,14 +1030,13 @@ function setupCastingShiftSheets() {
       log.push('Sheet already exists: ' + spec.name);
     }
     // Write/refresh the header row (safe — only row 1, matched by name later).
-    var headers = castingHeadersForShift(spec.shift);
     var current = sheet.getLastColumn() > 0
       ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].join('|')
       : '';
-    if (current !== headers.join('|')) {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (current !== spec.headers.join('|')) {
+      sheet.getRange(1, 1, 1, spec.headers.length).setValues([spec.headers]);
       sheet.setFrozenRows(1);
-      log.push('  set header row (' + headers.length + ' cols)');
+      log.push('  set header row (' + spec.headers.length + ' cols)');
     }
   });
 
@@ -1006,17 +1052,20 @@ function setupCastingShiftSheets() {
 
 // ---------- Helpers ----------
 
-// Secondary/Machining only. Casting is split across two shift sheets — use
-// getCastingSheetForShift(shift) for it, never this.
+// Machining only now. Casting and Secondary are each split across two shift
+// sheets — use getCastingSheetForShift/getSecondarySheetForShift for them.
 function getModuleSheet(module) {
-  if (module === 'secondary') return requireSheet(SECONDARY_SHEET);
   if (module === 'machining') return requireSheet(MACHINING_SHEET);
   throw new Error('getModuleSheet: unsupported module "' + module + '"');
 }
 
-function requireSheet(sheetName) {
+function requireSheet(sheetName, setupFn) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-  if (!sheet) throw new Error(sheetName + ' sheet tab not found');
+  if (!sheet) {
+    throw new Error(setupFn
+      ? sheetName + ' sheet tab not found — run ' + setupFn + '() once'
+      : sheetName + ' sheet tab not found');
+  }
   return sheet;
 }
 

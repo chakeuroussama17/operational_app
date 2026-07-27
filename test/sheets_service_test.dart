@@ -234,6 +234,162 @@ void main() {
     });
   });
 
+  group('secondary incremental API (shift-aware)', () {
+    test('dashboard: passes action+module+shift, maps dcm->station', () async {
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            '[{"dcm":"ST1","lastUpdated":"14:32"},{"dcm":"ST2","lastUpdated":null}]',
+            200,
+          );
+        }),
+      );
+
+      final stations = await service.fetchSecondaryDashboard(shift: 'Day');
+
+      expect(requested.queryParameters, {
+        'action': 'dashboard',
+        'module': 'secondary',
+        'shift': 'Day',
+      });
+      expect(stations, hasLength(2));
+      expect(stations[0].station, 'ST1');
+      expect(stations[0].lastUpdated, '14:32');
+      expect(stations[1].lastUpdated, isNull);
+    });
+
+    test('parts: parses MO + shift param, clamps fillPercent', () async {
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            '{"status":"ok","data":['
+            '{"part":"P1","mo":"SEC-01","lastUpdated":"09:15","fillPercent":"33.4"},'
+            '{"part":"P2","lastUpdated":null,"fillPercent":140}]}',
+            200,
+          );
+        }),
+      );
+
+      final parts = await service.fetchSecondaryParts('ST1', shift: 'Night');
+
+      expect(requested.queryParameters, {
+        'action': 'parts',
+        'module': 'secondary',
+        'station': 'ST1',
+        'shift': 'Night',
+      });
+      expect(parts[0].part, 'P1');
+      expect(parts[0].mo, 'SEC-01');
+      expect(parts[0].fillPercent, 33);
+      expect(parts[1].mo, isNull);
+      expect(parts[1].fillPercent, 100);
+    });
+
+    test('row: passes shift, normalises numbers, formats LOR', () async {
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            '{"status":"success","data":{"Date":"2026-07-27","Station":"ST1",'
+            '"PartNo":"P1","MO":"SEC-01","Plan":100,'
+            '"Actual_8AM":20,"LOR_8AM":0.2,"Actual_10AM":"","LOR_10AM":"",'
+            '"LastUpdated":"14:32"}}',
+            200,
+          );
+        }),
+      );
+
+      final row = await service.fetchSecondaryRow(
+        station: 'ST1',
+        part: 'P1',
+        shift: 'Day',
+      );
+
+      expect(requested.queryParameters, {
+        'action': 'row',
+        'module': 'secondary',
+        'station': 'ST1',
+        'part': 'P1',
+        'shift': 'Day',
+      });
+      expect(row!.value('Plan'), '100');
+      expect(row.value('MO'), 'SEC-01');
+      expect(row.value('Actual_8AM'), '20');
+      expect(row.lorLabel('LOR_8AM'), '20%');
+      expect(row.value('Actual_10AM'), isNull);
+    });
+
+    test('submit: posts module=secondary and includes Shift', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.submitSecondaryUpdate({
+        'Station': 'ST1',
+        'PartNo': 'P1',
+        'Shift': 'Night',
+        'Plan': '100',
+        'Actual_8PM': '35',
+      });
+
+      expect(sent['module'], 'secondary');
+      expect(sent['data'], {
+        'Station': 'ST1',
+        'PartNo': 'P1',
+        'Shift': 'Night',
+        'Plan': '100',
+        'Actual_8PM': '35',
+      });
+    });
+
+    test('addSecondaryPart: posts the secondaryAddPart op with mo', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.addSecondaryPart(station: 'ST1', part: 'P4', mo: 'SEC-04');
+
+      expect(sent['action'], 'config');
+      expect(sent['op'], 'secondaryAddPart');
+      expect(sent['group'], 'ST1');
+      expect(sent['part'], 'P4');
+      expect(sent['mo'], 'SEC-04');
+    });
+
+    test('editSecondaryPart: omits mo when left unset', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.editSecondaryPart(
+        station: 'ST1',
+        part: 'P1',
+        newPart: 'P1',
+      );
+
+      expect(sent['op'], 'secondaryEditPart');
+      expect(sent['newPart'], 'P1');
+      expect(sent.containsKey('mo'), isFalse);
+    });
+  });
+
   group('machining incremental API', () {
     test('dashboard: passes module param, parses customer cards', () async {
       late Uri requested;

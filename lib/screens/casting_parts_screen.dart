@@ -99,7 +99,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final input = await promptCastingPart(context, title: 'Add Part');
+    final input = await promptPartWithMo(context, title: 'Add Part');
     if (input == null) return;
     await _mutate(
       () => _sheetsService.addCastingPart(
@@ -111,7 +111,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _editPart(PartStatus part) async {
-    final input = await promptCastingPart(
+    final input = await promptPartWithMo(
       context,
       title: 'Edit Part',
       initialName: part.part,

@@ -34,20 +34,21 @@ class SheetsSubmissionException implements Exception {
 /// Machining adds a `?action=lines` step (Customer -> Part -> Line) since it
 /// is keyed by Customer + PartNo + Line + Date instead of two selectors.
 ///
-/// Casting alone is shift-aware: every dashboard/parts/row call also takes
-/// `shift` ("Day" | "Night"), and submitted data must include a `Shift`
-/// field — see casting_models.dart for why (real day/night shift schedule,
-/// not calendar midnight) and the two Casting-only config ops below for MO
-/// (manufacturing order) number management.
+/// Casting AND Secondary are shift-aware: every dashboard/parts/row call also
+/// takes `shift` ("Day" | "Night"), and submitted data must include a `Shift`
+/// field — see casting_models.dart / secondary_models.dart for why (real
+/// day/night shift schedule, not calendar midnight). Both also carry an MO
+/// (manufacturing order) number per part (see the config ops below).
+/// Machining is unchanged (single sheet, no shift, no MO).
 ///
 /// A separate Config API manages the list of valid groups/parts/lines
 /// itself (add/delete/rename), backing the manage/settings screens:
 ///   GET  ?action=config&module=X -> { groups, partsByGroup, lines }
 ///   POST { secret, action: 'config', op: 'add'|'delete'|'rename', module,
 ///          kind: 'group'|'part'|'line', group?, value, newValue? }
-///   POST { secret, action: 'config', op: 'castingAddPart'|'castingEditPart',
-///          group: dcm, part, newPart?, mo? } -- Casting parts only, since
-///          they alone carry an MO number alongside the name.
+///   POST { secret, action: 'config', op: `castingAddPart`/`castingEditPart`
+///          or `secondaryAddPart`/`secondaryEditPart`, group, part, newPart?,
+///          mo? } -- Casting/Secondary parts only, since they carry an MO.
 class SheetsService {
   SheetsService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -153,23 +154,30 @@ class SheetsService {
     });
   }
 
-  // ---------- Secondary incremental API ----------
+  // ---------- Secondary incremental API (shift-aware: Day or Night) ----------
 
-  Future<List<StationStatus>> fetchSecondaryDashboard() async {
+  Future<List<StationStatus>> fetchSecondaryDashboard({
+    required String shift,
+  }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'dashboard',
       'module': 'secondary',
+      'shift': shift,
     });
     return _asList(
       decoded,
     ).whereType<Map<String, dynamic>>().map(StationStatus.fromJson).toList();
   }
 
-  Future<List<SecondaryPartStatus>> fetchSecondaryParts(String station) async {
+  Future<List<SecondaryPartStatus>> fetchSecondaryParts(
+    String station, {
+    required String shift,
+  }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'parts',
       'module': 'secondary',
       'station': station,
+      'shift': shift,
     });
     return _asList(decoded)
         .whereType<Map<String, dynamic>>()
@@ -177,16 +185,18 @@ class SheetsService {
         .toList();
   }
 
-  /// Today's saved row for this Station + Part, or null if none yet.
+  /// This shift's saved row for this Station + Part, or null if none yet.
   Future<SecondaryRow?> fetchSecondaryRow({
     required String station,
     required String part,
+    required String shift,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'row',
       'module': 'secondary',
       'station': station,
       'part': part,
+      'shift': shift,
     });
     if (decoded == null) return null;
     if (decoded is Map<String, dynamic>) {
@@ -199,13 +209,51 @@ class SheetsService {
     throw const SheetsSubmissionException('Unexpected server response.');
   }
 
-  /// Saves a partial secondary update. [data] must contain Station and PartNo
-  /// plus ONLY the fields the user filled/changed.
+  /// Saves a partial secondary update. [data] must contain Station, PartNo and
+  /// Shift plus ONLY the fields the user filled/changed; the backend upserts
+  /// this shift's row and recalculates LOR%.
   Future<void> submitSecondaryUpdate(Map<String, String> data) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'secondary',
       'data': data,
+    });
+  }
+
+  /// Adds a new Secondary part under [station], optionally with its current MO
+  /// (manufacturing order) number.
+  Future<void> addSecondaryPart({
+    required String station,
+    required String part,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'secondaryAddPart',
+      'group': station,
+      'part': part,
+      'mo': ?mo,
+    });
+  }
+
+  /// Renames a Secondary part and/or updates its MO number. Only ever touches
+  /// the Config sheet — rows already logged keep whatever MO was snapshotted
+  /// onto them when they were created.
+  Future<void> editSecondaryPart({
+    required String station,
+    required String part,
+    required String newPart,
+    String? mo,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'config',
+      'op': 'secondaryEditPart',
+      'group': station,
+      'part': part,
+      'newPart': newPart,
+      'mo': ?mo,
     });
   }
 

@@ -11,11 +11,17 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'secondary_entry_screen.dart';
 
-/// Part selector for one station: fill-tank cards showing today's progress.
+/// Part selector for one station: fill-tank cards showing this shift's
+/// progress.
 class SecondaryPartsScreen extends StatefulWidget {
-  const SecondaryPartsScreen({super.key, required this.station});
+  const SecondaryPartsScreen({
+    super.key,
+    required this.station,
+    required this.shift,
+  });
 
   final String station;
+  final String shift;
 
   @override
   State<SecondaryPartsScreen> createState() => _SecondaryPartsScreenState();
@@ -46,7 +52,10 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
       _error = null;
     });
     try {
-      final parts = await _sheetsService.fetchSecondaryParts(widget.station);
+      final parts = await _sheetsService.fetchSecondaryParts(
+        widget.station,
+        shift: widget.shift,
+      );
       if (!mounted) return;
       setState(() {
         _parts = parts;
@@ -65,8 +74,12 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                SecondaryEntryScreen(station: widget.station, part: part.part),
+            builder: (_) => SecondaryEntryScreen(
+              station: widget.station,
+              part: part.part,
+              shift: widget.shift,
+              mo: part.mo,
+            ),
           ),
         )
         // Fill % / timestamps change after logging — refresh on return.
@@ -91,33 +104,31 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final name = await promptText(context, title: 'Add Part', label: 'Part');
-    if (name == null) return;
+    final input = await promptPartWithMo(context, title: 'Add Part');
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configAdd(
-        module: 'secondary',
-        kind: 'part',
-        group: widget.station,
-        value: name,
+      () => _sheetsService.addSecondaryPart(
+        station: widget.station,
+        part: input.name,
+        mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
   }
 
-  Future<void> _renamePart(SecondaryPartStatus part) async {
-    final name = await promptText(
+  Future<void> _editPart(SecondaryPartStatus part) async {
+    final input = await promptPartWithMo(
       context,
-      title: 'Rename Part',
-      label: 'Part',
-      initialValue: part.part,
+      title: 'Edit Part',
+      initialName: part.part,
+      initialMo: part.mo,
     );
-    if (name == null || name == part.part) return;
+    if (input == null) return;
     await _mutate(
-      () => _sheetsService.configRename(
-        module: 'secondary',
-        kind: 'part',
-        group: widget.station,
-        value: part.part,
-        newValue: name,
+      () => _sheetsService.editSecondaryPart(
+        station: widget.station,
+        part: part.part,
+        newPart: input.name,
+        mo: input.mo,
       ),
     );
   }
@@ -141,10 +152,21 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     );
   }
 
+  String _subtitleFor(SecondaryPartStatus part) {
+    final mo = part.mo;
+    final updated = part.lastUpdated;
+    if (mo != null && updated != null) return 'MO $mo · $updated';
+    if (mo != null) return 'MO $mo';
+    if (updated != null) return 'Last updated: $updated';
+    return 'No entries yet · ${widget.shift.toLowerCase()} shift';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(subtitle: 'Secondary — ${widget.station}'),
+      appBar: HicomAppBar(
+        subtitle: 'Secondary — ${widget.station} · ${widget.shift} shift',
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -225,9 +247,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
                   Positioned.fill(
                     child: FillTankCard(
                       title: part.part,
-                      subtitle: part.lastUpdated != null
-                          ? 'Last updated: ${part.lastUpdated}'
-                          : 'No entries yet today',
+                      subtitle: _subtitleFor(part),
                       fillPercent: part.fillPercent,
                       onTap: () => _openPart(part),
                     ),
@@ -236,7 +256,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
                     top: 2,
                     right: 2,
                     child: CardMenuButton(
-                      onEdit: () => _renamePart(part),
+                      onEdit: () => _editPart(part),
                       onDelete: () => _deletePart(part),
                     ),
                   ),

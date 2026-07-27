@@ -39,10 +39,10 @@ Future<String?> promptText(
   return (result == null || result.isEmpty) ? null : result;
 }
 
-/// Result of [promptCastingPart]: the part name plus its MO (manufacturing
-/// order) number — Casting parts are the only ones with an MO field.
-class CastingPartInput {
-  const CastingPartInput({required this.name, required this.mo});
+/// Result of [promptPartWithMo]: the part name plus its MO (manufacturing
+/// order) number — used by Casting and Secondary, whose parts carry an MO.
+class PartWithMoInput {
+  const PartWithMoInput({required this.name, required this.mo});
 
   final String name;
 
@@ -50,9 +50,9 @@ class CastingPartInput {
   final String mo;
 }
 
-/// Add/edit dialog for a Casting part: name plus its MO number. Returns null
-/// if cancelled or the name was left empty.
-Future<CastingPartInput?> promptCastingPart(
+/// Add/edit dialog for a part that has an MO number (Casting/Secondary): name
+/// plus its MO number. Returns null if cancelled or the name was left empty.
+Future<PartWithMoInput?> promptPartWithMo(
   BuildContext context, {
   required String title,
   String? initialName,
@@ -60,7 +60,7 @@ Future<CastingPartInput?> promptCastingPart(
 }) async {
   final nameController = TextEditingController(text: initialName ?? '');
   final moController = TextEditingController(text: initialMo ?? '');
-  final result = await showDialog<CastingPartInput>(
+  final result = await showDialog<PartWithMoInput>(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: Text(title),
@@ -82,7 +82,7 @@ Future<CastingPartInput?> promptCastingPart(
               helperText: 'Manufacturing order — update monthly',
             ),
             onSubmitted: (_) => Navigator.of(dialogContext).pop(
-              CastingPartInput(
+              PartWithMoInput(
                 name: nameController.text.trim(),
                 mo: moController.text.trim(),
               ),
@@ -97,7 +97,7 @@ Future<CastingPartInput?> promptCastingPart(
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(
-            CastingPartInput(
+            PartWithMoInput(
               name: nameController.text.trim(),
               mo: moController.text.trim(),
             ),

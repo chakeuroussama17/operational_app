@@ -103,7 +103,13 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final input = await promptPartWithMo(context, title: 'Add Part');
+    final codes = await _availableCodes();
+    if (codes == null || !mounted) return;
+    final input = await promptPartCode(
+      context,
+      title: 'Add Part',
+      codes: codes,
+    );
     if (input == null) return;
     await _mutate(
       () => _sheetsService.addMachiningPart(
@@ -115,11 +121,13 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   }
 
   Future<void> _editPart(MachiningPartStatus part) async {
-    final input = await promptPartWithMo(
+    // The part code is fixed on edit (it keys the logged rows); only MO changes.
+    final input = await promptPartCode(
       context,
       title: 'Edit Part',
-      initialName: part.part,
+      initialCode: part.part,
       initialMo: part.mo,
+      lockCode: true,
     );
     if (input == null) return;
     await _mutate(
@@ -130,6 +138,32 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         mo: input.mo,
       ),
     );
+  }
+
+  /// Part codes for Machining (from the Parts master), or null after telling
+  /// the user why the picker can't open.
+  Future<List<String>?> _availableCodes() async {
+    try {
+      final codes = await _sheetsService.fetchPartCodes('machining');
+      if (!mounted) return null;
+      if (codes.isEmpty) {
+        _snack('No Machining part codes found — import the Parts sheet first.');
+        return null;
+      }
+      return codes.map((c) => c.code).toList();
+    } on SheetsSubmissionException catch (error) {
+      if (!mounted) return null;
+      _snack(error.message);
+      return null;
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.danger),
+      );
   }
 
   Future<void> _deletePart(MachiningPartStatus part) async {
@@ -254,8 +288,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
 
 /// "MO X · HH:mm" / "MO X" / "Last updated: HH:mm" / "No entries yet today".
 String _partSubtitle(MachiningPartStatus part) {
+  final name = part.name;
   final mo = part.mo;
   final updated = part.lastUpdated;
+  if (name != null) return mo != null ? 'MO $mo · $name' : name;
   if (mo != null && updated != null) return 'MO $mo · $updated';
   if (mo != null) return 'MO $mo';
   if (updated != null) return 'Last updated: $updated';

@@ -8,6 +8,7 @@ import '../models/analytics_models.dart';
 import '../models/casting_models.dart';
 import '../models/config_models.dart';
 import '../models/machining_models.dart';
+import '../models/part_code.dart';
 import '../models/secondary_models.dart';
 
 /// Thrown when a request to the Sheets backend fails.
@@ -375,6 +376,21 @@ class SheetsService {
       'newPart': newPart,
       'mo': ?mo,
     });
+  }
+
+  // ---------- Parts master (imported CSV) ----------
+
+  /// The distinct part codes available for [module], from the Parts master
+  /// sheet filtered by Department. Feeds the add-part dropdown; picking a code
+  /// tells the backend which barcode + name to snapshot onto the row.
+  Future<List<PartCode>> fetchPartCodes(String module) async {
+    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+      'action': 'partcodes',
+      'module': module,
+    });
+    return _asList(
+      decoded,
+    ).whereType<Map<String, dynamic>>().map(PartCode.fromJson).toList();
   }
 
   // ---------- Config: manage groups/parts/lines ----------

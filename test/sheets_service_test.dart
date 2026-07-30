@@ -639,6 +639,54 @@ void main() {
     });
   });
 
+  group('parts master API', () {
+    test(
+      'fetchPartCodes: passes action+module, parses code/barcode/name',
+      () async {
+        late Uri requested;
+        final service = SheetsService(
+          client: MockClient((request) async {
+            requested = request.url;
+            return http.Response(
+              '{"status":"success","data":['
+              '{"code":"1143","barcode":"1143-YAM-C","name":"1143-YAM-B17-CRANKCASE-1-CAST"},'
+              '{"code":"6154","barcode":"6154-IGS-C","name":"6154-IGS-CYLINDER-BLOCK-CAST"}]}',
+              200,
+            );
+          }),
+        );
+
+        final codes = await service.fetchPartCodes('casting');
+
+        expect(requested.queryParameters, {
+          'action': 'partcodes',
+          'module': 'casting',
+        });
+        expect(codes, hasLength(2));
+        expect(codes[0].code, '1143');
+        expect(codes[0].barcode, '1143-YAM-C');
+        expect(codes[0].name, '1143-YAM-B17-CRANKCASE-1-CAST');
+        expect(codes[1].code, '6154');
+      },
+    );
+
+    test('fetchPartCodes: surfaces a missing-Parts-sheet error', () async {
+      final service = SheetsService(
+        client: MockClient(
+          (request) async => http.Response(
+            '{"status":"error","message":"Parts sheet not found - create it and import the parts CSV"}',
+            200,
+          ),
+        ),
+      );
+
+      await expectLater(
+        service.fetchPartCodes('casting'),
+        throwsA(isA<SheetsSubmissionException>()),
+      );
+    });
+  });
+
   group('config manage API', () {
     test(
       'fetchConfig: passes action+module, parses groups/parts/lines',

@@ -98,6 +98,19 @@
 
 var SECRET_KEY = 'hicom2026changeme';
 var CONFIG_SHEET = 'Config';
+// Master parts list, imported from the plant CSV. Header row (row 1) must be
+// EXACTLY: Part number | Part name | Part code | Department
+// The app's add-part dropdown reads part codes from here, filtered by the
+// module's Department; the chosen code's Part number (barcode) and Part name
+// are snapshotted onto the Config part row and every logged data row.
+var PARTS_SHEET = 'Parts';
+
+// Which "Department" value in the Parts master belongs to each app module.
+function moduleDepartment(module) {
+  if (module === 'secondary') return 'secondary';
+  if (module === 'machining') return 'machining';
+  return 'casting';
+}
 
 // ALL THREE modules run the same real 2-shift schedule. Day checkpoints run
 // 8AM-6PM; Night checkpoints run 8PM-6AM (crossing midnight).
@@ -148,13 +161,17 @@ function getMachiningSheetForShift(shift) {
 }
 
 // Header frame for a Casting shift sheet, built from that shift's slots.
+// Barcode (the CSV "Part number") and PartName are appended at the END of
+// every data frame — never inserted mid-frame — so re-running the setup
+// migration on a sheet that already has data leaves every existing column in
+// place and just adds two empty trailing columns.
 function castingHeadersForShift(shift) {
   var headers = ['Date', 'DCM', 'PartNo', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
-  headers.push('LastUpdated');
+  headers.push('LastUpdated', 'Barcode', 'PartName');
   return headers;
 }
 
@@ -167,7 +184,7 @@ function machiningHeadersForShift(shift) {
     headers.push('Output_LOR' + slot);
     headers.push('Rejection_' + slot);
   });
-  headers.push('LastUpdated');
+  headers.push('LastUpdated', 'Barcode', 'PartName');
   return headers;
 }
 
@@ -179,7 +196,7 @@ function secondaryHeadersForShift(shift) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
   });
-  headers.push('LastUpdated');
+  headers.push('LastUpdated', 'Barcode', 'PartName');
   return headers;
 }
 
@@ -204,7 +221,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'MACHINING-2SHEET-v4';
+var BACKEND_VERSION = 'PARTS-MASTER-v5';
 
 function doGet(e) {
   try {
@@ -213,6 +230,7 @@ function doGet(e) {
 
     if (action === 'config') return jsonResponse(getConfigSnapshot(module));
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
+    if (action === 'partcodes') return jsonResponse(getPartMaster(module));
 
     if (module === 'machining') {
       // Machining is now shift-aware too (Machining_Day/Machining_Night) and
@@ -320,9 +338,11 @@ function getSecondaryParts(station, shift) {
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
+    var info = getConfigPartInfo('secondary', station, part);
     return {
       part: part,
-      mo: getConfigPartMo('secondary', station, part),
+      mo: info.mo,
+      name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
     };
@@ -367,7 +387,10 @@ function upsertSecondaryRow(data) {
   if (!existing) {
     // Snapshot the part's currently-configured MO onto the row once, at
     // creation — later Config MO edits never rewrite already-logged rows.
-    merged.MO = getConfigPartMo('secondary', data.Station, data.PartNo);
+    var pinfo = getConfigPartInfo('secondary', data.Station, data.PartNo);
+    merged.MO = pinfo.mo;
+    merged.Barcode = pinfo.barcode;
+    merged.PartName = pinfo.name;
   }
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
@@ -440,9 +463,11 @@ function getCastingParts(dcm, shift) {
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
+    var info = getConfigPartInfo('casting', dcm, part);
     return {
       part: part,
-      mo: getConfigPartMo('casting', dcm, part),
+      mo: info.mo,
+      name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
     };
@@ -485,11 +510,14 @@ function upsertCastingRow(data) {
   merged.DCM = data.DCM;
   merged.PartNo = data.PartNo;
   if (!existing) {
-    // Snapshot the part's CURRENTLY configured MO onto the row exactly once,
-    // at creation. If the Config MO changes later (new month), rows already
-    // logged keep the MO that was active when they were written — a later
-    // Config edit must never silently rewrite already-logged history.
-    merged.MO = getConfigPartMo('casting', data.DCM, data.PartNo);
+    // Snapshot the part's CURRENTLY configured MO + Barcode + PartName onto the
+    // row exactly once, at creation. If Config changes later (new month, part
+    // re-picked), rows already logged keep what was active when written — a
+    // later Config edit must never silently rewrite already-logged history.
+    var pinfo = getConfigPartInfo('casting', data.DCM, data.PartNo);
+    merged.MO = pinfo.mo;
+    merged.Barcode = pinfo.barcode;
+    merged.PartName = pinfo.name;
   }
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
@@ -530,21 +558,88 @@ function upsertCastingRow(data) {
 // row. upsertCastingRow snapshots it onto a new data row at creation time;
 // editing it here only changes what NEW rows will pick up going forward.
 
-function getConfigPartMo(module, group, part) {
+// A part's snapshot attributes, read from its Config row: MO, plus the
+// Barcode (CSV "Part number") and PartName carried over from the master when
+// the part was added. Blank strings when the part or columns don't exist.
+function getConfigPartInfo(module, group, part) {
   var rows = getConfigRows();
   var match = rows.find(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part;
   });
-  return match && match.MO ? String(match.MO) : '';
+  if (!match) return { mo: '', barcode: '', name: '' };
+  return {
+    mo: match.MO ? String(match.MO) : '',
+    barcode: match.Barcode ? String(match.Barcode) : '',
+    name: match.PartName ? String(match.PartName) : '',
+  };
 }
 
-// Shared by Casting (group=DCM) and Secondary (group=Station) — the only two
-// modules whose parts carry an MO number. `module` decides which Config rows
-// are matched/written; the wire ops are castingAddPart/secondaryAddPart etc.
+// Back-compat thin wrapper (still used by the get*Parts readers).
+function getConfigPartMo(module, group, part) {
+  return getConfigPartInfo(module, group, part).mo;
+}
+
+// ---------- Parts master (imported CSV) ----------
+//
+// getPartMaster feeds the app's add-part dropdown: the distinct Part codes for
+// this module's Department, each with its barcode + name. lookupMasterPart
+// resolves a chosen code back to its barcode/name at add-time.
+
+function getPartMaster(module) {
+  module = String(module || 'casting').toLowerCase();
+  var dept = moduleDepartment(module);
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTS_SHEET);
+  if (!sheet) {
+    return { status: 'error', message: PARTS_SHEET + ' sheet not found — create it and import the parts CSV' };
+  }
+  var rows = getAllRowsAsObjects(sheet);
+  var seen = {};
+  var out = [];
+  rows.forEach(function (r) {
+    if (String(r.Department || '').toLowerCase().trim() !== dept) return;
+    var code = String(r['Part code'] === undefined ? '' : r['Part code']).trim();
+    if (!code || seen[code]) return;   // distinct codes; first row wins on dupes
+    seen[code] = true;
+    out.push({
+      code: code,
+      barcode: String(r['Part number'] === undefined ? '' : r['Part number']).trim(),
+      name: String(r['Part name'] === undefined ? '' : r['Part name']).trim(),
+    });
+  });
+  return { status: 'success', data: out };
+}
+
+function lookupMasterPart(module, code) {
+  var dept = moduleDepartment(String(module || '').toLowerCase());
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTS_SHEET);
+  if (!sheet) return { barcode: '', name: '' };
+  var wanted = String(code).trim();
+  var match = getAllRowsAsObjects(sheet).find(function (r) {
+    return String(r.Department || '').toLowerCase().trim() === dept &&
+      String(r['Part code'] === undefined ? '' : r['Part code']).trim() === wanted;
+  });
+  if (!match) return { barcode: '', name: '' };
+  return {
+    barcode: String(match['Part number'] === undefined ? '' : match['Part number']).trim(),
+    name: String(match['Part name'] === undefined ? '' : match['Part name']).trim(),
+  };
+}
+
+// Append a Config row built by HEADER NAME, so Barcode/PartName land in the
+// right columns whatever order the Config sheet has them in.
+function writeConfigRow(sheet, obj) {
+  var headers = getHeaders(sheet);
+  var arr = headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
+  sheet.appendRow(arr);
+}
+
+// Shared by all three modules. `payload.part` is now a Part CODE chosen from
+// the master dropdown; we look its barcode + name up and store them alongside
+// the MO on the Config part row. Wire ops: castingAddPart/secondaryAddPart/…
 function addPartWithMo(module, payload) {
   var group = String(payload.group || '');
-  var part = String(payload.part || '').trim();
+  var part = String(payload.part || '').trim();   // the chosen Part CODE
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : '';
   if (!group || !part) return { status: 'error', message: 'group and part are required' };
 
@@ -555,7 +650,12 @@ function addPartWithMo(module, payload) {
       String(r.Group) === group && String(r.Value) === part;
   });
   if (dup) return { status: 'error', message: 'Already exists' };
-  sheet.appendRow([module, 'part', group, part, mo]);
+
+  var info = lookupMasterPart(module, part);
+  writeConfigRow(sheet, {
+    Module: module, Kind: 'part', Group: group, Value: part,
+    MO: mo, Barcode: info.barcode, PartName: info.name,
+  });
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
 }
 
@@ -573,13 +673,21 @@ function editPartWithMo(module, payload) {
   var headers = getHeaders(sheet);
   var valueCol = headers.indexOf('Value') + 1;
   var moCol = headers.indexOf('MO') + 1;
+  var barcodeCol = headers.indexOf('Barcode') + 1;
+  var nameCol = headers.indexOf('PartName') + 1;
   var rows = getAllRowsAsObjects(sheet);
   var match = rows.find(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part;
   });
   if (!match) return { status: 'error', message: 'Not found' };
-  if (newPart !== part) sheet.getRange(match._rowNum, valueCol).setValue(newPart);
+  if (newPart !== part) {
+    // Code changed -> re-resolve its barcode/name from the master.
+    sheet.getRange(match._rowNum, valueCol).setValue(newPart);
+    var info = lookupMasterPart(module, newPart);
+    if (barcodeCol > 0) sheet.getRange(match._rowNum, barcodeCol).setValue(info.barcode);
+    if (nameCol > 0) sheet.getRange(match._rowNum, nameCol).setValue(info.name);
+  }
   if (mo !== null && moCol > 0) sheet.getRange(match._rowNum, moCol).setValue(mo);
   return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
@@ -621,9 +729,11 @@ function getMachiningParts(customer, shift) {
         if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
       }
     });
+    var info = getConfigPartInfo('machining', customer, part);
     return {
       part: part,
-      mo: getConfigPartMo('machining', customer, part),
+      mo: info.mo,
+      name: info.name,
       lastUpdated: latest ? hhmm(latest) : null,
     };
   });
@@ -697,7 +807,10 @@ function upsertMachiningRow(data) {
     // Snapshot the part's currently-configured MO onto the row once, at
     // creation — later Config MO edits never rewrite already-logged rows.
     // MO is per-part, so every line of a part logs the same MO.
-    merged.MO = getConfigPartMo('machining', data.Customer, data.PartNo);
+    var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo);
+    merged.MO = pinfo.mo;
+    merged.Barcode = pinfo.barcode;
+    merged.PartName = pinfo.name;
   }
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
@@ -1111,11 +1224,12 @@ function createShiftSheets(specs) {
   });
 
   var configSheet = getConfigSheet();
-  var configHeaders = getHeaders(configSheet);
-  if (configHeaders.indexOf('MO') === -1) {
-    configSheet.getRange(1, configSheet.getLastColumn() + 1).setValue('MO');
-    log.push('Added Config!MO column');
-  }
+  ['MO', 'Barcode', 'PartName'].forEach(function (col) {
+    if (getHeaders(configSheet).indexOf(col) === -1) {
+      configSheet.getRange(1, configSheet.getLastColumn() + 1).setValue(col);
+      log.push('Added Config!' + col + ' column');
+    }
+  });
 
   Logger.log(log.join('\n'));
 }

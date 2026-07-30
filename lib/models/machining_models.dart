@@ -76,16 +76,26 @@ class CustomerStatus {
 /// (manufacturing order) number. A navigation step to the Line selector below
 /// it, so it carries no fill percentage of its own.
 class MachiningPartStatus {
-  const MachiningPartStatus({required this.part, this.mo, this.lastUpdated});
+  const MachiningPartStatus({
+    required this.part,
+    this.mo,
+    this.name,
+    this.lastUpdated,
+  });
 
+  /// The part CODE (chosen from the master list) — this card's title.
   final String part;
   final String? mo;
+
+  /// Human-readable part name from the master list.
+  final String? name;
   final String? lastUpdated;
 
   factory MachiningPartStatus.fromJson(Map<String, dynamic> json) =>
       MachiningPartStatus(
         part: cleanCell(json['part']) ?? '',
         mo: cleanCell(json['mo']),
+        name: cleanCell(json['name']),
         lastUpdated: cleanCell(json['lastUpdated']),
       );
 }

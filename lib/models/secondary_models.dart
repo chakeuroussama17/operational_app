@@ -68,12 +68,17 @@ class SecondaryPartStatus {
   const SecondaryPartStatus({
     required this.part,
     this.mo,
+    this.name,
     this.lastUpdated,
     required this.fillPercent,
   });
 
+  /// The part CODE (chosen from the master list) — this card's title.
   final String part;
   final String? mo;
+
+  /// Human-readable part name from the master list.
+  final String? name;
   final String? lastUpdated;
 
   /// 0-100: how many of this shift's six time slots are filled today.
@@ -84,6 +89,7 @@ class SecondaryPartStatus {
     return SecondaryPartStatus(
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
+      name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),
     );

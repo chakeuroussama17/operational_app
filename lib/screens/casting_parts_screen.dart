@@ -99,7 +99,13 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _addPart() async {
-    final input = await promptPartWithMo(context, title: 'Add Part');
+    final codes = await _availableCodes();
+    if (codes == null || !mounted) return;
+    final input = await promptPartCode(
+      context,
+      title: 'Add Part',
+      codes: codes,
+    );
     if (input == null) return;
     await _mutate(
       () => _sheetsService.addCastingPart(
@@ -111,11 +117,13 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _editPart(PartStatus part) async {
-    final input = await promptPartWithMo(
+    // The part code is fixed on edit (it keys the logged rows); only MO changes.
+    final input = await promptPartCode(
       context,
       title: 'Edit Part',
-      initialName: part.part,
+      initialCode: part.part,
       initialMo: part.mo,
+      lockCode: true,
     );
     if (input == null) return;
     await _mutate(
@@ -126,6 +134,32 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         mo: input.mo,
       ),
     );
+  }
+
+  /// Part codes for Casting (from the Parts master), or null after telling the
+  /// user why the picker can't open.
+  Future<List<String>?> _availableCodes() async {
+    try {
+      final codes = await _sheetsService.fetchPartCodes('casting');
+      if (!mounted) return null;
+      if (codes.isEmpty) {
+        _snack('No Casting part codes found — import the Parts sheet first.');
+        return null;
+      }
+      return codes.map((c) => c.code).toList();
+    } on SheetsSubmissionException catch (error) {
+      if (!mounted) return null;
+      _snack(error.message);
+      return null;
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.danger),
+      );
   }
 
   Future<void> _deletePart(PartStatus part) async {
@@ -148,8 +182,10 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   String _subtitleFor(PartStatus part) {
+    final name = part.name;
     final mo = part.mo;
     final updated = part.lastUpdated;
+    if (name != null) return mo != null ? 'MO $mo · $name' : name;
     if (mo != null && updated != null) return 'MO $mo · $updated';
     if (mo != null) return 'MO $mo';
     if (updated != null) return 'Last updated: $updated';

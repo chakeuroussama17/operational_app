@@ -110,6 +110,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Add Part',
+      moduleLabel: 'Secondary',
       codes: codes,
     );
     if (input == null) return;
@@ -128,6 +129,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Edit Part',
+      moduleLabel: 'Secondary',
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,

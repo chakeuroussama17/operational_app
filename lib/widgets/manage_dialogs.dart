@@ -66,6 +66,7 @@ class PartWithMoInput {
 Future<PartWithMoInput?> promptPartCode(
   BuildContext context, {
   required String title,
+  required String moduleLabel,
   List<PartCode> codes = const [],
   String? initialCode,
   String? initialMo,
@@ -123,7 +124,19 @@ Future<PartWithMoInput?> promptPartCode(
                   ),
                   onChanged: (_) => setState(() => error = null),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
+                // The same code exists in several departments (a part is cast,
+                // then fettled, then machined), so spell out that this list is
+                // only this module's operations.
+                Text(
+                  '${matches.length} of ${codes.length} $moduleLabel parts',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
                 Container(
                   constraints: const BoxConstraints(maxHeight: 240),
                   decoration: BoxDecoration(

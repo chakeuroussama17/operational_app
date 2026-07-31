@@ -109,6 +109,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Add Part',
+      moduleLabel: 'Machining',
       codes: codes,
     );
     if (input == null) return;
@@ -127,6 +128,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Edit Part',
+      moduleLabel: 'Machining',
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,

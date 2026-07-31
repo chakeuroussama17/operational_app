@@ -105,6 +105,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Add Part',
+      moduleLabel: 'Casting',
       codes: codes,
     );
     if (input == null) return;
@@ -123,6 +124,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Edit Part',
+      moduleLabel: 'Casting',
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,

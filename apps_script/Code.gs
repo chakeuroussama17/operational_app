@@ -247,7 +247,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'REJECTION-ROLLUP-v8';
+var BACKEND_VERSION = 'REJECTION-ROLLUP-v9';
 
 function doGet(e) {
   try {
@@ -1543,7 +1543,8 @@ function reorderSheet(sheetName, desired) {
     if (h && finalHeaders.indexOf(h) === -1) finalHeaders.push(h);
   });
   if (finalHeaders.join('|') === current.join('|')) {
-    return 'already in order: ' + sheetName;
+    applyColumnFormats(sheet, finalHeaders);
+    return 'already in order (formats refreshed): ' + sheetName;
   }
 
   var rows = getAllRowsAsObjects(sheet);
@@ -1558,8 +1559,36 @@ function reorderSheet(sheetName, desired) {
   sheet.clearContents();
   sheet.getRange(1, 1, out.length, finalHeaders.length).setValues(out);
   sheet.setFrozenRows(1);
+  applyColumnFormats(sheet, finalHeaders);
   invalidateCaches();
   return 'reordered ' + sheetName + ' (' + rows.length + ' data rows)';
+}
+
+// A cell's number format belongs to its POSITION, not to the data that moves
+// through it. So a column that shifts inherits whatever the previous occupant
+// was formatted as — RejectionTotal landing where LastUpdated used to sit read
+// back as "1900-01-06" instead of 8, because 8 is eight days past the epoch.
+//
+// Rather than trusting whatever is there, formats are set from the header
+// name: percent for the LOR columns, dates for the date columns, and default
+// for everything else. Idempotent, so re-running the migration repairs a sheet
+// that already went wrong.
+function applyColumnFormats(sheet, headers) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;                 // header only, nothing to format
+  var n = lastRow - 1;
+
+  headers.forEach(function (header, i) {
+    var range = sheet.getRange(2, i + 1, n, 1);
+    range.clearFormat();
+    if (header.indexOf('LOR') !== -1) {
+      range.setNumberFormat('0%');
+    } else if (header === 'LastUpdated') {
+      range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    } else if (header === 'Date') {
+      range.setNumberFormat('yyyy-mm-dd');
+    }
+  });
 }
 
 function createShiftSheets(specs) {

@@ -82,6 +82,12 @@
  *     Date | Shift | Customer | PartNo | Line | Barcode | PartName | MO |
  *     RejectionCode | RejectionType | Qty | LastUpdated
  *   The app always posts the whole list, which replaces that entry's rows.
+ *   The machining row also carries RejectionTotal (a number) and
+ *   RejectionSummary ("5 POROSITY, 3 FLASHES"), rewritten from the list on
+ *   every save so the entry reads at a glance.
+ *
+ *   Rejection_Summary — live QUERY rollups by defect type and by part.
+ *   Run setupRejectionSummary() once; it never needs re-running.
  *
  * After editing: Deploy > New deployment (editing an existing deployment's
  * version has not reliably gone live in testing — always cut a new one).
@@ -106,6 +112,11 @@ var REJECTION_TYPES_SHEET = 'RejectionTypes';
 // defect type per Customer+Part+Line+shift+date. That keeps the shape open
 // ended and makes "which defect costs us most" a plain pivot.
 var MACHINING_REJECTIONS_SHEET = 'Machining_Rejections';
+
+// A small always-current rollup of the detail table (RejectionType | Qty),
+// built as a live QUERY formula rather than rows the script maintains — a
+// formula can never be left stale by a save that didn't run.
+var REJECTION_SUMMARY_SHEET = 'Rejection_Summary';
 
 function machiningRejectionHeaders() {
   return ['Date', 'Shift', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName',
@@ -194,7 +205,8 @@ function machiningHeadersForShift(shift) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
-  headers.push('LastUpdated');
+  // Derived from the detail table on every save — read these, never type them.
+  headers.push('RejectionTotal', 'RejectionSummary', 'LastUpdated');
   return headers;
 }
 
@@ -235,7 +247,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'REJECTION-LIST-v7';
+var BACKEND_VERSION = 'REJECTION-ROLLUP-v8';
 
 function doGet(e) {
   try {
@@ -916,6 +928,16 @@ function upsertMachiningRow(data) {
     }
   });
 
+  // Parse the defect list before writing the row so its total and summary go
+  // out in the same write. null = the field wasn't sent, so whatever the row
+  // already carries stays.
+  var rejections = parseRejectionList(data);
+  if (rejections !== null) {
+    var totals = summariseRejections(rejections);
+    merged.RejectionTotal = totals.total;
+    merged.RejectionSummary = totals.summary;
+  }
+
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -927,7 +949,9 @@ function upsertMachiningRow(data) {
     sheet.appendRow(rowArray);
   }
 
-  saveMachiningRejections(data, shift, shiftDate, merged);
+  if (rejections !== null) {
+    writeMachiningRejections(rejections, data, shift, shiftDate, merged);
+  }
 
   return {
     status: 'success',
@@ -942,17 +966,43 @@ function upsertMachiningRow(data) {
 // {code, type, qty}), so this replaces every row for that entry rather than
 // merging: deleting a line in the app has to delete it in the sheet too.
 // A missing field means "not edited" and is left alone; an empty array clears.
-function saveMachiningRejections(data, shift, shiftDate, row) {
-  if (data.Rejections === undefined || data.Rejections === null) return;
-
+//
+// Returns the parsed list, or null when the field was absent or unusable —
+// null means "leave everything as it was", which is why a malformed payload
+// can never wipe a shift's defects.
+function parseRejectionList(data) {
+  if (data.Rejections === undefined || data.Rejections === null) return null;
   var list;
   try {
     list = typeof data.Rejections === 'string' ? JSON.parse(data.Rejections) : data.Rejections;
   } catch (e) {
-    return; // malformed payload — never wipe the existing list over it
+    return null;
   }
-  if (Object.prototype.toString.call(list) !== '[object Array]') return;
+  if (Object.prototype.toString.call(list) !== '[object Array]') return null;
+  return list.filter(function (item) {
+    // A half-filled UI row is not a defect.
+    return item && String(item.qty === undefined ? '' : item.qty).trim() !== '' &&
+      String(item.type === undefined ? '' : item.type).trim() !== '';
+  });
+}
 
+// The two derived cells that ride on the machining row itself, so an entry
+// reads at a glance without opening the detail table:
+//   RejectionTotal   8                       (a NUMBER — sums and charts)
+//   RejectionSummary "5 POROSITY, 3 FLASHES" (text, for humans)
+// Both are rewritten from the list on every save, so they cannot drift.
+function summariseRejections(list) {
+  var total = 0;
+  var parts = [];
+  list.forEach(function (item) {
+    var qty = parseFloat(item.qty);
+    if (!isNaN(qty)) total += qty;
+    parts.push(String(item.qty).trim() + ' ' + String(item.type).trim());
+  });
+  return { total: total, summary: parts.join(', ') };
+}
+
+function writeMachiningRejections(list, data, shift, shiftDate, row) {
   var sheet = requireSheet(MACHINING_REJECTIONS_SHEET, setupMachiningShiftSheets);
   var headers = getHeaders(sheet);
 
@@ -967,9 +1017,8 @@ function saveMachiningRejections(data, shift, shiftDate, row) {
 
   var now = new Date();
   list.forEach(function (item) {
-    var qty = String(item && item.qty !== undefined ? item.qty : '').trim();
-    var type = String(item && item.type !== undefined ? item.type : '').trim();
-    if (!qty || !type) return; // half-filled UI row — nothing to record
+    var qty = String(item.qty).trim();
+    var qtyNum = parseFloat(qty);
     var out = {
       Date: shiftDate,
       Shift: shift,
@@ -980,8 +1029,10 @@ function saveMachiningRejections(data, shift, shiftDate, row) {
       PartName: row.PartName || '',
       MO: row.MO || '',
       RejectionCode: padRejectionCode(item.code),
-      RejectionType: type,
-      Qty: qty,
+      RejectionType: String(item.type).trim(),
+      // Written as a NUMBER, not text — the summary tab's QUERY sums this
+      // column, and sum() silently ignores text cells.
+      Qty: isNaN(qtyNum) ? qty : qtyNum,
       LastUpdated: now,
     };
     sheet.appendRow(headers.map(function (h) {
@@ -1388,12 +1439,67 @@ function setupSecondaryShiftSheets() {
   ]);
 }
 
+// ---------- Rejection rollup tab ----------
+//
+// Two live tables over Machining_Rejections: totals by defect type, and by
+// part. Both are QUERY formulas, so they update the moment a log is saved and
+// there is nothing to re-run. Safe to re-run — it rebuilds the formulas.
+//
+// The column letters are derived from machiningRejectionHeaders() rather than
+// hardcoded, so moving a column in the detail table doesn't silently break it.
+function setupRejectionSummary() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REJECTION_SUMMARY_SHEET) || ss.insertSheet(REJECTION_SUMMARY_SHEET);
+  sheet.clear();
+
+  var headers = machiningRejectionHeaders();
+  var typeCol = columnLetter(headers.indexOf('RejectionType') + 1);
+  var qtyCol = columnLetter(headers.indexOf('Qty') + 1);
+  var partCol = columnLetter(headers.indexOf('PartNo') + 1);
+  var src = "'" + MACHINING_REJECTIONS_SHEET + "'!";
+
+  sheet.getRange('A1').setValue('Rejections by type');
+  sheet.getRange('A2').setFormula(
+    '=QUERY(' + src + typeCol + ':' + qtyCol + ', "select ' + typeCol +
+    ', sum(' + qtyCol + ') where ' + typeCol + " is not null and " + typeCol +
+    " <> '' group by " + typeCol + ' order by sum(' + qtyCol + ") desc label " +
+    typeCol + " 'RejectionType', sum(" + qtyCol + ") 'Qty'\", 1)"
+  );
+
+  sheet.getRange('D1').setValue('Rejections by part');
+  sheet.getRange('D2').setFormula(
+    '=QUERY(' + src + 'A:' + qtyCol + ', "select ' + partCol +
+    ', sum(' + qtyCol + ') where ' + partCol + " is not null and " + partCol +
+    " <> '' group by " + partCol + ' order by sum(' + qtyCol + ") desc label " +
+    partCol + " 'PartNo', sum(" + qtyCol + ") 'Qty'\", 1)"
+  );
+
+  sheet.getRange('A1:D1').setFontWeight('bold');
+  sheet.setColumnWidth(1, 240);
+  sheet.setColumnWidth(4, 140);
+  Logger.log('Built ' + REJECTION_SUMMARY_SHEET + ' (live formulas over ' +
+    MACHINING_REJECTIONS_SHEET + ')');
+}
+
+// 1 -> "A", 27 -> "AA".
+function columnLetter(index) {
+  var out = '';
+  while (index > 0) {
+    var rem = (index - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    index = Math.floor((index - 1) / 26);
+  }
+  return out;
+}
+
 function setupMachiningShiftSheets() {
   createShiftSheets([
     { name: MACHINING_DAY_SHEET, headers: machiningHeadersForShift('Day') },
     { name: MACHINING_NIGHT_SHEET, headers: machiningHeadersForShift('Night') },
     { name: MACHINING_REJECTIONS_SHEET, headers: machiningRejectionHeaders() },
+    // (the Rejection_Summary rollup is formulas, not headers — built below)
   ]);
+  setupRejectionSummary();
 }
 
 // ---------- One-off: rearrange existing tabs into the header order above ----

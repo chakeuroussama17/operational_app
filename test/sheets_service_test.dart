@@ -642,7 +642,7 @@ void main() {
   group('parts master API', () {
     // fetchPartCodes memoises per module for the session — otherwise the first
     // test here would satisfy the second one from cache.
-    setUp(SheetsService.clearPartCodeCache);
+    setUp(SheetsService.clearMasterCaches);
 
     test(
       'fetchPartCodes: passes action+module, parses code/barcode/name',
@@ -711,6 +711,110 @@ void main() {
         service.fetchPartCodes('casting'),
         throwsA(isA<SheetsSubmissionException>()),
       );
+    });
+  });
+
+  group('rejection types + machining rejection list', () {
+    setUp(SheetsService.clearMasterCaches);
+
+    test('fetchRejectionTypes: passes action, parses + caches', () async {
+      var requests = 0;
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requests++;
+          requested = request.url;
+          return http.Response(
+            '{"status":"success","data":['
+            '{"code":"064","type":"POROSITY"},{"code":"006","type":"BLOW HOLE"}]}',
+            200,
+          );
+        }),
+      );
+
+      final types = await service.fetchRejectionTypes();
+      await service.fetchRejectionTypes();
+
+      expect(requested.queryParameters, {'action': 'rejectiontypes'});
+      expect(requests, 1, reason: 'the master list is fetched once');
+      expect(types, hasLength(2));
+      expect(types[0].code, '064');
+      expect(types[0].type, 'POROSITY');
+      expect(types[0].label, '064 · POROSITY');
+    });
+
+    test('machining row exposes the defect list it was sent with', () async {
+      final service = SheetsService(
+        client: MockClient(
+          (request) async => http.Response(
+            '{"status":"success","data":{"Customer":"Mazda","PartNo":"2244",'
+            '"Line":"FY2","Output_8AM":150,"Output_LOR8AM":0.5,'
+            '"Rejections":[{"code":"064","type":"POROSITY","qty":5},'
+            '{"code":"006","type":"BLOW HOLE","qty":2}]}}',
+            200,
+          ),
+        ),
+      );
+
+      final row = await service.fetchMachiningRow(
+        customer: 'Mazda',
+        part: '2244',
+        line: 'FY2',
+        shift: 'Day',
+      );
+
+      expect(row!.value('Output_8AM'), '150');
+      expect(row.lorLabel('Output_LOR8AM'), '50%');
+      final rejections = row.rejections;
+      expect(rejections, hasLength(2));
+      expect(rejections[0].code, '064');
+      expect(rejections[0].type, 'POROSITY');
+      expect(rejections[0].qty, '5');
+      expect(rejections[0].isComplete, isTrue);
+    });
+
+    test('machining row without the field yields an empty list', () async {
+      final service = SheetsService(
+        client: MockClient(
+          (request) async => http.Response(
+            '{"status":"success","data":{"Customer":"Mazda","PartNo":"2244"}}',
+            200,
+          ),
+        ),
+      );
+
+      final row = await service.fetchMachiningRow(
+        customer: 'Mazda',
+        part: '2244',
+        line: 'FY2',
+        shift: 'Day',
+      );
+
+      expect(row!.rejections, isEmpty);
+    });
+
+    test('submit carries the encoded defect list through', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.submitMachiningUpdate({
+        'Customer': 'Mazda',
+        'PartNo': '2244',
+        'Line': 'FY2',
+        'Shift': 'Day',
+        'Rejections': '[{"qty":"5","code":"064","type":"POROSITY"}]',
+      });
+
+      expect(sent['module'], 'machining');
+      final data = sent['data'] as Map<String, dynamic>;
+      final list = jsonDecode(data['Rejections'] as String) as List;
+      expect(list, hasLength(1));
+      expect((list.first as Map)['type'], 'POROSITY');
     });
   });
 

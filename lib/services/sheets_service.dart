@@ -10,6 +10,7 @@ import '../models/casting_models.dart';
 import '../models/config_models.dart';
 import '../models/machining_models.dart';
 import '../models/part_code.dart';
+import '../models/rejection.dart';
 import '../models/secondary_models.dart';
 
 /// Thrown when a request to the Sheets backend fails.
@@ -399,14 +400,34 @@ class SheetsService {
     return codes;
   }
 
-  /// The parts master is an imported CSV that changes rarely, while the picker
-  /// is opened constantly — so each module's list is fetched once and reused
-  /// for the rest of the session. Static because every screen builds its own
-  /// [SheetsService]. (Re-imported the CSV? Restart the app.)
+  /// The full rejection-code master (~230 defect types), for the Machining
+  /// entry screen's defect picker. Cached like the parts master.
+  Future<List<RejectionType>> fetchRejectionTypes() async {
+    final cached = _rejectionTypeCache;
+    if (cached != null) return cached;
+
+    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+      'action': 'rejectiontypes',
+    });
+    final types = _asList(
+      decoded,
+    ).whereType<Map<String, dynamic>>().map(RejectionType.fromJson).toList();
+    _rejectionTypeCache = types;
+    return types;
+  }
+
+  /// The parts and rejection masters are imported CSVs that change rarely,
+  /// while their pickers are opened constantly — so each is fetched once and
+  /// reused for the rest of the session. Static because every screen builds
+  /// its own [SheetsService]. (Re-imported a CSV? Restart the app.)
   static final Map<String, List<PartCode>> _partCodeCache = {};
+  static List<RejectionType>? _rejectionTypeCache;
 
   @visibleForTesting
-  static void clearPartCodeCache() => _partCodeCache.clear();
+  static void clearMasterCaches() {
+    _partCodeCache.clear();
+    _rejectionTypeCache = null;
+  }
 
   // ---------- Config: manage groups/parts/lines ----------
 

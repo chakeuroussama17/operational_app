@@ -2,19 +2,18 @@
 ///
 /// One level deeper than Casting/Secondary: Customer -> Part -> Line -> entry
 /// (keyed by Customer + PartNo + Line + shift-date). Shift-aware like the
-/// others (Day 8AM-6PM / Night 8PM-6AM crossing midnight), MO number per part,
-/// and each time slot also carries a Rejection count alongside Output and its
-/// computed LOR%.
+/// others (Day 8AM-6PM / Night 8PM-6AM crossing midnight), MO number per part.
+///
+/// Rejections are NOT per slot — they're a typed list for the whole entry
+/// ("5 POROSITY, 2 COLD SHUT"), posted as `Rejections` and stored in their own
+/// sheet. See [RejectionEntry] in models/rejection.dart.
 library;
+
+import 'rejection.dart';
 
 /// One of the six checkpoints logged for a given shift.
 class MachiningSlot {
-  const MachiningSlot(
-    this.label,
-    this.outputKey,
-    this.lorKey,
-    this.rejectionKey,
-  );
+  const MachiningSlot(this.label, this.outputKey, this.lorKey);
 
   final String label;
 
@@ -23,29 +22,26 @@ class MachiningSlot {
 
   /// Column/field name of the backend-computed LOR%, e.g. "Output_LOR10AM".
   final String lorKey;
-
-  /// Column/field name of the user-entered rejection count, e.g. "Rejection_10AM".
-  final String rejectionKey;
 }
 
 /// Day shift: 8AM-6PM.
 const List<MachiningSlot> machiningDaySlots = [
-  MachiningSlot('8 AM', 'Output_8AM', 'Output_LOR8AM', 'Rejection_8AM'),
-  MachiningSlot('10 AM', 'Output_10AM', 'Output_LOR10AM', 'Rejection_10AM'),
-  MachiningSlot('12 PM', 'Output_12PM', 'Output_LOR12PM', 'Rejection_12PM'),
-  MachiningSlot('2 PM', 'Output_2PM', 'Output_LOR2PM', 'Rejection_2PM'),
-  MachiningSlot('4 PM', 'Output_4PM', 'Output_LOR4PM', 'Rejection_4PM'),
-  MachiningSlot('6 PM', 'Output_6PM', 'Output_LOR6PM', 'Rejection_6PM'),
+  MachiningSlot('8 AM', 'Output_8AM', 'Output_LOR8AM'),
+  MachiningSlot('10 AM', 'Output_10AM', 'Output_LOR10AM'),
+  MachiningSlot('12 PM', 'Output_12PM', 'Output_LOR12PM'),
+  MachiningSlot('2 PM', 'Output_2PM', 'Output_LOR2PM'),
+  MachiningSlot('4 PM', 'Output_4PM', 'Output_LOR4PM'),
+  MachiningSlot('6 PM', 'Output_6PM', 'Output_LOR6PM'),
 ];
 
 /// Night shift: 8PM-6AM, crossing midnight.
 const List<MachiningSlot> machiningNightSlots = [
-  MachiningSlot('8 PM', 'Output_8PM', 'Output_LOR8PM', 'Rejection_8PM'),
-  MachiningSlot('10 PM', 'Output_10PM', 'Output_LOR10PM', 'Rejection_10PM'),
-  MachiningSlot('12 AM', 'Output_12AM', 'Output_LOR12AM', 'Rejection_12AM'),
-  MachiningSlot('2 AM', 'Output_2AM', 'Output_LOR2AM', 'Rejection_2AM'),
-  MachiningSlot('4 AM', 'Output_4AM', 'Output_LOR4AM', 'Rejection_4AM'),
-  MachiningSlot('6 AM', 'Output_6AM', 'Output_LOR6AM', 'Rejection_6AM'),
+  MachiningSlot('8 PM', 'Output_8PM', 'Output_LOR8PM'),
+  MachiningSlot('10 PM', 'Output_10PM', 'Output_LOR10PM'),
+  MachiningSlot('12 AM', 'Output_12AM', 'Output_LOR12AM'),
+  MachiningSlot('2 AM', 'Output_2AM', 'Output_LOR2AM'),
+  MachiningSlot('4 AM', 'Output_4AM', 'Output_LOR4AM'),
+  MachiningSlot('6 AM', 'Output_6AM', 'Output_LOR6AM'),
 ];
 
 List<MachiningSlot> machiningSlotsForShift(String shift) =>
@@ -134,6 +130,17 @@ class MachiningRow {
 
   /// Cell as a display/edit string, or null when empty. "300.0" -> "300".
   String? value(String key) => cleanCell(raw[key]);
+
+  /// This entry's defect list, sent alongside the row. Empty when none were
+  /// logged (or when an older backend didn't send the field).
+  List<RejectionEntry> get rejections {
+    final raw = this.raw['Rejections'];
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((m) => RejectionEntry.fromJson(m.cast<String, dynamic>()))
+        .toList();
+  }
 
   /// LOR cell formatted for the read-only badge, e.g. "10%".
   ///

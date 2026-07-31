@@ -71,26 +71,17 @@
  *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
  *
  * Machining (shift-split like the others — two tabs, keyed Customer+PartNo+
- * Line+shift-date, MO per part, plus a Rejection_ count per slot. Run
- * setupMachiningShiftSheets() once):
+ * Line+shift-date, MO per part. Run setupMachiningShiftSheets() once):
  *
- *   Machining_Day (Day shift, checkpoints 8AM-6PM):
- *     Date | Customer | PartNo | Line | MO | Plan |
- *     Output_8AM  | Output_LOR8AM  | Rejection_8AM  |
- *     Output_10AM | Output_LOR10AM | Rejection_10AM |
- *     Output_12PM | Output_LOR12PM | Rejection_12PM |
- *     Output_2PM  | Output_LOR2PM  | Rejection_2PM  |
- *     Output_4PM  | Output_LOR4PM  | Rejection_4PM  |
- *     Output_6PM  | Output_LOR6PM  | Rejection_6PM  | LastUpdated
+ *   Machining_Day (Day shift, checkpoints 8AM-6PM) / Machining_Night (8PM-6AM):
+ *     Date | Customer | PartNo | Line | Barcode | PartName | MO | Plan |
+ *     Output_<slot> | Output_LOR<slot> (x6) | LastUpdated
  *
- *   Machining_Night (Night shift, checkpoints 8PM-6AM crossing midnight):
- *     Date | Customer | PartNo | Line | MO | Plan |
- *     Output_8PM  | Output_LOR8PM  | Rejection_8PM  |
- *     Output_10PM | Output_LOR10PM | Rejection_10PM |
- *     Output_12AM | Output_LOR12AM | Rejection_12AM |
- *     Output_2AM  | Output_LOR2AM  | Rejection_2AM  |
- *     Output_4AM  | Output_LOR4AM  | Rejection_4AM  |
- *     Output_6AM  | Output_LOR6AM  | Rejection_6AM  | LastUpdated
+ *   Machining_Rejections — rejections are a typed LIST per entry, not one
+ *   number per slot, so they live here, one row per defect type:
+ *     Date | Shift | Customer | PartNo | Line | Barcode | PartName | MO |
+ *     RejectionCode | RejectionType | Qty | LastUpdated
+ *   The app always posts the whole list, which replaces that entry's rows.
  *
  * After editing: Deploy > New deployment (editing an existing deployment's
  * version has not reliably gone live in testing — always cut a new one).
@@ -104,6 +95,22 @@ var CONFIG_SHEET = 'Config';
 // module's Department; the chosen code's Part number (barcode) and Part name
 // are snapshotted onto the Config part row and every logged data row.
 var PARTS_SHEET = 'Parts';
+
+// Master defect list, imported from the plant CSV. The export carries a title
+// line above the real header, so the reader finds the header row rather than
+// assuming row 1 (see getRejectionTypes).
+var REJECTION_TYPES_SHEET = 'RejectionTypes';
+
+// Machining rejections are a LIST per entry (5 POROSITY, 2 COLD SHUT, ...),
+// not one number per time slot, so they get their own fact table: one row per
+// defect type per Customer+Part+Line+shift+date. That keeps the shape open
+// ended and makes "which defect costs us most" a plain pivot.
+var MACHINING_REJECTIONS_SHEET = 'Machining_Rejections';
+
+function machiningRejectionHeaders() {
+  return ['Date', 'Shift', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName',
+    'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated'];
+}
 
 // Which "Department" value in the Parts master belongs to each app module.
 function moduleDepartment(module) {
@@ -119,8 +126,8 @@ function moduleDepartment(module) {
 // Secondary_Day/Secondary_Night, Machining_Day/Machining_Night) so every row
 // holds only its shift's six checkpoints — no half-empty rows, and no Shift
 // column (the tab the row lives in IS the shift). Column prefixes differ per
-// module (Casting Output_/Output_LOR; Secondary Actual_/LOR_; Machining
-// Output_/Output_LOR + Rejection_) but the slot TIMES are identical.
+// module (Casting and Machining Output_/Output_LOR; Secondary Actual_/LOR_)
+// but the slot TIMES are identical.
 var CASTING_DAY_SHEET = 'Casting_Day';
 var CASTING_NIGHT_SHEET = 'Casting_Night';
 var SECONDARY_DAY_SHEET = 'Secondary_Day';
@@ -179,13 +186,13 @@ function castingHeadersForShift(shift) {
 }
 
 // Header frame for a Machining shift sheet — like Casting but one level
-// deeper (Line) and with a Rejection_ column alongside each slot's output.
+// deeper (Line). Rejections used to be one count per time slot; they are now
+// a typed list in MACHINING_REJECTIONS_SHEET, so this frame is output-only.
 function machiningHeadersForShift(shift) {
   var headers = ['Date', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
-    headers.push('Rejection_' + slot);
   });
   headers.push('LastUpdated');
   return headers;
@@ -228,7 +235,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'PARTS-MASTER-v6';
+var BACKEND_VERSION = 'REJECTION-LIST-v7';
 
 function doGet(e) {
   try {
@@ -238,6 +245,7 @@ function doGet(e) {
     if (action === 'config') return jsonResponse(getConfigSnapshot(module));
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
     if (action === 'partcodes') return jsonResponse(getPartMaster(module));
+    if (action === 'rejectiontypes') return jsonResponse(getRejectionTypes());
 
     if (module === 'machining') {
       // Machining is now shift-aware too (Machining_Day/Machining_Night) and
@@ -624,6 +632,69 @@ function getPartMaster(module) {
   return { status: 'success', data: out };
 }
 
+// ---------- Rejection types master ----------
+//
+// Feeds the defect-type picker on the Machining entry screen. The CSV export
+// looks like:
+//     REJECTION CODES/CAUSE CODES        <- title line
+//     REJECTION CODES | REJECTION TYPE   <- the actual header
+//     001             | ALARM
+// so rather than assuming row 1 is the header, scan the first few rows for it.
+// That way the sheet works whether or not the title line was deleted.
+function getRejectionTypes() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REJECTION_TYPES_SHEET);
+  if (!sheet) {
+    return { status: 'error', message: REJECTION_TYPES_SHEET + ' sheet not found — create it and import the rejection CSV' };
+  }
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) {
+    return { status: 'error', message: 'The ' + REJECTION_TYPES_SHEET + ' sheet is empty — import the rejection CSV into it' };
+  }
+  var values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+
+  var headerRow = -1, typeCol = -1, codeCol = -1;
+  for (var i = 0; i < Math.min(values.length, 10) && headerRow === -1; i++) {
+    for (var j = 0; j < values[i].length; j++) {
+      var cell = String(values[i][j]).trim().toUpperCase();
+      if (cell === 'REJECTION TYPE') { headerRow = i; typeCol = j; }
+      if (cell === 'REJECTION CODES' || cell === 'REJECTION CODE') { codeCol = j; }
+    }
+  }
+  if (headerRow === -1) {
+    return {
+      status: 'error',
+      message: 'No "REJECTION TYPE" header found in ' + REJECTION_TYPES_SHEET +
+        ' — the sheet needs a header row with REJECTION CODES and REJECTION TYPE',
+    };
+  }
+  if (codeCol === -1) codeCol = typeCol > 0 ? typeCol - 1 : 0;
+
+  var out = [], seen = {};
+  for (var r = headerRow + 1; r < values.length; r++) {
+    var type = String(values[r][typeCol]).trim();
+    if (!type) continue;
+    var code = padRejectionCode(values[r][codeCol]);
+    // A few names repeat under different codes (FOLDED is 153 and 179), so the
+    // code is part of the identity.
+    var key = code + '|' + type;
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push({ code: code, type: type });
+  }
+  return { status: 'success', data: out };
+}
+
+// A CSV import reads "001" as the number 1 — put the leading zeros back so the
+// code still matches the printed defect list.
+function padRejectionCode(raw) {
+  if (raw === null || raw === undefined) return '';
+  var s = String(raw).trim();
+  if (s === '') return '';
+  if (/^\d+$/.test(s) && s.length < 3) s = ('00' + s).slice(-3);
+  return s;
+}
+
 function lookupMasterPart(module, code) {
   var dept = moduleDepartment(String(module || '').toLowerCase());
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTS_SHEET);
@@ -712,8 +783,8 @@ function editPartWithMo(module, payload) {
 //
 // Now mirrors Casting/Secondary: two per-shift sheets (Machining_Day/
 // Machining_Night), keyed by Customer + PartNo + Line + shift-date. Adds the
-// Line dimension and a Rejection_ count per slot. MO is per-PART (scoped to
-// Customer+Part) and so is shared across all of that part's lines.
+// Line dimension; rejections are a typed list in MACHINING_REJECTIONS_SHEET.
+// MO is per-PART (scoped to Customer+Part), shared across that part's lines.
 
 function getMachiningDashboard(shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
@@ -793,6 +864,8 @@ function getMachiningRow(customer, part, line, shift) {
   });
   if (!match) return { status: 'success', data: null };
   delete match._rowNum;
+  // The entry screen edits the defect list in place, so it ships with the row.
+  match.Rejections = getMachiningRejections(customer, part, line, shift);
   return { status: 'success', data: match };
 }
 
@@ -833,7 +906,6 @@ function upsertMachiningRow(data) {
   slots.forEach(function (slot) {
     var outKey = 'Output_' + slot;
     var lorKey = 'Output_LOR' + slot;
-    var rejKey = 'Rejection_' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
       var plan = parseFloat(merged.Plan);
@@ -841,9 +913,6 @@ function upsertMachiningRow(data) {
       if (plan > 0 && !isNaN(output)) {
         merged[lorKey] = Math.round((output / plan) * 100) + '%';
       }
-    }
-    if (data[rejKey] !== undefined && data[rejKey] !== '') {
-      merged[rejKey] = data[rejKey];
     }
   });
 
@@ -857,11 +926,89 @@ function upsertMachiningRow(data) {
   } else {
     sheet.appendRow(rowArray);
   }
+
+  saveMachiningRejections(data, shift, shiftDate, merged);
+
   return {
     status: 'success',
     version: BACKEND_VERSION,
     message: existing ? 'Row updated (same row)' : 'Row created',
   };
+}
+
+// ---------- Machining: the rejection list ----------
+//
+// The app sends the WHOLE list as `data.Rejections` (a JSON array of
+// {code, type, qty}), so this replaces every row for that entry rather than
+// merging: deleting a line in the app has to delete it in the sheet too.
+// A missing field means "not edited" and is left alone; an empty array clears.
+function saveMachiningRejections(data, shift, shiftDate, row) {
+  if (data.Rejections === undefined || data.Rejections === null) return;
+
+  var list;
+  try {
+    list = typeof data.Rejections === 'string' ? JSON.parse(data.Rejections) : data.Rejections;
+  } catch (e) {
+    return; // malformed payload — never wipe the existing list over it
+  }
+  if (Object.prototype.toString.call(list) !== '[object Array]') return;
+
+  var sheet = requireSheet(MACHINING_REJECTIONS_SHEET, setupMachiningShiftSheets);
+  var headers = getHeaders(sheet);
+
+  var stale = getAllRowsAsObjects(sheet).filter(function (r) {
+    return String(r.Customer) === String(data.Customer) &&
+      String(r.PartNo) === String(data.PartNo) &&
+      String(r.Line) === String(data.Line) &&
+      String(r.Shift) === shift &&
+      formatDateOnly(r.Date) === shiftDate;
+  });
+  if (stale.length) deleteSheetRows(sheet, stale);
+
+  var now = new Date();
+  list.forEach(function (item) {
+    var qty = String(item && item.qty !== undefined ? item.qty : '').trim();
+    var type = String(item && item.type !== undefined ? item.type : '').trim();
+    if (!qty || !type) return; // half-filled UI row — nothing to record
+    var out = {
+      Date: shiftDate,
+      Shift: shift,
+      Customer: data.Customer,
+      PartNo: data.PartNo,
+      Line: data.Line,
+      Barcode: row.Barcode || '',
+      PartName: row.PartName || '',
+      MO: row.MO || '',
+      RejectionCode: padRejectionCode(item.code),
+      RejectionType: type,
+      Qty: qty,
+      LastUpdated: now,
+    };
+    sheet.appendRow(headers.map(function (h) {
+      return out.hasOwnProperty(h) ? out[h] : '';
+    }));
+  });
+}
+
+function getMachiningRejections(customer, part, line, shift) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MACHINING_REJECTIONS_SHEET);
+  if (!sheet || getHeaders(sheet).length === 0) return [];
+  var shiftDate = getShiftDate(shift);
+  return getAllRowsAsObjects(sheet)
+    .filter(function (r) {
+      return String(r.Customer) === String(customer) &&
+        String(r.PartNo) === String(part) &&
+        String(r.Line) === String(line) &&
+        String(r.Shift) === shift &&
+        formatDateOnly(r.Date) === shiftDate;
+    })
+    .map(function (r) {
+      return {
+        code: padRejectionCode(r.RejectionCode),
+        type: String(r.RejectionType === undefined ? '' : r.RejectionType),
+        qty: String(r.Qty === undefined ? '' : r.Qty),
+      };
+    });
 }
 
 // ---------- Config: reads (drives every group/part/line list) ----------
@@ -1002,10 +1149,6 @@ function getAnalytics(module, days) {
   var timeSlots = DAY_SLOTS.concat(NIGHT_SLOTS);
   var outputKeys = timeSlots.map(function (s) { return outputPrefix + s; });
   var lorKeys = timeSlots.map(function (s) { return lorPrefix + s; });
-  var rejectionKeys = (module === 'machining')
-    ? timeSlots.map(function (s) { return 'Rejection_' + s; })
-    : [];
-
   var byDate = {};
   dateKeys.forEach(function (dk) {
     byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0 };
@@ -1038,11 +1181,21 @@ function getAnalytics(module, days) {
       bucket.lorCount += 1;
     });
 
-    rejectionKeys.forEach(function (k) {
-      var v = parseFloat(r[k]);
-      if (!isNaN(v)) bucket.rejection += v;
-    });
   });
+
+  // Machining rejections are their own fact table now (one row per defect
+  // type), so they're totalled per date from there instead of off the row.
+  if (module === 'machining') {
+    var rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MACHINING_REJECTIONS_SHEET);
+    if (rejSheet && getHeaders(rejSheet).length > 0) {
+      getAllRowsAsObjects(rejSheet).forEach(function (r) {
+        var dk = formatDateOnly(r.Date);
+        if (!byDate.hasOwnProperty(dk)) return;
+        var qty = parseFloat(r.Qty);
+        if (!isNaN(qty)) byDate[dk].rejection += qty;
+      });
+    }
+  }
 
   var output = [];
   var lorPercent = [];
@@ -1117,7 +1270,7 @@ function configMutate(payload) {
         return String(r.Module).toLowerCase() === module && String(r.Group || '') === value;
       });
       if (toDelete.length === 0) return { status: 'error', message: 'Not found' };
-      deleteConfigRows(sheet, toDelete);
+      deleteSheetRows(sheet, toDelete);
       return { status: 'success', version: BACKEND_VERSION, message: 'Deleted group and its parts' };
     }
     var target = rows.filter(function (r) {
@@ -1125,7 +1278,7 @@ function configMutate(payload) {
         String(r.Group || '') === group && String(r.Value || '') === value;
     });
     if (target.length === 0) return { status: 'error', message: 'Not found' };
-    deleteConfigRows(sheet, target);
+    deleteSheetRows(sheet, target);
     return { status: 'success', version: BACKEND_VERSION, message: 'Deleted' };
   }
 
@@ -1155,7 +1308,8 @@ function configMutate(payload) {
 
 // Deletes rows bottom-to-top so earlier row numbers stay valid as later
 // deletes shift the sheet up.
-function deleteConfigRows(sheet, rowsToDelete) {
+// Deletes rows bottom-up so earlier deletions don't shift later row numbers.
+function deleteSheetRows(sheet, rowsToDelete) {
   var rowNums = rowsToDelete
     .map(function (r) { return r._rowNum; })
     .sort(function (a, b) { return b - a; });
@@ -1238,6 +1392,7 @@ function setupMachiningShiftSheets() {
   createShiftSheets([
     { name: MACHINING_DAY_SHEET, headers: machiningHeadersForShift('Day') },
     { name: MACHINING_NIGHT_SHEET, headers: machiningHeadersForShift('Night') },
+    { name: MACHINING_REJECTIONS_SHEET, headers: machiningRejectionHeaders() },
   ]);
 }
 
@@ -1259,6 +1414,7 @@ function migrateColumnOrder() {
     reorderSheet(SECONDARY_NIGHT_SHEET, secondaryHeadersForShift('Night')),
     reorderSheet(MACHINING_DAY_SHEET, machiningHeadersForShift('Day')),
     reorderSheet(MACHINING_NIGHT_SHEET, machiningHeadersForShift('Night')),
+    reorderSheet(MACHINING_REJECTIONS_SHEET, machiningRejectionHeaders()),
     reorderSheet(CONFIG_SHEET, CONFIG_HEADERS),
   ];
   Logger.log(log.join('\n'));

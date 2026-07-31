@@ -213,11 +213,14 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day shift slots run 8 AM - 6 PM.
+    // Day shift slots run 8 AM - 6 PM, outputs only — rejections are no longer
+    // per slot but a typed list at the bottom.
     expect(find.text('Output — 8 AM'), findsOneWidget);
-    expect(find.text('Rejection — 10 AM'), findsOneWidget);
     expect(find.text('Output — 6 PM'), findsOneWidget);
     expect(find.text('LOR'), findsNWidgets(6));
+    expect(find.textContaining('Rejection — '), findsNothing);
+    expect(find.text('Rejections'), findsOneWidget);
+    expect(find.text('ADD REJECTION'), findsOneWidget);
 
     // Submitting with no values entered is a no-op with a hint.
     await tester.dragUntilVisible(
@@ -236,6 +239,58 @@ void main() {
     expect(find.textContaining('Server error (400)'), findsWidgets);
 
     // Let snackbar timers elapse so the test ends cleanly.
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: rejection rows can be added and removed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          line: 'FY2',
+          shift: 'Day',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Qty'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.text('ADD REJECTION'),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.text('ADD REJECTION'));
+    await tester.pumpAndSettle();
+
+    // A row is a quantity plus an unset defect-type field.
+    expect(find.text('Qty'), findsOneWidget);
+    expect(find.text('Select type'), findsOneWidget);
+    expect(find.text('ADD ANOTHER'), findsOneWidget);
+
+    await tester.tap(find.text('ADD ANOTHER'));
+    await tester.pumpAndSettle();
+    expect(find.text('Qty'), findsNWidgets(2));
+
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Qty'), findsOneWidget);
+
+    // An empty row is incomplete, so there is still nothing to save.
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing new to save yet.'), findsOneWidget);
+
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
   });

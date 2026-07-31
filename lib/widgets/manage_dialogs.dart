@@ -51,17 +51,17 @@ class PartWithMoInput {
   final String mo;
 }
 
-/// Add/edit dialog for a part. On ADD, the part code is chosen from [codes]
-/// (the module's master list) via a type-to-search field — no free typing of
-/// new codes. On EDIT ([lockCode] = true) the code is fixed and only the MO
-/// can change. Returns null if cancelled or no code was chosen.
+/// Add/edit dialog for a part. The part code is chosen from [codes] (the
+/// module's master list) via a type-to-search field — no free typing of new
+/// codes. On edit, [initialCode] pre-fills the current code and can be
+/// changed (the backend re-resolves the barcode/name for the new code).
+/// Returns null if cancelled or no code was chosen.
 Future<PartWithMoInput?> promptPartCode(
   BuildContext context, {
   required String title,
   List<String> codes = const [],
   String? initialCode,
   String? initialMo,
-  bool lockCode = false,
 }) async {
   final moController = TextEditingController(text: initialMo ?? '');
   var selectedCode = initialCode ?? '';
@@ -77,7 +77,7 @@ Future<PartWithMoInput?> promptPartCode(
             setState(() => error = 'Choose a part code');
             return;
           }
-          if (!lockCode && codes.isNotEmpty && !codes.contains(code)) {
+          if (codes.isNotEmpty && !codes.contains(code)) {
             setState(() => error = 'Pick a code from the list');
             return;
           }
@@ -92,43 +92,32 @@ Future<PartWithMoInput?> promptPartCode(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (lockCode)
-                InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Part code'),
-                  child: Text(
-                    selectedCode,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                )
-              else
-                Autocomplete<String>(
-                  optionsBuilder: (value) {
-                    final q = value.text.trim().toLowerCase();
-                    if (q.isEmpty) return codes;
-                    return codes.where((c) => c.toLowerCase().contains(q));
-                  },
-                  onSelected: (c) => setState(() {
-                    selectedCode = c;
-                    error = null;
-                  }),
-                  fieldViewBuilder:
-                      (ctx, textController, focusNode, onFieldSubmitted) {
-                        return TextField(
-                          controller: textController,
-                          focusNode: focusNode,
-                          autofocus: true,
-                          decoration: InputDecoration(
-                            labelText: 'Part code',
-                            helperText: 'Type to search · choose from the list',
-                            errorText: error,
-                          ),
-                          onChanged: (v) => selectedCode = v,
-                        );
-                      },
-                ),
+              Autocomplete<String>(
+                initialValue: TextEditingValue(text: initialCode ?? ''),
+                optionsBuilder: (value) {
+                  final q = value.text.trim().toLowerCase();
+                  if (q.isEmpty) return codes;
+                  return codes.where((c) => c.toLowerCase().contains(q));
+                },
+                onSelected: (c) => setState(() {
+                  selectedCode = c;
+                  error = null;
+                }),
+                fieldViewBuilder:
+                    (ctx, textController, focusNode, onFieldSubmitted) {
+                      return TextField(
+                        controller: textController,
+                        focusNode: focusNode,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          labelText: 'Part code',
+                          helperText: 'Type to search · choose from the list',
+                          errorText: error,
+                        ),
+                        onChanged: (v) => selectedCode = v,
+                      );
+                    },
+              ),
               const SizedBox(height: 14),
               TextField(
                 controller: moController,

@@ -593,6 +593,13 @@ function getPartMaster(module) {
   if (!sheet) {
     return { status: 'error', message: PARTS_SHEET + ' sheet not found — create it and import the parts CSV' };
   }
+  if (getHeaders(sheet).length === 0) {
+    return {
+      status: 'error',
+      message: 'The ' + PARTS_SHEET + ' sheet is empty — import the parts CSV into it ' +
+        '(if the import made its own tab, delete this one and rename that tab to ' + PARTS_SHEET + ')',
+    };
+  }
   var rows = getAllRowsAsObjects(sheet);
   var seen = {};
   var out = [];
@@ -1253,8 +1260,13 @@ function requireSheet(sheetName, setupFn) {
 // silently break column matching — the #1 cause of blank Date / new-row-each-
 // submit. Values are still written positionally, so trimming is safe.
 function getHeaders(sheet) {
+  // A brand-new/empty tab has lastColumn 0, and getRange(...,0) throws
+  // "The number of columns in the range must be at least 1" — report it as
+  // "no headers" so callers can raise a message that says what to actually do.
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return [];
   return sheet
-    .getRange(1, 1, 1, sheet.getLastColumn())
+    .getRange(1, 1, 1, lastCol)
     .getValues()[0]
     .map(function (h) {
       return String(h).trim();

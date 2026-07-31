@@ -117,13 +117,14 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Future<void> _editPart(PartStatus part) async {
-    // The part code is fixed on edit (it keys the logged rows); only MO changes.
+    final codes = await _availableCodes();
+    if (codes == null || !mounted) return;
     final input = await promptPartCode(
       context,
       title: 'Edit Part',
+      codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
-      lockCode: true,
     );
     if (input == null) return;
     await _mutate(

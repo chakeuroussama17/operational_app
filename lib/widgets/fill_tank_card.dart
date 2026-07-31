@@ -71,16 +71,22 @@ class FillTankCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textSecondary,
-                          shadows: const [
-                            Shadow(color: Colors.white70, blurRadius: 6),
-                          ],
+                      // Part names off the master list can be long — clamp them
+                      // so the tile never overflows its fixed square.
+                      Flexible(
+                        child: Text(
+                          subtitle,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textSecondary,
+                            shadows: const [
+                              Shadow(color: Colors.white70, blurRadius: 6),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(height: 2),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
+import '../models/part_code.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
@@ -144,7 +145,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
 
   /// Part codes for Secondary (from the Parts master), or null after telling
   /// the user why the picker can't open.
-  Future<List<String>?> _availableCodes() async {
+  Future<List<PartCode>?> _availableCodes() async {
     try {
       final codes = await _sheetsService.fetchPartCodes('secondary');
       if (!mounted) return null;
@@ -152,7 +153,7 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
         _snack('No Secondary part codes found — import the Parts sheet first.');
         return null;
       }
-      return codes.map((c) => c.code).toList();
+      return codes;
     } on SheetsSubmissionException catch (error) {
       if (!mounted) return null;
       _snack(error.message);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 import '../models/casting_models.dart';
+import '../models/part_code.dart';
 import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
 import '../widgets/card_menu_button.dart';
@@ -139,7 +140,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
 
   /// Part codes for Casting (from the Parts master), or null after telling the
   /// user why the picker can't open.
-  Future<List<String>?> _availableCodes() async {
+  Future<List<PartCode>?> _availableCodes() async {
     try {
       final codes = await _sheetsService.fetchPartCodes('casting');
       if (!mounted) return null;
@@ -147,7 +148,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         _snack('No Casting part codes found — import the Parts sheet first.');
         return null;
       }
-      return codes.map((c) => c.code).toList();
+      return codes;
     } on SheetsSubmissionException catch (error) {
       if (!mounted) return null;
       _snack(error.message);

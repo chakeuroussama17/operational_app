@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/constants.dart';
@@ -384,14 +385,28 @@ class SheetsService {
   /// sheet filtered by Department. Feeds the add-part dropdown; picking a code
   /// tells the backend which barcode + name to snapshot onto the row.
   Future<List<PartCode>> fetchPartCodes(String module) async {
+    final cached = _partCodeCache[module];
+    if (cached != null) return cached;
+
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'partcodes',
       'module': module,
     });
-    return _asList(
+    final codes = _asList(
       decoded,
     ).whereType<Map<String, dynamic>>().map(PartCode.fromJson).toList();
+    _partCodeCache[module] = codes;
+    return codes;
   }
+
+  /// The parts master is an imported CSV that changes rarely, while the picker
+  /// is opened constantly — so each module's list is fetched once and reused
+  /// for the rest of the session. Static because every screen builds its own
+  /// [SheetsService]. (Re-imported the CSV? Restart the app.)
+  static final Map<String, List<PartCode>> _partCodeCache = {};
+
+  @visibleForTesting
+  static void clearPartCodeCache() => _partCodeCache.clear();
 
   // ---------- Config: manage groups/parts/lines ----------
 

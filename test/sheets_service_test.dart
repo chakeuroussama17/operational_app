@@ -640,6 +640,10 @@ void main() {
   });
 
   group('parts master API', () {
+    // fetchPartCodes memoises per module for the session — otherwise the first
+    // test here would satisfy the second one from cache.
+    setUp(SheetsService.clearPartCodeCache);
+
     test(
       'fetchPartCodes: passes action+module, parses code/barcode/name',
       () async {
@@ -669,6 +673,29 @@ void main() {
         expect(codes[1].code, '6154');
       },
     );
+
+    test('fetchPartCodes: second call is served from cache', () async {
+      var requests = 0;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requests++;
+          return http.Response(
+            '{"status":"success","data":[{"code":"1143","barcode":"1143-YAM-C","name":"CRANKCASE"}]}',
+            200,
+          );
+        }),
+      );
+
+      final first = await service.fetchPartCodes('casting');
+      final second = await service.fetchPartCodes('casting');
+
+      expect(requests, 1, reason: 'the master list is fetched once per module');
+      expect(second, same(first));
+
+      // A different module is a separate entry, so it still goes to the wire.
+      await service.fetchPartCodes('machining');
+      expect(requests, 2);
+    });
 
     test('fetchPartCodes: surfaces a missing-Parts-sheet error', () async {
       final service = SheetsService(

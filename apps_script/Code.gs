@@ -161,44 +161,51 @@ function getMachiningSheetForShift(shift) {
 }
 
 // Header frame for a Casting shift sheet, built from that shift's slots.
-// Barcode (the CSV "Part number") and PartName are appended at the END of
-// every data frame — never inserted mid-frame — so re-running the setup
-// migration on a sheet that already has data leaves every existing column in
-// place and just adds two empty trailing columns.
+// The part's identity columns (PartNo = master code, Barcode = the CSV "Part
+// number", PartName) sit together right after the machine/station selector,
+// then MO and Plan, then the slots, with LastUpdated last.
+//
+// Everything reads and writes by header NAME, so this order is purely for
+// humans reading the sheet — but existing tabs must be physically rearranged
+// to match: run migrateColumnOrder() once (see below).
 function castingHeadersForShift(shift) {
-  var headers = ['Date', 'DCM', 'PartNo', 'MO', 'Plan'];
+  var headers = ['Date', 'DCM', 'PartNo', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
-  headers.push('LastUpdated', 'Barcode', 'PartName');
+  headers.push('LastUpdated');
   return headers;
 }
 
 // Header frame for a Machining shift sheet — like Casting but one level
 // deeper (Line) and with a Rejection_ column alongside each slot's output.
 function machiningHeadersForShift(shift) {
-  var headers = ['Date', 'Customer', 'PartNo', 'Line', 'MO', 'Plan'];
+  var headers = ['Date', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
     headers.push('Rejection_' + slot);
   });
-  headers.push('LastUpdated', 'Barcode', 'PartName');
+  headers.push('LastUpdated');
   return headers;
 }
 
 // Header frame for a Secondary shift sheet — same shape as Casting but keyed
 // by Station and using the Actual_/LOR_ column prefixes.
 function secondaryHeadersForShift(shift) {
-  var headers = ['Date', 'Station', 'PartNo', 'MO', 'Plan'];
+  var headers = ['Date', 'Station', 'PartNo', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
   });
-  headers.push('LastUpdated', 'Barcode', 'PartName');
+  headers.push('LastUpdated');
   return headers;
 }
+
+// Config's own frame: the part's identity (Value = code, Barcode, PartName)
+// grouped, with the monthly MO last since it's the one that gets edited.
+var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Barcode', 'PartName', 'MO'];
 
 // The "business date" a shift row belongs to. Day shift never crosses
 // midnight, so it's always today. Night shift starts in the evening and
@@ -221,7 +228,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'PARTS-MASTER-v5';
+var BACKEND_VERSION = 'PARTS-MASTER-v6';
 
 function doGet(e) {
   try {
@@ -600,7 +607,7 @@ function getPartMaster(module) {
         '(if the import made its own tab, delete this one and rename that tab to ' + PARTS_SHEET + ')',
     };
   }
-  var rows = getAllRowsAsObjects(sheet);
+  var rows = getPartsMasterRows(sheet);
   var seen = {};
   var out = [];
   rows.forEach(function (r) {
@@ -620,9 +627,9 @@ function getPartMaster(module) {
 function lookupMasterPart(module, code) {
   var dept = moduleDepartment(String(module || '').toLowerCase());
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTS_SHEET);
-  if (!sheet) return { barcode: '', name: '' };
+  if (!sheet || getHeaders(sheet).length === 0) return { barcode: '', name: '' };
   var wanted = String(code).trim();
-  var match = getAllRowsAsObjects(sheet).find(function (r) {
+  var match = getPartsMasterRows(sheet).find(function (r) {
     return String(r.Department || '').toLowerCase().trim() === dept &&
       String(r['Part code'] === undefined ? '' : r['Part code']).trim() === wanted;
   });
@@ -639,6 +646,7 @@ function writeConfigRow(sheet, obj) {
   var headers = getHeaders(sheet);
   var arr = headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
   sheet.appendRow(arr);
+  invalidateCaches();
 }
 
 // Shared by all three modules. `payload.part` is now a Part CODE chosen from
@@ -696,6 +704,7 @@ function editPartWithMo(module, payload) {
     if (nameCol > 0) sheet.getRange(match._rowNum, nameCol).setValue(info.name);
   }
   if (mo !== null && moCol > 0) sheet.getRange(match._rowNum, moCol).setValue(mo);
+  invalidateCaches();
   return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
 
@@ -863,8 +872,32 @@ function getConfigSheet() {
   return sheet;
 }
 
+// ---------- Per-request caches ----------
+//
+// Apps Script gives every request a fresh process, so these live only for the
+// current call — there is no cross-request staleness to worry about.
+//
+// They matter a lot: getConfigPartInfo runs once PER PART inside each
+// get*Parts, and each call used to re-read the entire Config sheet. A 10-part
+// screen meant 10 full sheet reads; now it's one. Same for the ~380-row Parts
+// master. Sheet reads are by far the slowest thing this script does.
+var _cache = {};
+
+function invalidateCaches() {
+  _cache = {};
+}
+
 function getConfigRows() {
-  return getAllRowsAsObjects(getConfigSheet());
+  if (!_cache.configRows) {
+    _cache.configRows = getAllRowsAsObjects(getConfigSheet());
+  }
+  return _cache.configRows;
+}
+
+// Rows of the Parts master, read at most once per request.
+function getPartsMasterRows(sheet) {
+  if (!_cache.partsRows) _cache.partsRows = getAllRowsAsObjects(sheet);
+  return _cache.partsRows;
 }
 
 // Groups = distinct Group values from "group" rows UNION any Group value
@@ -1129,6 +1162,7 @@ function deleteConfigRows(sheet, rowsToDelete) {
   rowNums.forEach(function (rowNum) {
     sheet.deleteRow(rowNum);
   });
+  invalidateCaches();
 }
 
 // ---------- One-time setup: run manually from the Apps Script editor ----------
@@ -1205,6 +1239,65 @@ function setupMachiningShiftSheets() {
     { name: MACHINING_DAY_SHEET, headers: machiningHeadersForShift('Day') },
     { name: MACHINING_NIGHT_SHEET, headers: machiningHeadersForShift('Night') },
   ]);
+}
+
+// ---------- One-off: rearrange existing tabs into the header order above ----
+//
+// Barcode/PartName were originally appended after LastUpdated so they could be
+// added to live sheets without moving anything. This physically rewrites each
+// tab so the part identity columns sit next to PartNo.
+//
+// Rewriting only row 1 would be data corruption — the values would stay put
+// while the titles above them moved. So every row is re-mapped BY HEADER NAME.
+// Columns not in the target frame are kept at the end rather than dropped.
+// Safe to re-run: a tab already in the right order is left alone.
+function migrateColumnOrder() {
+  var log = [
+    reorderSheet(CASTING_DAY_SHEET, castingHeadersForShift('Day')),
+    reorderSheet(CASTING_NIGHT_SHEET, castingHeadersForShift('Night')),
+    reorderSheet(SECONDARY_DAY_SHEET, secondaryHeadersForShift('Day')),
+    reorderSheet(SECONDARY_NIGHT_SHEET, secondaryHeadersForShift('Night')),
+    reorderSheet(MACHINING_DAY_SHEET, machiningHeadersForShift('Day')),
+    reorderSheet(MACHINING_NIGHT_SHEET, machiningHeadersForShift('Night')),
+    reorderSheet(CONFIG_SHEET, CONFIG_HEADERS),
+  ];
+  Logger.log(log.join('\n'));
+}
+
+function reorderSheet(sheetName, desired) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return 'SKIP (no such tab): ' + sheetName;
+
+  var current = getHeaders(sheet);
+  if (current.length === 0) {
+    sheet.getRange(1, 1, 1, desired.length).setValues([desired]);
+    sheet.setFrozenRows(1);
+    return 'header written: ' + sheetName;
+  }
+
+  // Preserve any column this version doesn't know about.
+  var finalHeaders = desired.slice();
+  current.forEach(function (h) {
+    if (h && finalHeaders.indexOf(h) === -1) finalHeaders.push(h);
+  });
+  if (finalHeaders.join('|') === current.join('|')) {
+    return 'already in order: ' + sheetName;
+  }
+
+  var rows = getAllRowsAsObjects(sheet);
+  var out = [finalHeaders];
+  rows.forEach(function (r) {
+    out.push(finalHeaders.map(function (h) {
+      return r[h] === undefined || r[h] === null ? '' : r[h];
+    }));
+  });
+
+  // Everything is already in memory before anything is cleared.
+  sheet.clearContents();
+  sheet.getRange(1, 1, out.length, finalHeaders.length).setValues(out);
+  sheet.setFrozenRows(1);
+  invalidateCaches();
+  return 'reordered ' + sheetName + ' (' + rows.length + ' data rows)';
 }
 
 function createShiftSheets(specs) {

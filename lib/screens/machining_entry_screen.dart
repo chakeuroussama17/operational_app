@@ -25,6 +25,7 @@ class MachiningEntryScreen extends StatefulWidget {
     required this.line,
     required this.shift,
     this.mo,
+    this.service,
   });
 
   final String customer;
@@ -36,13 +37,17 @@ class MachiningEntryScreen extends StatefulWidget {
   /// Edit it from the part's Edit action on the Parts screen.
   final String? mo;
 
+  /// Test seam: the screen normally builds its own [SheetsService] against the
+  /// real backend; widget tests inject one backed by a mock client instead.
+  final SheetsService? service;
+
   @override
   State<MachiningEntryScreen> createState() => _MachiningEntryScreenState();
 }
 
 class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _sheetsService = SheetsService();
+  late final _sheetsService = widget.service ?? SheetsService();
 
   late final List<MachiningSlot> _slots = machiningSlotsForShift(widget.shift);
 
@@ -64,6 +69,18 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   /// to what is already saved, which is why reopening the screen and typing
   /// again can't double-count.
   final Map<String, List<_RejectionRow>> _slotRows = {};
+
+  /// Hours whose output is already on the sheet. Once logged, an hour is
+  /// history: it shows as a read-only value, not an editable field. Derived
+  /// from the server row on every (re)load, so submitting locks the hours
+  /// that were just saved. Corrections go through the sheet itself.
+  final Set<String> _lockedOutputs = {};
+
+  /// Per-hour rejections that were saved earlier THIS session, shown read-only
+  /// under their hour. The sheet keeps only the per-type totals — the hour is
+  /// not stored — so after the screen is closed this per-hour view is gone and
+  /// history lives in the summary instead.
+  final Map<String, List<RejectionEntry>> _loggedSlotRejections = {};
 
   /// Encoded snapshot of the saved totals, to tell whether they changed.
   String _initialRejections = '[]';
@@ -163,9 +180,13 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       if (!mounted) return;
       setState(() {
         _planController.text = row?.value('Plan') ?? '';
+        _lockedOutputs.clear();
         for (final slot in _slots) {
-          _outputControllers[slot.outputKey]!.text =
-              row?.value(slot.outputKey) ?? '';
+          final saved = row?.value(slot.outputKey);
+          _outputControllers[slot.outputKey]!.text = saved ?? '';
+          if (saved != null && saved.isNotEmpty) {
+            _lockedOutputs.add(slot.outputKey);
+          }
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
         _saved = {
@@ -243,7 +264,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       });
       if (!mounted) return;
       showSaveSuccessSnack(context);
-      // Re-fetch so freshly computed LOR% values appear.
+      // Freeze this session's hourly rejections into read-only history under
+      // their hour, before the reload wipes the editable rows.
+      _captureLoggedRejections();
+      // Re-fetch so freshly computed LOR% values appear and the hours that
+      // were just saved lock.
       await _load();
     } on SheetsSubmissionException catch (error) {
       if (!mounted) return;
@@ -261,6 +286,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   void _removeType(String key) {
     setState(() {
       _saved.remove(key);
+      // Its read-only per-hour lines have to go too, or the hours would still
+      // show a defect the summary no longer counts.
+      for (final list in _loggedSlotRejections.values) {
+        list.removeWhere((entry) => '${entry.code}|${entry.type}' == key);
+      }
       for (final rows in _slotRows.values) {
         for (final row in rows) {
           if ('${row.entry.code}|${row.entry.type}' == key) {
@@ -272,6 +302,42 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         }
       }
     });
+  }
+
+  /// Folds this session's completed hourly entries into the read-only
+  /// per-hour history, merging repeats of the same defect within an hour.
+  void _captureLoggedRejections() {
+    for (final slot in _slots) {
+      for (final row in _slotRows[slot.outputKey] ?? const <_RejectionRow>[]) {
+        final qty = double.tryParse(row.qtyController.text.trim());
+        final type = row.entry.type.trim();
+        if (qty == null || qty == 0 || type.isEmpty) continue;
+        final list = _loggedSlotRejections.putIfAbsent(
+          slot.outputKey,
+          () => [],
+        );
+        RejectionEntry? existing;
+        for (final entry in list) {
+          if (entry.code == row.entry.code && entry.type == type) {
+            existing = entry;
+            break;
+          }
+        }
+        if (existing != null) {
+          existing.qty = _trimNumber(
+            (double.tryParse(existing.qty) ?? 0) + qty,
+          );
+        } else {
+          list.add(
+            RejectionEntry(
+              qty: _trimNumber(qty),
+              code: row.entry.code,
+              type: type,
+            ),
+          );
+        }
+      }
+    }
   }
 
   /// Opens the defect-type picker for one rejection row. The master list
@@ -363,6 +429,9 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           slot: slot,
                           outputController: _outputControllers[slot.outputKey]!,
                           lorLabel: _lors[slot.lorKey],
+                          locked: _lockedOutputs.contains(slot.outputKey),
+                          logged:
+                              _loggedSlotRejections[slot.outputKey] ?? const [],
                           rows: _slotRows[slot.outputKey]!,
                           onPickType: _pickType,
                           onQtyChanged: () => setState(() {}),
@@ -515,11 +584,17 @@ class _RejectionRow {
 /// One time slot: output field + LOR% badge, with that hour's rejections
 /// directly beneath — logged as the hour is logged, rather than collected
 /// separately at the end.
+///
+/// An hour whose output is already on the sheet is history: its value shows
+/// in a read-only box with a lock, and rejections saved for it this session
+/// show as read-only lines. More defects can still be added for that hour.
 class _SlotBlock extends StatelessWidget {
   const _SlotBlock({
     required this.slot,
     required this.outputController,
     required this.lorLabel,
+    required this.locked,
+    required this.logged,
     required this.rows,
     required this.onPickType,
     required this.onQtyChanged,
@@ -530,6 +605,12 @@ class _SlotBlock extends StatelessWidget {
   final MachiningSlot slot;
   final TextEditingController outputController;
   final String? lorLabel;
+
+  /// True when this hour's output is already saved to the sheet.
+  final bool locked;
+
+  /// Rejections saved for this hour earlier this session (read-only).
+  final List<RejectionEntry> logged;
   final List<_RejectionRow> rows;
   final void Function(_RejectionRow row) onPickType;
   final VoidCallback onQtyChanged;
@@ -542,6 +623,7 @@ class _SlotBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _outputRow(),
+        for (final entry in logged) _loggedRow(entry),
         for (final row in rows) _rejectionRow(row),
         Align(
           alignment: Alignment.centerLeft,
@@ -557,6 +639,65 @@ class _SlotBlock extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// A rejection already saved for this hour: same shape as the editable row,
+  /// but frozen — corrections go through the summary's remove instead.
+  Widget _loggedRow(RejectionEntry entry) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 12),
+      child: Row(
+        children: [
+          Icon(
+            Icons.subdirectory_arrow_right,
+            size: 18,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceTint,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.borderSubtle),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      entry.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '× ${entry.qty}',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.lock_outline,
+                    size: 15,
+                    color: AppColors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Keeps the frozen line aligned with the editable rows' ✕ column.
+          const SizedBox(width: 36),
+        ],
+      ),
     );
   }
 
@@ -617,11 +758,13 @@ class _SlotBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: AppNumberField(
-            label: 'Output — ${slot.label}',
-            controller: outputController,
-            required: false,
-          ),
+          child: locked
+              ? _lockedOutput()
+              : AppNumberField(
+                  label: 'Output — ${slot.label}',
+                  controller: outputController,
+                  required: false,
+                ),
         ),
         const SizedBox(width: 12),
         Column(
@@ -663,6 +806,45 @@ class _SlotBlock extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  /// An hour that's already on the sheet: the value is shown, not editable.
+  /// Mistakes are corrected in the sheet itself, not by overtyping history.
+  Widget _lockedOutput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(label: 'Output — ${slot.label}', required: false),
+        const SizedBox(height: 6),
+        Container(
+          height: 58,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceTint,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Row(
+            children: [
+              Text(
+                outputController.text,
+                style: TextStyle(
+                  fontSize: AppDimens.fieldFontSize,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              Icon(
+                Icons.lock_outline,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
+            ],
+          ),
         ),
       ],
     );

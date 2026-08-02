@@ -1,5 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:hicom_ops/services/sheets_service.dart';
 import 'package:hicom_ops/config/theme_controller.dart';
 import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
@@ -298,6 +303,105 @@ void main() {
     await tester.tap(find.byType(SubmitButton));
     await tester.pumpAndSettle();
     expect(find.text('Nothing new to save yet.'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: saved hours lock, rejections stay visible', (
+    tester,
+  ) async {
+    // A minimal stateful backend: one saved hour (8 AM = 150), one saved
+    // defect total (POROSITY 5); a POST replaces the stored defect list.
+    var storedRejections = <dynamic>[
+      {'code': '064', 'type': 'POROSITY', 'qty': '5'},
+    ];
+    final mock = MockClient((request) async {
+      if (request.method == 'POST') {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final data = body['data'] as Map<String, dynamic>;
+        if (data['Rejections'] != null) {
+          storedRejections =
+              jsonDecode(data['Rejections'] as String) as List<dynamic>;
+        }
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': [
+              {'code': '064', 'type': 'POROSITY'},
+              {'code': '037', 'type': 'FLASHES'},
+            ],
+          }),
+          200,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'status': 'success',
+          'data': {
+            'Customer': 'Mazda',
+            'PartNo': '2244',
+            'Line': 'FY2',
+            'Plan': 300,
+            'Output_8AM': 150,
+            'Output_LOR8AM': 0.5,
+            'Rejections': storedRejections,
+          },
+        }),
+        200,
+      );
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          line: 'FY2',
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The saved hour shows its value read-only — a locked box, not a field.
+    expect(find.text('150'), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    // Plan + 5 editable outputs + 6 qty boxes; 8 AM's output is not a field.
+    expect(find.byType(TextFormField), findsNWidgets(12));
+    // The saved defect total is visible in the summary (line + total row).
+    expect(find.text('064 · POROSITY'), findsOneWidget);
+    expect(find.text('5'), findsNWidgets(2));
+
+    // Log 2 more POROSITY against the (locked) 8 AM hour.
+    await tester.tap(find.text('Select type').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('POROSITY'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(1), '2');
+    await tester.pumpAndSettle();
+
+    // The summary merges it: 5 saved + 2 new = 7 (line + total row).
+    expect(find.text('7'), findsNWidgets(2));
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    // After the save the hour keeps a read-only history line ("× 2" with its
+    // own lock), the editable row resets, and the summary shows the new 7.
+    expect(find.text('× 2'), findsOneWidget);
+    expect(find.byIcon(Icons.lock_outline), findsNWidgets(2));
+    expect(find.text('7'), findsNWidgets(2));
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -863,6 +864,66 @@ void main() {
       final list = jsonDecode(data['Rejections'] as String) as List;
       expect(list, hasLength(1));
       expect((list.first as Map)['type'], 'POROSITY');
+    });
+  });
+
+  group('slow-backend handling', () {
+    setUp(SheetsService.clearMasterCaches);
+
+    test('a read that times out once is retried and succeeds', () async {
+      var attempts = 0;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          attempts++;
+          // Stands in for a cold Apps Script container outrunning the client
+          // timeout, without making the test actually wait for it.
+          if (attempts == 1) throw TimeoutException('cold start');
+          return http.Response('[{"dcm":"1212","lastUpdated":"14:32"}]', 200);
+        }),
+      );
+
+      final machines = await service.fetchCastingDashboard(shift: 'Day');
+
+      expect(attempts, 2, reason: 'the first attempt timed out');
+      expect(machines.single.dcm, '1212');
+    });
+
+    test('a read that keeps timing out reports it plainly', () async {
+      var attempts = 0;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          attempts++;
+          throw TimeoutException('still cold');
+        }),
+      );
+
+      await expectLater(
+        service.fetchCastingDashboard(shift: 'Day'),
+        throwsA(
+          isA<SheetsSubmissionException>().having(
+            (e) => e.message,
+            'message',
+            contains('taking too long'),
+          ),
+        ),
+      );
+      expect(attempts, 2, reason: 'one retry, then give up');
+    });
+
+    test('a save is never retried automatically', () async {
+      var attempts = 0;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          attempts++;
+          throw TimeoutException('cold start');
+        }),
+      );
+
+      await expectLater(
+        service.submitCastingUpdate({'DCM': '1212', 'PartNo': '1'}),
+        throwsA(isA<SheetsSubmissionException>()),
+      );
+      expect(attempts, 1, reason: 'retrying an upsert could double-write');
     });
   });
 

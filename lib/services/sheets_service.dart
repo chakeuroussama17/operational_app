@@ -56,7 +56,10 @@ class SheetsService {
 
   final http.Client _client;
 
-  static const Duration _timeout = Duration(seconds: 20);
+  /// Generous because the backend is Apps Script: a warm call takes 2-3s, but
+  /// a cold container can take far longer, and failing at 20s turned a slow
+  /// answer into a false "no network" on the floor.
+  static const Duration _timeout = Duration(seconds: 45);
 
   // ---------- Casting incremental API (shift-aware: Day or Night) ----------
 
@@ -563,15 +566,20 @@ class SheetsService {
 
   /// GET with query params, following the Apps Script redirect, returning
   /// the decoded JSON body (list, map or null).
+  ///
+  /// Apps Script normally answers in 2-3s, but a cold container occasionally
+  /// stalls for far longer — which looked to the floor like "no internet" even
+  /// though the network was fine. Reads are safe to repeat, so a timeout is
+  /// retried once before giving up.
   Future<dynamic> _getJson(String url, Map<String, String> params) async {
     final uri = Uri.parse(url).replace(queryParameters: params);
 
     late final http.Response response;
     try {
-      response = await _client.get(uri).timeout(_timeout);
+      response = await _getWithRetry(uri);
     } on TimeoutException {
       throw const SheetsSubmissionException(
-        'Connection timed out. Check the network and try again.',
+        'The sheet is taking too long to answer. Give it a moment and retry.',
       );
     } on http.ClientException {
       throw const SheetsSubmissionException(
@@ -593,6 +601,16 @@ class SheetsService {
     }
     _throwIfErrorEnvelope(decoded);
     return decoded;
+  }
+
+  /// One retry on timeout only. A GET changes nothing, so repeating it is
+  /// safe — unlike the upsert POST, which is never retried automatically.
+  Future<http.Response> _getWithRetry(Uri uri) async {
+    try {
+      return await _client.get(uri).timeout(_timeout);
+    } on TimeoutException {
+      return await _client.get(uri).timeout(_timeout);
+    }
   }
 
   void _throwIfErrorEnvelope(dynamic decoded) {

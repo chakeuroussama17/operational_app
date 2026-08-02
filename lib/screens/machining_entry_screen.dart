@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../config/constants.dart';
 import '../models/machining_models.dart';
@@ -53,12 +54,18 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   /// Backend-computed LOR% labels, keyed by lorKey.
   final Map<String, String?> _lors = {};
 
-  /// The defect list for this entry — any number of "N of this type" rows.
-  /// Posted whole on submit, replacing whatever the sheet held.
-  List<RejectionEntry> _rejections = [];
-  List<TextEditingController> _qtyControllers = [];
+  /// Defect totals already saved for this entry, keyed by code|type. The sheet
+  /// stores one total per type with no slot, so this is all that comes back.
+  Map<String, RejectionEntry> _saved = {};
 
-  /// Encoded snapshot of the loaded list, to tell whether it was edited.
+  /// Rejections typed against each time slot THIS session, keyed by outputKey.
+  /// The slot is an entry aid only — it never reaches the sheet — so these are
+  /// folded into the summary and cleared once saved. Anything typed here adds
+  /// to what is already saved, which is why reopening the screen and typing
+  /// again can't double-count.
+  final Map<String, List<_RejectionRow>> _slotRows = {};
+
+  /// Encoded snapshot of the saved totals, to tell whether they changed.
   String _initialRejections = '[]';
 
   /// Values as loaded from the server, to detect what changed this session.
@@ -80,34 +87,66 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final controller in _outputControllers.values) {
       controller.dispose();
     }
-    for (final controller in _qtyControllers) {
-      controller.dispose();
+    for (final rows in _slotRows.values) {
+      for (final row in rows) {
+        row.dispose();
+      }
     }
     _sheetsService.dispose();
     super.dispose();
   }
 
-  void _setRejections(List<RejectionEntry> entries) {
-    for (final controller in _qtyControllers) {
-      controller.dispose();
+  /// Resets the per-slot rows to one empty row per checkpoint. Called on load
+  /// and after a successful save, when everything typed has become a saved
+  /// total and would otherwise be counted a second time.
+  void _resetSlotRows() {
+    for (final rows in _slotRows.values) {
+      for (final row in rows) {
+        row.dispose();
+      }
     }
-    _rejections = entries;
-    _qtyControllers = [
-      for (final entry in entries) TextEditingController(text: entry.qty),
-    ];
+    _slotRows.clear();
+    for (final slot in _slots) {
+      _slotRows[slot.outputKey] = [_RejectionRow()];
+    }
   }
 
-  /// Only complete rows go to the server — a row the user opened but never
-  /// filled in is not a defect. Quantities live in the controllers, so they're
-  /// pulled back onto the entries here rather than mirrored on every keystroke.
-  String _encodeRejections() {
-    final out = <Map<String, String>>[];
-    for (var i = 0; i < _rejections.length; i++) {
-      final entry = _rejections[i]..qty = _qtyControllers[i].text.trim();
-      if (entry.isComplete) out.add(entry.toJson());
+  /// What the sheet gets: the saved totals plus everything typed against the
+  /// slots this session, added up per defect type. The slot itself is dropped —
+  /// the sheet holds one total per type, exactly as before.
+  List<RejectionEntry> get _rejectionSummary {
+    final totals = <String, RejectionEntry>{};
+    _saved.forEach((key, entry) {
+      totals[key] = RejectionEntry(
+        qty: entry.qty,
+        code: entry.code,
+        type: entry.type,
+      );
+    });
+
+    for (final rows in _slotRows.values) {
+      for (final row in rows) {
+        final added = double.tryParse(row.qtyController.text.trim());
+        final type = row.entry.type.trim();
+        if (added == null || added == 0 || type.isEmpty) continue;
+        final key = '${row.entry.code}|$type';
+        final running = double.tryParse(totals[key]?.qty ?? '') ?? 0;
+        totals[key] = RejectionEntry(
+          qty: _trimNumber(running + added),
+          code: row.entry.code,
+          type: type,
+        );
+      }
     }
-    return jsonEncode(out);
+    return totals.values.toList();
   }
+
+  String _encodeRejections() =>
+      jsonEncode([for (final entry in _rejectionSummary) entry.toJson()]);
+
+  /// 8.0 -> "8", 8.5 -> "8.5" — piece counts shouldn't grow a decimal point.
+  static String _trimNumber(double value) =>
+      value % 1 == 0 ? value.toInt().toString() : value.toString();
 
   Future<void> _load() async {
     setState(() {
@@ -129,7 +168,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
               row?.value(slot.outputKey) ?? '';
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
-        _setRejections(row?.rejections ?? []);
+        _saved = {
+          for (final entry in row?.rejections ?? <RejectionEntry>[])
+            '${entry.code}|${entry.type}': entry,
+        };
+        _resetSlotRows();
         _initialRejections = _encodeRejections();
         _initial = _currentValues();
         _loading = false;
@@ -138,6 +181,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       if (!mounted) return;
       setState(() {
         // Keep the form usable offline-ish: empty fields, banner on top.
+        _resetSlotRows();
         _initial = _currentValues();
         _loadError = error.message;
         _loading = false;
@@ -211,9 +255,28 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     }
   }
 
+  /// Drops a defect type entirely — both what was already saved and anything
+  /// typed for it this session. Correcting a saved total means removing it here
+  /// and re-entering the right number against a slot.
+  void _removeType(String key) {
+    setState(() {
+      _saved.remove(key);
+      for (final rows in _slotRows.values) {
+        for (final row in rows) {
+          if ('${row.entry.code}|${row.entry.type}' == key) {
+            row.qtyController.clear();
+            row.entry
+              ..code = ''
+              ..type = '';
+          }
+        }
+      }
+    });
+  }
+
   /// Opens the defect-type picker for one rejection row. The master list
   /// (~230 types) is fetched once per session by the service.
-  Future<void> _pickType(int index) async {
+  Future<void> _pickType(_RejectionRow row) async {
     List<RejectionType> types;
     try {
       types = await _sheetsService.fetchRejectionTypes();
@@ -247,11 +310,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     final picked = await promptRejectionType(
       context,
       types: types,
-      initialCode: _rejections[index].code,
+      initialCode: row.entry.code,
     );
     if (picked == null || !mounted) return;
     setState(() {
-      _rejections[index]
+      row.entry
         ..code = picked.code
         ..type = picked.type;
     });
@@ -300,21 +363,23 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           slot: slot,
                           outputController: _outputControllers[slot.outputKey]!,
                           lorLabel: _lors[slot.lorKey],
+                          rows: _slotRows[slot.outputKey]!,
+                          onPickType: _pickType,
+                          onQtyChanged: () => setState(() {}),
+                          onAddRow: () => setState(
+                            () =>
+                                _slotRows[slot.outputKey]!.add(_RejectionRow()),
+                          ),
+                          onRemoveRow: (row) => setState(() {
+                            _slotRows[slot.outputKey]!.remove(row);
+                            row.dispose();
+                          }),
                         ),
                       ],
                       const SizedBox(height: 26),
-                      _RejectionSection(
-                        entries: _rejections,
-                        qtyControllers: _qtyControllers,
-                        onAdd: () => setState(() {
-                          _rejections.add(RejectionEntry());
-                          _qtyControllers.add(TextEditingController());
-                        }),
-                        onRemove: (index) => setState(() {
-                          _rejections.removeAt(index);
-                          _qtyControllers.removeAt(index).dispose();
-                        }),
-                        onPickType: (index) => _pickType(index),
+                      _RejectionSummary(
+                        entries: _rejectionSummary,
+                        onRemove: _removeType,
                       ),
                       const SizedBox(height: 28),
                       SubmitButton(
@@ -436,20 +501,118 @@ class _LoadErrorBanner extends StatelessWidget {
   }
 }
 
-/// One time slot: editable output field + read-only LOR% badge.
+/// One editable rejection line: which defect, and how many. Paired with a
+/// controller so the quantity survives rebuilds while rows are added/removed.
+class _RejectionRow {
+  _RejectionRow();
+
+  final RejectionEntry entry = RejectionEntry();
+  final TextEditingController qtyController = TextEditingController();
+
+  void dispose() => qtyController.dispose();
+}
+
+/// One time slot: output field + LOR% badge, with that hour's rejections
+/// directly beneath — logged as the hour is logged, rather than collected
+/// separately at the end.
 class _SlotBlock extends StatelessWidget {
   const _SlotBlock({
     required this.slot,
     required this.outputController,
     required this.lorLabel,
+    required this.rows,
+    required this.onPickType,
+    required this.onQtyChanged,
+    required this.onAddRow,
+    required this.onRemoveRow,
   });
 
   final MachiningSlot slot;
   final TextEditingController outputController;
   final String? lorLabel;
+  final List<_RejectionRow> rows;
+  final void Function(_RejectionRow row) onPickType;
+  final VoidCallback onQtyChanged;
+  final VoidCallback onAddRow;
+  final void Function(_RejectionRow row) onRemoveRow;
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _outputRow(),
+        for (final row in rows) _rejectionRow(row),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: onAddRow,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Another defect this hour'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.steelBlue,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _rejectionRow(_RejectionRow row) {
+    final canRemove = rows.length > 1;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 12),
+      child: Row(
+        children: [
+          Icon(
+            Icons.subdirectory_arrow_right,
+            size: 18,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _TypeField(entry: row.entry, onTap: () => onPickType(row)),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 76,
+            child: TextFormField(
+              controller: row.qtyController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              textAlign: TextAlign.center,
+              onChanged: (_) => onQtyChanged(),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              decoration: const InputDecoration(
+                hintText: 'Qty',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 36,
+            child: canRemove
+                ? IconButton(
+                    onPressed: () => onRemoveRow(row),
+                    icon: const Icon(Icons.close, size: 18),
+                    color: AppColors.textSecondary,
+                    tooltip: 'Remove',
+                    visualDensity: VisualDensity.compact,
+                  )
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _outputRow() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -506,96 +669,135 @@ class _SlotBlock extends StatelessWidget {
   }
 }
 
-/// The defect list for the whole entry: rows of "how many" + "of what type",
-/// with a + to add another. Sits just above SAVE, after the time slots.
-class _RejectionSection extends StatelessWidget {
-  const _RejectionSection({
-    required this.entries,
-    required this.qtyControllers,
-    required this.onAdd,
-    required this.onRemove,
-    required this.onPickType,
-  });
+/// The auto-calculated total per defect type for the day — the sum of the
+/// hourly entries above plus whatever was already saved. This is exactly what
+/// is written to the sheet; the hourly split is an entry aid and is not stored.
+class _RejectionSummary extends StatelessWidget {
+  const _RejectionSummary({required this.entries, required this.onRemove});
 
   final List<RejectionEntry> entries;
-  final List<TextEditingController> qtyControllers;
-  final VoidCallback onAdd;
-  final void Function(int index) onRemove;
-  final void Function(int index) onPickType;
+  final void Function(String key) onRemove;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.report_gmailerrorred, size: 20, color: AppColors.danger),
-            const SizedBox(width: 8),
-            Text(
-              'Rejections',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '(optional)',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'How many of each defect this shift — add a row per type.',
-          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-        ),
-        for (var i = 0; i < entries.length; i++) ...[
-          const SizedBox(height: 12),
+    final total = entries.fold<double>(
+      0,
+      (sum, e) => sum + (double.tryParse(e.qty) ?? 0),
+    );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceTint,
+        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SizedBox(
-                width: 96,
-                child: AppNumberField(
-                  label: 'Qty',
-                  controller: qtyControllers[i],
-                  required: false,
-                ),
-              ),
-              const SizedBox(width: 10),
+              Icon(Icons.summarize_outlined, size: 20, color: AppColors.navy),
+              const SizedBox(width: 8),
               Expanded(
-                child: _TypeField(
-                  entry: entries[i],
-                  onTap: () => onPickType(i),
+                child: Text(
+                  'Rejection summary',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
-              IconButton(
-                onPressed: () => onRemove(i),
-                icon: const Icon(Icons.close),
-                color: AppColors.textSecondary,
-                tooltip: 'Remove this rejection',
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  'saved to sheet',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ),
             ],
           ),
-        ],
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: Text(entries.isEmpty ? 'ADD REJECTION' : 'ADD ANOTHER'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.navy,
-              side: BorderSide(color: AppColors.navy.withValues(alpha: 0.4)),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          if (entries.isEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'No rejections logged this shift.',
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
             ),
-          ),
-        ),
-      ],
+          ] else ...[
+            const SizedBox(height: 6),
+            for (final entry in entries)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      entry.qty,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 36,
+                      child: IconButton(
+                        onPressed: () =>
+                            onRemove('${entry.code}|${entry.type}'),
+                        icon: const Icon(Icons.close, size: 18),
+                        color: AppColors.textSecondary,
+                        tooltip: 'Remove ${entry.type}',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 10, right: 36),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Total',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    total % 1 == 0
+                        ? total.toInt().toString()
+                        : total.toString(),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.danger,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

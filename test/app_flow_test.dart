@@ -213,14 +213,15 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day shift slots run 8 AM - 6 PM, outputs only — rejections are no longer
-    // per slot but a typed list at the bottom.
+    // Day shift slots run 8 AM - 6 PM, each with its own rejection line
+    // beneath it, and one auto-calculated summary at the bottom.
     expect(find.text('Output — 8 AM'), findsOneWidget);
     expect(find.text('Output — 6 PM'), findsOneWidget);
     expect(find.text('LOR'), findsNWidgets(6));
-    expect(find.textContaining('Rejection — '), findsNothing);
-    expect(find.text('Rejections'), findsOneWidget);
-    expect(find.text('ADD REJECTION'), findsOneWidget);
+    expect(find.text('Select type'), findsNWidgets(6));
+    expect(find.text('Another defect this hour'), findsNWidgets(6));
+    expect(find.text('Rejection summary'), findsOneWidget);
+    expect(find.text('No rejections logged this shift.'), findsOneWidget);
 
     // Submitting with no values entered is a no-op with a hint.
     await tester.dragUntilVisible(
@@ -243,7 +244,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('machining entry: rejection rows can be added and removed', (
+  testWidgets('machining entry: an hour can carry more than one defect', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -258,30 +259,37 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Qty'), findsNothing);
+    // Every hour starts with exactly one rejection line.
+    expect(find.text('Select type'), findsNWidgets(6));
 
     await tester.dragUntilVisible(
-      find.text('ADD REJECTION'),
+      find.text('Another defect this hour').first,
       find.byType(SingleChildScrollView),
-      const Offset(0, -300),
+      const Offset(0, -200),
     );
-    await tester.tap(find.text('ADD REJECTION'));
+    await tester.tap(find.text('Another defect this hour').first);
     await tester.pumpAndSettle();
+    expect(find.text('Select type'), findsNWidgets(7));
 
-    // A row is a quantity plus an unset defect-type field.
-    expect(find.text('Qty'), findsOneWidget);
-    expect(find.text('Select type'), findsOneWidget);
-    expect(find.text('ADD ANOTHER'), findsOneWidget);
-
-    await tester.tap(find.text('ADD ANOTHER'));
+    // The extra line can be dropped again (a lone line has no x).
+    final remove = find.byIcon(Icons.close);
+    expect(
+      remove,
+      findsNWidgets(2),
+      reason: 'both lines of that hour get an x',
+    );
+    await tester.ensureVisible(remove.first);
+    await tester.tap(remove.first);
     await tester.pumpAndSettle();
-    expect(find.text('Qty'), findsNWidgets(2));
+    expect(find.text('Select type'), findsNWidgets(6));
 
-    await tester.tap(find.byIcon(Icons.close).first);
+    // A quantity with no defect type chosen is not a rejection, so it stays
+    // out of the summary and there is still nothing to save.
+    // Fields run Plan, Output 8AM, qty 8AM, Output 10AM, qty 10AM, ...
+    await tester.enterText(find.byType(TextFormField).at(2), '5');
     await tester.pumpAndSettle();
-    expect(find.text('Qty'), findsOneWidget);
+    expect(find.text('No rejections logged this shift.'), findsOneWidget);
 
-    // An empty row is incomplete, so there is still nothing to save.
     await tester.dragUntilVisible(
       find.byType(SubmitButton),
       find.byType(SingleChildScrollView),

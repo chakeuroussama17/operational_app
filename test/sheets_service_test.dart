@@ -793,6 +793,54 @@ void main() {
       expect(row!.rejections, isEmpty);
     });
 
+    test('the same defect logged in two hours posts as one total', () async {
+      // The sheet stores one total per defect type with no slot, so the screen
+      // adds the hourly entries up before posting. This pins that arithmetic:
+      // 2 POROSITY at 8AM + 3 POROSITY at 10AM + 1 FLASHES = POROSITY 5, and
+      // it must never post two POROSITY lines.
+      final hourly = [
+        {'qty': '2', 'code': '064', 'type': 'POROSITY'},
+        {'qty': '3', 'code': '064', 'type': 'POROSITY'},
+        {'qty': '1', 'code': '037', 'type': 'FLASHES'},
+      ];
+
+      final totals = <String, num>{};
+      for (final row in hourly) {
+        final key = '${row['code']}|${row['type']}';
+        totals[key] = (totals[key] ?? 0) + num.parse(row['qty']!);
+      }
+
+      expect(totals, {'064|POROSITY': 5, '037|FLASHES': 1});
+
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      await service.submitMachiningUpdate({
+        'Customer': 'Mazda',
+        'PartNo': '2244',
+        'Line': 'FY2',
+        'Shift': 'Day',
+        'Rejections': jsonEncode([
+          for (final entry in totals.entries)
+            {
+              'qty': '${entry.value}',
+              'code': entry.key.split('|').first,
+              'type': entry.key.split('|').last,
+            },
+        ]),
+      });
+
+      final data = sent['data'] as Map<String, dynamic>;
+      final list = jsonDecode(data['Rejections'] as String) as List;
+      expect(list, hasLength(2), reason: 'one line per type, not per hour');
+      expect(list.first, {'qty': '5', 'code': '064', 'type': 'POROSITY'});
+    });
+
     test('submit carries the encoded defect list through', () async {
       late Map<String, dynamic> sent;
       final service = SheetsService(

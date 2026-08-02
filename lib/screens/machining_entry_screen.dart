@@ -280,30 +280,6 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     }
   }
 
-  /// Drops a defect type entirely — both what was already saved and anything
-  /// typed for it this session. Correcting a saved total means removing it here
-  /// and re-entering the right number against a slot.
-  void _removeType(String key) {
-    setState(() {
-      _saved.remove(key);
-      // Its read-only per-hour lines have to go too, or the hours would still
-      // show a defect the summary no longer counts.
-      for (final list in _loggedSlotRejections.values) {
-        list.removeWhere((entry) => '${entry.code}|${entry.type}' == key);
-      }
-      for (final rows in _slotRows.values) {
-        for (final row in rows) {
-          if ('${row.entry.code}|${row.entry.type}' == key) {
-            row.qtyController.clear();
-            row.entry
-              ..code = ''
-              ..type = '';
-          }
-        }
-      }
-    });
-  }
-
   /// Folds this session's completed hourly entries into the read-only
   /// per-hour history, merging repeats of the same defect within an hour.
   void _captureLoggedRejections() {
@@ -446,10 +422,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         ),
                       ],
                       const SizedBox(height: 26),
-                      _RejectionSummary(
-                        entries: _rejectionSummary,
-                        onRemove: _removeType,
-                      ),
+                      _RejectionSummary(entries: _rejectionSummary),
                       const SizedBox(height: 28),
                       SubmitButton(
                         onPressed: _submit,
@@ -643,7 +616,7 @@ class _SlotBlock extends StatelessWidget {
   }
 
   /// A rejection already saved for this hour: same shape as the editable row,
-  /// but frozen — corrections go through the summary's remove instead.
+  /// but frozen — recorded scrap is corrected in the sheet, not on the floor.
   Widget _loggedRow(RejectionEntry entry) {
     return Padding(
       padding: const EdgeInsets.only(top: 8, left: 12),
@@ -854,11 +827,14 @@ class _SlotBlock extends StatelessWidget {
 /// The auto-calculated total per defect type for the day — the sum of the
 /// hourly entries above plus whatever was already saved. This is exactly what
 /// is written to the sheet; the hourly split is an entry aid and is not stored.
+///
+/// Deliberately display-only: recorded scrap must not be erasable from the
+/// floor, so there is no remove here. A wrong figure is corrected in the
+/// sheet itself.
 class _RejectionSummary extends StatelessWidget {
-  const _RejectionSummary({required this.entries, required this.onRemove});
+  const _RejectionSummary({required this.entries});
 
   final List<RejectionEntry> entries;
-  final void Function(String key) onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -868,7 +844,7 @@ class _RejectionSummary extends StatelessWidget {
     );
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: AppColors.surfaceTint,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
@@ -891,15 +867,12 @@ class _RejectionSummary extends StatelessWidget {
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text(
-                  'saved to sheet',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  ),
+              Text(
+                'saved to sheet',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
                 ),
               ),
             ],
@@ -914,7 +887,7 @@ class _RejectionSummary extends StatelessWidget {
             const SizedBox(height: 6),
             for (final entry in entries)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 8),
                 child: Row(
                   children: [
                     Expanded(
@@ -936,22 +909,11 @@ class _RejectionSummary extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    SizedBox(
-                      width: 36,
-                      child: IconButton(
-                        onPressed: () =>
-                            onRemove('${entry.code}|${entry.type}'),
-                        icon: const Icon(Icons.close, size: 18),
-                        color: AppColors.textSecondary,
-                        tooltip: 'Remove ${entry.type}',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
                   ],
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.only(top: 10, right: 36),
+              padding: const EdgeInsets.only(top: 10),
               child: Row(
                 children: [
                   Expanded(

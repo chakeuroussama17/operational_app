@@ -192,7 +192,8 @@ function castingHeadersForShift(shift) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
-  headers.push('LastUpdated');
+  // Who logged which hour — derived on save, never typed (see applyLogAttribution).
+  headers.push('LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -205,8 +206,8 @@ function machiningHeadersForShift(shift) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
   });
-  // Derived from the detail table on every save — read these, never type them.
-  headers.push('RejectionTotal', 'RejectionSummary', 'LastUpdated');
+  // Derived on every save — read these, never type them.
+  headers.push('RejectionTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -218,7 +219,8 @@ function secondaryHeadersForShift(shift) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
   });
-  headers.push('LastUpdated');
+  // Who logged which hour — derived on save, never typed (see applyLogAttribution).
+  headers.push('LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -247,7 +249,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'REJECTION-ROLLUP-v9';
+var BACKEND_VERSION = 'USER-LOGIN-v10';
 
 function doGet(e) {
   try {
@@ -258,6 +260,7 @@ function doGet(e) {
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
     if (action === 'partcodes') return jsonResponse(getPartMaster(module));
     if (action === 'rejectiontypes') return jsonResponse(getRejectionTypes());
+    if (action === 'user') return jsonResponse(getUserProfile(e.parameter.email));
 
     if (module === 'machining') {
       // Machining is now shift-aware too (Machining_Day/Machining_Night) and
@@ -315,6 +318,10 @@ function doPost(e) {
       if (payload.op === 'machiningAddPart') return jsonResponse(addPartWithMo('machining', payload));
       if (payload.op === 'machiningEditPart') return jsonResponse(editPartWithMo('machining', payload));
       return jsonResponse(configMutate(payload));
+    }
+    if (payload.action === 'user') {
+      if (payload.op === 'register') return jsonResponse(registerUser(payload));
+      return jsonResponse({ status: 'error', message: 'Unknown user op' });
     }
     if (payload.module === 'casting') return jsonResponse(upsertCastingRow(payload.data));
     if (payload.module === 'secondary') return jsonResponse(upsertSecondaryRow(payload.data));
@@ -393,6 +400,13 @@ function getSecondaryRow(station, part, shift) {
 // ---------- Secondary: upsert (per-shift sheet, snapshots MO once) ----------
 
 function upsertSecondaryRow(data) {
+  var writer;
+  try {
+    writer = resolveWriter(data);
+  } catch (userError) {
+    return { status: 'error', message: userError.message };
+  }
+
   // `data.Shift` is sent by the app only to pick the sheet — never stored.
   var shift = data.Shift === 'Night' ? 'Night' : 'Day';
   var sheet = getSecondarySheetForShift(shift);
@@ -406,6 +420,15 @@ function upsertSecondaryRow(data) {
       String(r.PartNo) === String(data.PartNo) &&
       formatDateOnly(r.Date) === shiftDate;
   });
+
+  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
+  if (lockedEdits.length) {
+    return {
+      status: 'error',
+      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
+        '. Corrections go through the admin.',
+    };
+  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -434,6 +457,7 @@ function upsertSecondaryRow(data) {
     }
   });
 
+  applyLogAttribution(merged, data, writer, 'Actual_', slots);
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -518,6 +542,13 @@ function getCastingRow(dcm, part, shift) {
 // ---------- Casting: upsert (per-shift sheet, snapshots MO once at creation) ----------
 
 function upsertCastingRow(data) {
+  var writer;
+  try {
+    writer = resolveWriter(data);
+  } catch (userError) {
+    return { status: 'error', message: userError.message };
+  }
+
   // `data.Shift` is sent by the app only to pick the sheet — it is NOT stored
   // as a column (the sheet tab already encodes the shift).
   var shift = data.Shift === 'Night' ? 'Night' : 'Day';
@@ -531,6 +562,15 @@ function upsertCastingRow(data) {
     return String(r.DCM) === String(data.DCM) && String(r.PartNo) === String(data.PartNo) &&
       formatDateOnly(r.Date) === shiftDate;
   });
+
+  var lockedEdits = findLockedEdits(existing, data, 'Output_', slots);
+  if (lockedEdits.length) {
+    return {
+      status: 'error',
+      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
+        '. Corrections go through the admin.',
+    };
+  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -561,6 +601,7 @@ function upsertCastingRow(data) {
     }
   });
 
+  applyLogAttribution(merged, data, writer, 'Output_', slots);
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -884,6 +925,13 @@ function getMachiningRow(customer, part, line, shift) {
 // ---------- Machining: upsert (per-shift sheet, snapshots MO, Rejection per slot) ----------
 
 function upsertMachiningRow(data) {
+  var writer;
+  try {
+    writer = resolveWriter(data);
+  } catch (userError) {
+    return { status: 'error', message: userError.message };
+  }
+
   // `data.Shift` is sent by the app only to pick the sheet — never stored.
   var shift = data.Shift === 'Night' ? 'Night' : 'Day';
   var sheet = getMachiningSheetForShift(shift);
@@ -898,6 +946,15 @@ function upsertMachiningRow(data) {
       String(r.Line) === String(data.Line) &&
       formatDateOnly(r.Date) === shiftDate;
   });
+
+  var lockedEdits = findLockedEdits(existing, data, 'Output_', slots);
+  if (lockedEdits.length) {
+    return {
+      status: 'error',
+      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
+        '. Corrections go through the admin.',
+    };
+  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -938,6 +995,7 @@ function upsertMachiningRow(data) {
     merged.RejectionSummary = totals.summary;
   }
 
+  applyLogAttribution(merged, data, writer, 'Output_', slots);
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -958,6 +1016,136 @@ function upsertMachiningRow(data) {
     version: BACKEND_VERSION,
     message: existing ? 'Row updated (same row)' : 'Row created',
   };
+}
+
+// ---------- Users: who is allowed in, and who logged what ----------
+//
+// The admin manages access from the Users tab alone: flip a row's Status from
+// "active" to anything else and that person can no longer log in OR write —
+// every save re-checks the sheet, so deactivation bites immediately, not at
+// the next login. Registration appends here (Firebase confirms the email is
+// real; this sheet says who they are and whether they're still with us).
+var USERS_SHEET = 'Users';
+var USERS_HEADERS = ['Email', 'Name', 'EmployeeID', 'Status', 'RegisteredAt'];
+
+function getUsersSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(USERS_SHEET);
+  if (!sheet) {
+    createShiftSheets([{ name: USERS_SHEET, headers: USERS_HEADERS }]);
+    sheet = ss.getSheetByName(USERS_SHEET);
+  }
+  return sheet;
+}
+
+function getUserByEmail(email) {
+  if (!email) return null;
+  var needle = String(email).trim().toLowerCase();
+  var match = getAllRowsAsObjects(getUsersSheet()).find(function (r) {
+    return String(r.Email).trim().toLowerCase() === needle;
+  });
+  if (!match) return null;
+  return {
+    email: String(match.Email).trim(),
+    name: String(match.Name || '').trim(),
+    employeeId: String(match.EmployeeID || '').trim(),
+    status: String(match.Status || '').trim().toLowerCase(),
+  };
+}
+
+// GET ?action=user&email=... — the app's gate after Firebase sign-in.
+// data:null = not registered yet (app shows the registration page);
+// status!='active' = the app refuses entry.
+function getUserProfile(email) {
+  return { status: 'success', data: getUserByEmail(email) };
+}
+
+function registerUser(payload) {
+  var email = String(payload.email || '').trim();
+  var name = String(payload.name || '').trim();
+  var employeeId = String(payload.employeeId || '').trim();
+  if (!email || !name || !employeeId) {
+    return { status: 'error', message: 'Email, full name and employee ID are all required' };
+  }
+  if (getUserByEmail(email)) {
+    return { status: 'error', message: 'This email is already registered' };
+  }
+  var sheet = getUsersSheet();
+  var headers = getHeaders(sheet);
+  var row = {
+    Email: email,
+    Name: name,
+    EmployeeID: employeeId,
+    Status: 'active',
+    RegisteredAt: new Date(),
+  };
+  sheet.appendRow(headers.map(function (h) {
+    return row.hasOwnProperty(h) ? row[h] : '';
+  }));
+  return {
+    status: 'success',
+    data: { email: email, name: name, employeeId: employeeId, status: 'active' },
+  };
+}
+
+// Who is making this write. Returns null when no UserEmail was sent — a
+// pre-login app during the rollout window — which is allowed through
+// unattributed rather than bricking every tablet the moment the backend
+// deploys. Once an email IS sent it must belong to a registered, ACTIVE user.
+function resolveWriter(data) {
+  var email = data.UserEmail === undefined ? '' : String(data.UserEmail).trim();
+  if (!email) return null;
+  var user = getUserByEmail(email);
+  if (!user) {
+    throw new Error('This account is not registered. Sign out and register first.');
+  }
+  if (user.status !== 'active') {
+    throw new Error('This account has been deactivated. Contact the admin.');
+  }
+  return user;
+}
+
+// An output that's on the sheet is history, whoever wrote it — the server
+// refuses to change it no matter what the client claims. Sending the SAME
+// value again is harmless (the app re-posts unchanged fields only rarely,
+// but it must not error). Returns the offending slots.
+function findLockedEdits(existing, data, prefix, slots) {
+  if (!existing) return [];
+  var locked = [];
+  slots.forEach(function (slot) {
+    var incoming = data[prefix + slot];
+    if (incoming === undefined || incoming === '') return;
+    var current = existing[prefix + slot];
+    if (current === '' || current === null || current === undefined) return;
+    if (String(current) !== String(incoming)) locked.push(slot);
+  });
+  return locked;
+}
+
+// Stamps who filled which slot, exactly once — the first writer owns the hour
+// (which the lock above guarantees anyway). Two derived columns:
+//   LogMeta  {"8AM":{"by":"Ahmad","at":"08:07"}, ...}  — the app reads this to
+//            show "added by Ahmad at 08:07" under a locked hour
+//   LoggedBy "Ahmad 8AM · Karim 12PM"                  — the same story for a
+//            human scanning the sheet
+function applyLogAttribution(merged, data, writer, prefix, slots) {
+  if (!writer) return;
+  var meta;
+  try {
+    meta = merged.LogMeta ? JSON.parse(merged.LogMeta) : {};
+  } catch (e) {
+    meta = {};
+  }
+  var at = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm');
+  slots.forEach(function (slot) {
+    if (data[prefix + slot] === undefined || data[prefix + slot] === '') return;
+    if (!meta[slot]) meta[slot] = { by: writer.name || writer.email, at: at };
+  });
+  merged.LogMeta = JSON.stringify(meta);
+  merged.LoggedBy = slots
+    .filter(function (slot) { return meta[slot]; })
+    .map(function (slot) { return meta[slot].by + ' ' + slot; })
+    .join(' · ');
 }
 
 // ---------- Machining: the rejection list ----------

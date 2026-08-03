@@ -1290,6 +1290,7 @@ function reconcileRejections(incoming, stored) {
 function writeMachiningRejections(list, data, shift, shiftDate, row) {
   var sheet = requireSheet(MACHINING_REJECTIONS_SHEET, setupMachiningShiftSheets);
   var headers = getHeaders(sheet);
+  var hourCol = headers.indexOf('Hour') + 1; // 1-based; 0 if the column is absent
 
   var stale = getAllRowsAsObjects(sheet).filter(function (r) {
     return String(r.Customer) === String(data.Customer) &&
@@ -1321,9 +1322,19 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
       LastUpdated: now,
       Hour: item.slot === undefined ? '' : String(item.slot).trim(),
     };
-    sheet.appendRow(headers.map(function (h) {
+    var rowArray = headers.map(function (h) {
       return out.hasOwnProperty(h) ? out[h] : '';
-    }));
+    });
+    var nextRow = sheet.getLastRow() + 1;
+    // "8AM"/"10AM"/"12PM" look like clock times to Sheets' own auto-detection,
+    // which silently rewrites a plain appendRow() value into a TIME serial
+    // number instead of keeping the text — and a corrupted Hour cell can never
+    // match its slot again, so reconcileRejections would treat every future
+    // correction as a brand-new line instead of finding it. Force the cell to
+    // Plain Text BEFORE the value lands, not after: reformatting an
+    // already-corrupted cell does not undo the corruption.
+    if (hourCol > 0) sheet.getRange(nextRow, hourCol).setNumberFormat('@');
+    sheet.getRange(nextRow, 1, 1, headers.length).setValues([rowArray]);
   });
 }
 
@@ -1882,6 +1893,12 @@ function applyColumnFormats(sheet, headers) {
       range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
     } else if (header === 'Date') {
       range.setNumberFormat('yyyy-mm-dd');
+    } else if (header === 'Hour') {
+      // "8AM"/"10AM" read as clock times to Sheets' auto-detection — Plain
+      // Text keeps them as the literal slot key writeMachiningRejections and
+      // reconcileRejections match against. See the comment there for why a
+      // corrupted cell can never be fixed after the fact, only prevented.
+      range.setNumberFormat('@');
     }
   });
 }

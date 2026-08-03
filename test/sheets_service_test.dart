@@ -867,6 +867,93 @@ void main() {
     });
   });
 
+  group('users API', () {
+    tearDown(() => SheetsService.currentUserEmail = null);
+
+    test('fetchUserProfile parses a registered user', () async {
+      late Uri requested;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          requested = request.url;
+          return http.Response(
+            '{"status":"success","data":{"email":"ahmad@hidsb.com",'
+            '"name":"Ahmad Ali","employeeId":"EMP-014","status":"active"}}',
+            200,
+          );
+        }),
+      );
+
+      final user = await service.fetchUserProfile('ahmad@hidsb.com');
+
+      expect(requested.queryParameters, {
+        'action': 'user',
+        'email': 'ahmad@hidsb.com',
+      });
+      expect(user!.name, 'Ahmad Ali');
+      expect(user.employeeId, 'EMP-014');
+      expect(user.isActive, isTrue);
+    });
+
+    test('fetchUserProfile returns null for the unregistered', () async {
+      final service = SheetsService(
+        client: MockClient(
+          (request) async =>
+              http.Response('{"status":"success","data":null}', 200),
+        ),
+      );
+
+      expect(await service.fetchUserProfile('new@hidsb.com'), isNull);
+    });
+
+    test('registerUser posts the register op', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      final user = await service.registerUser(
+        email: 'ahmad@hidsb.com',
+        name: 'Ahmad Ali',
+        employeeId: 'EMP-014',
+      );
+
+      expect(sent['action'], 'user');
+      expect(sent['op'], 'register');
+      expect(sent['email'], 'ahmad@hidsb.com');
+      expect(sent['name'], 'Ahmad Ali');
+      expect(sent['employeeId'], 'EMP-014');
+      expect(user.isActive, isTrue);
+    });
+
+    test('saves carry the signed-in email; signed out, they do not', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      SheetsService.currentUserEmail = 'ahmad@hidsb.com';
+      await service.submitMachiningUpdate({'Customer': 'Mazda', 'PartNo': '1'});
+      expect(
+        (sent['data'] as Map<String, dynamic>)['UserEmail'],
+        'ahmad@hidsb.com',
+        reason: 'the sheet records who logged the hour',
+      );
+
+      SheetsService.currentUserEmail = null;
+      await service.submitCastingUpdate({'DCM': '1212', 'PartNo': '1'});
+      expect(
+        (sent['data'] as Map<String, dynamic>).containsKey('UserEmail'),
+        isFalse,
+      );
+    });
+  });
+
   group('slow-backend handling', () {
     setUp(SheetsService.clearMasterCaches);
 

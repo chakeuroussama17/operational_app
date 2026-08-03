@@ -5,7 +5,14 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbyzV-P0WrwKukteT4T07ENGUhvV5lrtScZmmQwW-YIn20pBIP1Pyo3OF2cYd9Rpue83UQ/exec';
+    'https://script.google.com/macros/s/AKfycbzkjkWeDggI3nyWgWme6RdqALzxlYRAdCC92JqTzN89z2L2Rv26iMnmQ3s7S9JBSPDPuA/exec';
+
+/// Company email domains allowed to sign in / register. Anything else is
+/// refused before Firebase is even called.
+const List<String> allowedEmailDomains = [
+  '@hidsb.com',
+  '@hicom-engineering.com',
+];
 
 /// Shared secret checked by the Apps Script doPost (its SECRET_KEY).
 /// Sent as a top-level "secret" field with every submission.

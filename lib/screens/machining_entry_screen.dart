@@ -76,6 +76,23 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   /// that were just saved. Corrections go through the sheet itself.
   final Set<String> _lockedOutputs = {};
 
+  /// Who logged which hour — slot ("8AM") -> {by, at}, from the row's LogMeta
+  /// column. Shown under each locked hour as "Added by Ahmad at 08:07".
+  Map<String, dynamic> _logMeta = {};
+
+  static Map<String, dynamic> _parseLogMeta(dynamic raw) {
+    if (raw is Map) return raw.cast<String, dynamic>();
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return decoded.cast<String, dynamic>();
+      } catch (_) {
+        // A hand-edited cell that isn't JSON — no attribution, no crash.
+      }
+    }
+    return {};
+  }
+
   /// Per-hour rejections that were saved earlier THIS session, shown read-only
   /// under their hour. The sheet keeps only the per-type totals — the hour is
   /// not stored — so after the screen is closed this per-hour view is gone and
@@ -189,6 +206,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           }
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
+        _logMeta = _parseLogMeta(row?.raw['LogMeta']);
         _saved = {
           for (final entry in row?.rejections ?? <RejectionEntry>[])
             '${entry.code}|${entry.type}': entry,
@@ -406,6 +424,12 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           outputController: _outputControllers[slot.outputKey]!,
                           lorLabel: _lors[slot.lorKey],
                           locked: _lockedOutputs.contains(slot.outputKey),
+                          stamp:
+                              _logMeta[slot.outputKey.replaceFirst(
+                                    'Output_',
+                                    '',
+                                  )]
+                                  as Map?,
                           logged:
                               _loggedSlotRejections[slot.outputKey] ?? const [],
                           rows: _slotRows[slot.outputKey]!,
@@ -567,6 +591,7 @@ class _SlotBlock extends StatelessWidget {
     required this.outputController,
     required this.lorLabel,
     required this.locked,
+    required this.stamp,
     required this.logged,
     required this.rows,
     required this.onPickType,
@@ -581,6 +606,9 @@ class _SlotBlock extends StatelessWidget {
 
   /// True when this hour's output is already saved to the sheet.
   final bool locked;
+
+  /// {by, at} for a locked hour — who logged it and when, from LogMeta.
+  final Map? stamp;
 
   /// Rejections saved for this hour earlier this session (read-only).
   final List<RejectionEntry> logged;
@@ -819,6 +847,19 @@ class _SlotBlock extends StatelessWidget {
             ],
           ),
         ),
+        if (stamp != null && stamp!['by'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 2),
+            child: Text(
+              'Added by ${stamp!['by']}'
+              '${stamp!['at'] != null ? ' at ${stamp!['at']}' : ''}',
+              style: TextStyle(
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
       ],
     );
   }

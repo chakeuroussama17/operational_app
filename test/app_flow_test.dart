@@ -348,6 +348,7 @@ void main() {
             'Plan': 300,
             'Output_8AM': 150,
             'Output_LOR8AM': 0.5,
+            'LogMeta': '{"8AM":{"by":"Ahmad Ali","at":"08:07"}}',
             'Rejections': storedRejections,
           },
         }),
@@ -369,9 +370,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The saved hour shows its value read-only — a locked box, not a field.
+    // The saved hour shows its value read-only — a locked box, not a field —
+    // with who logged it underneath.
     expect(find.text('150'), findsOneWidget);
     expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
     // Plan + 5 editable outputs + 6 qty boxes; 8 AM's output is not a field.
     expect(find.byType(TextFormField), findsNWidgets(12));
     // The saved defect total is visible in the summary (line + total row).

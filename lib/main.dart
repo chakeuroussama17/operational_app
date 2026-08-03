@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'config/constants.dart';
 import 'config/theme_controller.dart';
+import 'screens/auth_gate.dart';
 import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await themeController.load();
-  runApp(const HicomOpsApp());
+  runApp(const HicomOpsApp(requireLogin: true));
 }
 
 /// HICOM Diecastings production shift-log app.
@@ -16,7 +17,13 @@ Future<void> main() async {
 /// whole tree rebuilds — and [AppColors.brightness] is re-synced — whenever
 /// the effective light/dark mode changes.
 class HicomOpsApp extends StatefulWidget {
-  const HicomOpsApp({super.key});
+  const HicomOpsApp({super.key, this.requireLogin = false});
+
+  /// main() passes true, putting [AuthGate] in front of everything. Defaults
+  /// to false so widget tests can pump the app straight to the home screen —
+  /// the gate is a UI convenience; the WRITE enforcement lives server-side
+  /// either way.
+  final bool requireLogin;
 
   @override
   State<HicomOpsApp> createState() => _HicomOpsAppState();
@@ -65,11 +72,11 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
       themeMode: mode,
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
-      // Not const: a new instance each rebuild forces HomeScreen (and its
-      // subtree) to rebuild on a theme toggle so the AppColors getters are
-      // re-read. A const HomeScreen would be canonicalised and skipped.
+      // Not const: a new instance each rebuild forces the subtree to rebuild
+      // on a theme toggle so the AppColors getters are re-read. A const child
+      // would be canonicalised and skipped.
       // ignore: prefer_const_constructors
-      home: HomeScreen(),
+      home: widget.requireLogin ? AuthGate() : HomeScreen(),
     );
   }
 

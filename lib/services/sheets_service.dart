@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/constants.dart';
 import '../models/analytics_models.dart';
+import '../models/app_user.dart';
 import '../models/casting_models.dart';
 import '../models/config_models.dart';
 import '../models/machining_models.dart';
@@ -56,10 +57,59 @@ class SheetsService {
 
   final http.Client _client;
 
+  /// Who is signed in, set by the auth gate after login. Every module save
+  /// carries it as UserEmail so the sheet records who logged which hour —
+  /// and the backend refuses writes from deactivated accounts.
+  static String? currentUserEmail;
+
   /// Generous because the backend is Apps Script: a warm call takes 2-3s, but
   /// a cold container can take far longer, and failing at 20s turned a slow
   /// answer into a false "no network" on the floor.
   static const Duration _timeout = Duration(seconds: 45);
+
+  /// [data] plus the signed-in user's email — the attribution the backend
+  /// stamps into LoggedBy/LogMeta.
+  static Map<String, String> _attributed(Map<String, String> data) {
+    final email = currentUserEmail;
+    if (email == null || email.isEmpty) return data;
+    return {...data, 'UserEmail': email};
+  }
+
+  // ---------- Users (login gate + registration) ----------
+
+  /// The Users-tab profile for [email], or null when not registered yet.
+  Future<AppUser?> fetchUserProfile(String email) async {
+    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+      'action': 'user',
+      'email': email,
+    });
+    if (decoded is! Map<String, dynamic>) return null;
+    final data = decoded['data'];
+    return data is Map<String, dynamic> ? AppUser.fromJson(data) : null;
+  }
+
+  /// One-time registration after the first Firebase sign-in. The backend
+  /// appends to the Users tab with status "active".
+  Future<AppUser> registerUser({
+    required String email,
+    required String name,
+    required String employeeId,
+  }) async {
+    await _postJson(CASTING_WEBHOOK_URL, {
+      'secret': SHEETS_SHARED_SECRET,
+      'action': 'user',
+      'op': 'register',
+      'email': email,
+      'name': name,
+      'employeeId': employeeId,
+    });
+    return AppUser(
+      email: email,
+      name: name,
+      employeeId: employeeId,
+      status: 'active',
+    );
+  }
 
   // ---------- Casting incremental API (shift-aware: Day or Night) ----------
 
@@ -118,7 +168,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'casting',
-      'data': data,
+      'data': _attributed(data),
     });
   }
 
@@ -221,7 +271,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'secondary',
-      'data': data,
+      'data': _attributed(data),
     });
   }
 
@@ -343,7 +393,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'module': 'machining',
-      'data': data,
+      'data': _attributed(data),
     });
   }
 

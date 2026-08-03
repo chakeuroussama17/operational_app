@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
+import '../screens/auth_gate.dart';
 
 /// Branded app bar: real HICOM logo, deep-purple gradient header, amber
 /// accent underline. Shown on every screen; [subtitle] names the current
@@ -119,6 +120,17 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
                     data: const IconThemeData(color: Colors.white),
                     child: action,
                   ),
+                ),
+              // Present only when the login gate is active (production) —
+              // widget tests pump screens without an AuthScope and see no
+              // sign-out button.
+              if (AuthScope.maybeOf(context) != null)
+                IconButton(
+                  onPressed: () => AuthScope.signOutFrom(context),
+                  icon: const Icon(Icons.logout_rounded, size: 22),
+                  color: Colors.white,
+                  tooltip:
+                      'Sign out (${AuthScope.maybeOf(context)!.user.name})',
                 ),
               const SizedBox(width: 4),
             ],

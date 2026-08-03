@@ -119,8 +119,10 @@ var MACHINING_REJECTIONS_SHEET = 'Machining_Rejections';
 var REJECTION_SUMMARY_SHEET = 'Rejection_Summary';
 
 function machiningRejectionHeaders() {
+  // Hour is deliberately LAST: the Rejection_Summary QUERY formulas reference
+  // the other columns by letter, and appending keeps every letter stable.
   return ['Date', 'Shift', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName',
-    'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated'];
+    'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated', 'Hour'];
 }
 
 // Which "Department" value in the Parts master belongs to each app module.
@@ -207,7 +209,7 @@ function machiningHeadersForShift(shift) {
     headers.push('Output_LOR' + slot);
   });
   // Derived on every save — read these, never type them.
-  headers.push('RejectionTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
+  headers.push('OutputTotal', 'RejectionTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -249,7 +251,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'USER-LOGIN-v10';
+var BACKEND_VERSION = 'LOR-CUM-v11';
 
 function doGet(e) {
   try {
@@ -446,16 +448,11 @@ function upsertSecondaryRow(data) {
 
   slots.forEach(function (slot) {
     var outKey = 'Actual_' + slot;
-    var lorKey = 'LOR_' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
-      var plan = parseFloat(merged.Plan);
-      var output = parseFloat(data[outKey]);
-      if (plan > 0 && !isNaN(output)) {
-        merged[lorKey] = Math.round((output / plan) * 100) + '%';
-      }
     }
   });
+  deriveCumulativeLor(merged, slots, 'Actual_', 'LOR_');
 
   applyLogAttribution(merged, data, writer, 'Actual_', slots);
   merged.LastUpdated = new Date();
@@ -590,16 +587,11 @@ function upsertCastingRow(data) {
 
   slots.forEach(function (slot) {
     var outKey = 'Output_' + slot;
-    var lorKey = 'Output_LOR' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
-      var plan = parseFloat(merged.Plan);
-      var output = parseFloat(data[outKey]);
-      if (plan > 0 && !isNaN(output)) {
-        merged[lorKey] = Math.round((output / plan) * 100) + '%';
-      }
     }
   });
+  deriveCumulativeLor(merged, slots, 'Output_', 'Output_LOR');
 
   applyLogAttribution(merged, data, writer, 'Output_', slots);
   merged.LastUpdated = new Date();
@@ -956,6 +948,17 @@ function upsertMachiningRow(data) {
     };
   }
 
+  // Plan is set once at the start of the shift and then locked, same as an
+  // output — the whole shift's LOR math hangs off it.
+  if (existing && data.Plan !== undefined && data.Plan !== '' &&
+      existing.Plan !== '' && existing.Plan !== null && existing.Plan !== undefined &&
+      String(existing.Plan) !== String(data.Plan)) {
+    return {
+      status: 'error',
+      message: 'Plan is already set for this shift and locked. Corrections go through the admin.',
+    };
+  }
+
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
   merged.Customer = data.Customer;
@@ -974,26 +977,43 @@ function upsertMachiningRow(data) {
 
   slots.forEach(function (slot) {
     var outKey = 'Output_' + slot;
-    var lorKey = 'Output_LOR' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
-      var plan = parseFloat(merged.Plan);
-      var output = parseFloat(data[outKey]);
-      if (plan > 0 && !isNaN(output)) {
-        merged[lorKey] = Math.round((output / plan) * 100) + '%';
-      }
     }
   });
 
-  // Parse the defect list before writing the row so its total and summary go
-  // out in the same write. null = the field wasn't sent, so whatever the row
-  // already carries stays.
+  // Reconcile the defect list BEFORE deriving anything: a qty correction
+  // hands pieces back to (or takes them from) its hour's output, and the
+  // totals/LOR below must see the adjusted numbers.
   var rejections = parseRejectionList(data);
+  var finalRejections = null;
   if (rejections !== null) {
-    var totals = summariseRejections(rejections);
+    var storedRejections = getMachiningRejections(data.Customer, data.PartNo, data.Line, shift);
+    var reconciled = reconcileRejections(rejections, storedRejections);
+    finalRejections = reconciled.list;
+
+    var slotNames = Object.keys(reconciled.deltas);
+    for (var i = 0; i < slotNames.length; i++) {
+      var dSlot = slotNames[i];
+      var outCell = parseFloat(merged['Output_' + dSlot]);
+      if (isNaN(outCell)) continue;   // no output logged for that hour yet
+      var adjusted = outCell + reconciled.deltas[dSlot];
+      if (adjusted < 0) {
+        return {
+          status: 'error',
+          message: 'That correction would make the ' + dSlot + ' output negative.',
+        };
+      }
+      merged['Output_' + dSlot] = adjusted;
+    }
+
+    var totals = summariseRejections(finalRejections);
     merged.RejectionTotal = totals.total;
     merged.RejectionSummary = totals.summary;
   }
+
+  // Derived cells, always from the (possibly adjusted) outputs.
+  merged.OutputTotal = deriveCumulativeLor(merged, slots, 'Output_', 'Output_LOR');
 
   applyLogAttribution(merged, data, writer, 'Output_', slots);
   merged.LastUpdated = new Date();
@@ -1007,8 +1027,8 @@ function upsertMachiningRow(data) {
     sheet.appendRow(rowArray);
   }
 
-  if (rejections !== null) {
-    writeMachiningRejections(rejections, data, shift, shiftDate, merged);
+  if (finalRejections !== null) {
+    writeMachiningRejections(finalRejections, data, shift, shiftDate, merged);
   }
 
   return {
@@ -1148,6 +1168,27 @@ function applyLogAttribution(merged, data, writer, prefix, slots) {
     .join(' · ');
 }
 
+// LOR answers "how much of the plan is done SO FAR", not "what did this hour
+// do": each slot's cell is the RUNNING output total over Plan (100 then 150
+// against a plan of 300 reads 33.33% then 83.33%, not 33%/50%). Every slot is
+// recomputed on every save, so a rejection correction that hands pieces back
+// to an earlier hour ripples through the rest of the shift. Written as an
+// "N.NN%" string; Sheets stores the fraction and the 0.00% column format
+// shows the decimals.
+function deriveCumulativeLor(merged, slots, outPrefix, lorPrefix) {
+  var plan = parseFloat(merged.Plan);
+  var running = 0;
+  slots.forEach(function (slot) {
+    var v = parseFloat(merged[outPrefix + slot]);
+    if (isNaN(v)) return;      // hour not logged yet — leave its LOR cell be
+    running += v;
+    if (plan > 0) {
+      merged[lorPrefix + slot] = (Math.round((running / plan) * 10000) / 100) + '%';
+    }
+  });
+  return running;
+}
+
 // ---------- Machining: the rejection list ----------
 //
 // The app sends the WHOLE list as `data.Rejections` (a JSON array of
@@ -1179,15 +1220,71 @@ function parseRejectionList(data) {
 //   RejectionTotal   8                       (a NUMBER — sums and charts)
 //   RejectionSummary "5 POROSITY, 3 FLASHES" (text, for humans)
 // Both are rewritten from the list on every save, so they cannot drift.
+// The summary text aggregates BY TYPE (hour lines of the same defect fold
+// together) and skips types corrected down to zero.
 function summariseRejections(list) {
   var total = 0;
-  var parts = [];
+  var byType = {};
+  var order = [];
   list.forEach(function (item) {
     var qty = parseFloat(item.qty);
-    if (!isNaN(qty)) total += qty;
-    parts.push(String(item.qty).trim() + ' ' + String(item.type).trim());
+    if (isNaN(qty)) return;
+    total += qty;
+    var key = String(item.type).trim();
+    if (!(key in byType)) order.push(key);
+    byType[key] = (byType[key] || 0) + qty;
+  });
+  var parts = [];
+  order.forEach(function (type) {
+    if (byType[type] > 0) parts.push(byType[type] + ' ' + type);
   });
   return { total: total, summary: parts.join(', ') };
+}
+
+// The correction rule: output counts GOOD parts, so output + rejections =
+// what the hour actually produced, and that total is history. Editing a saved
+// rejection's qty only RECLASSIFIES pieces between scrap and good — lowering
+// 20 to 18 hands 2 pieces back to that hour's output. Nothing else about a
+// saved line can change, and saved lines are never deleted from here (that is
+// the admin's job, in the sheet).
+//
+// Reconciles the incoming hour-tagged entries against what the sheet holds:
+//   - same (hour, code, type) with a new qty  -> update + output delta
+//   - a brand-new (hour, code, type)          -> append, NO delta (its output
+//     was typed as the good count alongside it)
+//   - stored rows the payload doesn't mention -> kept untouched, so a partial
+//     post can never silently destroy recorded scrap
+// Old-format payloads (entries without an hour) keep the original
+// whole-list-replace semantics so a pre-update app still works.
+function reconcileRejections(incoming, stored) {
+  var slotless = incoming.some(function (e) {
+    return !e.slot || String(e.slot).trim() === '';
+  });
+  if (slotless) return { list: incoming, deltas: {} };
+
+  var deltas = {};
+  var finalList = stored.map(function (r) {
+    return { code: r.code, type: r.type, qty: r.qty, slot: r.slot };
+  });
+  incoming.forEach(function (entry) {
+    var slot = String(entry.slot).trim();
+    var match = finalList.find(function (r) {
+      return String(r.slot) === slot &&
+        padRejectionCode(r.code) === padRejectionCode(entry.code) &&
+        String(r.type).trim() === String(entry.type).trim();
+    });
+    if (!match) {
+      finalList.push({ code: entry.code, type: entry.type, qty: entry.qty, slot: slot });
+      return;
+    }
+    var oldQty = parseFloat(match.qty) || 0;
+    var newQty = parseFloat(entry.qty) || 0;
+    if (newQty !== oldQty) {
+      deltas[slot] = (deltas[slot] || 0) + (oldQty - newQty);
+      match.qty = entry.qty;
+    }
+  });
+  return { list: finalList, deltas: deltas };
 }
 
 function writeMachiningRejections(list, data, shift, shiftDate, row) {
@@ -1222,6 +1319,7 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
       // column, and sum() silently ignores text cells.
       Qty: isNaN(qtyNum) ? qty : qtyNum,
       LastUpdated: now,
+      Hour: item.slot === undefined ? '' : String(item.slot).trim(),
     };
     sheet.appendRow(headers.map(function (h) {
       return out.hasOwnProperty(h) ? out[h] : '';
@@ -1246,6 +1344,7 @@ function getMachiningRejections(customer, part, line, shift) {
         code: padRejectionCode(r.RejectionCode),
         type: String(r.RejectionType === undefined ? '' : r.RejectionType),
         qty: String(r.Qty === undefined ? '' : r.Qty),
+        slot: String(r.Hour === undefined ? '' : r.Hour).trim(),
       };
     });
 }
@@ -1403,23 +1502,29 @@ function getAnalytics(module, days) {
       if (!isNaN(v)) bucket.output += v;
     });
 
+    // LOR cells are cumulative (running total / plan), so a row's true
+    // achievement is its LATEST checkpoint — the max, since a running total
+    // never goes down. Averaging every cell would double-count early hours.
+    var rowLor = null;
     lorKeys.forEach(function (k) {
       var raw = r[k];
       if (raw === '' || raw === null || raw === undefined) return;
       var s = String(raw);
       var pct;
       if (s.indexOf('%') !== -1) {
-        pct = parseFloat(s); // already a percent, e.g. "33%"
+        pct = parseFloat(s); // already a percent, e.g. "33.33%"
       } else {
         var n = parseFloat(s);
         if (isNaN(n)) return;
         pct = n * 100; // Sheets stores a written "10%" as the fraction 0.1
       }
       if (isNaN(pct)) return;
-      bucket.lorSum += pct;
-      bucket.lorCount += 1;
+      if (rowLor === null || pct > rowLor) rowLor = pct;
     });
-
+    if (rowLor !== null) {
+      bucket.lorSum += rowLor;
+      bucket.lorCount += 1;
+    }
   });
 
   // Machining rejections are their own fact table now (one row per defect
@@ -1770,7 +1875,9 @@ function applyColumnFormats(sheet, headers) {
     var range = sheet.getRange(2, i + 1, n, 1);
     range.clearFormat();
     if (header.indexOf('LOR') !== -1) {
-      range.setNumberFormat('0%');
+      // Two decimals: LOR is cumulative (running total / plan), and 83.33%
+      // vs 83% matters when the shift is being chased against its plan.
+      range.setNumberFormat('0.00%');
     } else if (header === 'LastUpdated') {
       range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
     } else if (header === 'Date') {

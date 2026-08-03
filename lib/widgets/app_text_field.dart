@@ -67,6 +67,7 @@ class AppNumberField extends StatelessWidget {
     this.hint,
     this.required = true,
     this.allowDecimal = false,
+    this.onChanged,
   });
 
   final String label;
@@ -76,6 +77,10 @@ class AppNumberField extends StatelessWidget {
 
   /// Enable for rate fields such as LOR%; leave off for piece counts.
   final bool allowDecimal;
+
+  /// Fires on every keystroke — for screens that show something derived from
+  /// this field (a running total, a live percentage) as it is typed.
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +103,7 @@ class AppNumberField extends StatelessWidget {
             color: AppColors.textPrimary,
           ),
           decoration: InputDecoration(hintText: hint ?? '0'),
+          onChanged: onChanged,
           validator: (value) {
             final text = value?.trim() ?? '';
             if (text.isEmpty) {

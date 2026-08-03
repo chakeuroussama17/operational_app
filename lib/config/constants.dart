@@ -40,6 +40,9 @@ abstract class AppColors {
     0xFF6C63B5,
   ); // secondary emphasis / focus
   static const Color amber = Color(0xFFFFA000); // CTA / highlights (gold)
+  // Amber is a background colour; this is the readable-on-surface version of
+  // it, for text marking an unsaved edit.
+  static const Color amberDark = Color(0xFFB26A00);
   static const Color success = Color(0xFF2E7D32);
   static const Color danger = Color(0xFFC62828);
 

@@ -23,17 +23,27 @@ class RejectionType {
 /// into and removed; the whole list is posted on submit and replaces whatever
 /// the sheet held for that entry.
 class RejectionEntry {
-  RejectionEntry({this.qty = '', this.code = '', this.type = ''});
+  RejectionEntry({
+    this.qty = '',
+    this.code = '',
+    this.type = '',
+    this.slot = '',
+  });
 
   factory RejectionEntry.fromJson(Map<String, dynamic> json) => RejectionEntry(
     qty: (json['qty'] ?? '').toString().trim(),
     code: (json['code'] ?? '').toString().trim(),
     type: (json['type'] ?? '').toString().trim(),
+    slot: (json['slot'] ?? '').toString().trim(),
   );
 
   String qty;
   String code;
   String type;
+
+  /// Which hour this defect belongs to ("8AM"). Empty on rows written before
+  /// the sheet tracked the hour — those stay in the sheet untouched.
+  String slot;
 
   /// A row the user started but didn't finish is dropped rather than posted.
   bool get isComplete => qty.trim().isNotEmpty && type.trim().isNotEmpty;
@@ -45,5 +55,6 @@ class RejectionEntry {
     'qty': qty.trim(),
     'code': code,
     'type': type,
+    'slot': slot,
   };
 }

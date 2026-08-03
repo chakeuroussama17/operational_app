@@ -311,18 +311,29 @@ void main() {
   testWidgets('machining entry: saved hours lock, rejections stay visible', (
     tester,
   ) async {
-    // A minimal stateful backend: one saved hour (8 AM = 150), one saved
-    // defect total (POROSITY 5); a POST replaces the stored defect list.
+    // A stateful stand-in for the backend: Plan 300 and 8 AM = 150 are saved,
+    // with 5 POROSITY logged against that hour. Posted lines are merged by
+    // (hour, type) the way the real reconcile does.
     var storedRejections = <dynamic>[
-      {'code': '064', 'type': 'POROSITY', 'qty': '5'},
+      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '8AM'},
     ];
     final mock = MockClient((request) async {
       if (request.method == 'POST') {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         final data = body['data'] as Map<String, dynamic>;
         if (data['Rejections'] != null) {
-          storedRejections =
-              jsonDecode(data['Rejections'] as String) as List<dynamic>;
+          for (final raw
+              in jsonDecode(data['Rejections'] as String) as List<dynamic>) {
+            final entry = raw as Map<String, dynamic>;
+            final match = storedRejections.cast<Map<String, dynamic>>().where(
+              (r) => r['slot'] == entry['slot'] && r['type'] == entry['type'],
+            );
+            if (match.isEmpty) {
+              storedRejections.add(entry);
+            } else {
+              match.first['qty'] = entry['qty'];
+            }
+          }
         }
         return http.Response('{"status":"success"}', 200);
       }
@@ -345,9 +356,9 @@ void main() {
             'Customer': 'Mazda',
             'PartNo': '2244',
             'Line': 'FY2',
-            'Plan': 300,
+            'Plan': 400,
             'Output_8AM': 150,
-            'Output_LOR8AM': 0.5,
+            'Output_LOR8AM': 0.375,
             'LogMeta': '{"8AM":{"by":"Ahmad Ali","at":"08:07"}}',
             'Rejections': storedRejections,
           },
@@ -370,27 +381,29 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The saved hour shows its value read-only — a locked box, not a field —
-    // with who logged it underneath.
-    expect(find.text('150'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    // Plan and the saved hour are both read-only boxes, and the hour carries
+    // who logged it. The saved defect sits under its own hour.
     expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
-    // Plan + 5 editable outputs + 6 qty boxes; 8 AM's output is not a field.
+    expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
+    // Plan and 8 AM's output are locked boxes, not fields: 5 editable outputs
+    // + 6 new-defect qty boxes + the saved defect's own qty box.
     expect(find.byType(TextFormField), findsNWidgets(12));
-    // The saved defect total is visible in the summary (line + total row).
-    expect(find.text('064 · POROSITY'), findsOneWidget);
-    expect(find.text('5'), findsNWidgets(2));
+    // LOR is cumulative over Plan: 150 of 400.
+    expect(find.text('37.5%'), findsOneWidget);
+    expect(find.text('250'), findsOneWidget, reason: 'left to plan');
 
-    // Log 2 more POROSITY against the (locked) 8 AM hour.
-    await tester.tap(find.text('Select type').first);
+    // Correcting the saved 5 down to 3 hands 2 pieces back to the 8 AM output.
+    await tester.enterText(find.byType(TextFormField).at(0), '3');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('POROSITY'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).at(1), '2');
-    await tester.pumpAndSettle();
-
-    // The summary merges it: 5 saved + 2 new = 7 (line + total row).
-    expect(find.text('7'), findsNWidgets(2));
+    expect(
+      find.text('152'),
+      findsNWidgets(2),
+      reason: "the hour's box and the shift total both move",
+    );
+    expect(find.text('38%'), findsOneWidget, reason: '152 of 400');
+    expect(find.text('248'), findsOneWidget, reason: 'left to plan follows');
+    // The qty box itself, plus the summary's line and total.
+    expect(find.text('3'), findsNWidgets(3));
 
     await tester.dragUntilVisible(
       find.byType(SubmitButton),
@@ -400,11 +413,90 @@ void main() {
     await tester.tap(find.byType(SubmitButton));
     await tester.pumpAndSettle();
 
-    // After the save the hour keeps a read-only history line ("× 2" with its
-    // own lock), the editable row resets, and the summary shows the new 7.
-    expect(find.text('× 2'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline), findsNWidgets(2));
-    expect(find.text('7'), findsNWidgets(2));
+    // The correction posted with its hour attached.
+    expect(find.text('064 · POROSITY'), findsNWidgets(2));
+    expect(
+      (storedRejections.first as Map)['qty'],
+      '3',
+      reason: 'the corrected quantity reached the sheet',
+    );
+    expect((storedRejections.first as Map)['slot'], '8AM');
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: an untouched saved defect is not re-posted', (
+    tester,
+  ) async {
+    Map<String, dynamic>? posted;
+    final mock = MockClient((request) async {
+      if (request.method == 'POST') {
+        posted =
+            (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                as Map<String, dynamic>;
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': [
+              {'code': '064', 'type': 'POROSITY'},
+            ],
+          }),
+          200,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'status': 'success',
+          'data': {
+            'Plan': 400,
+            'Output_8AM': 150,
+            'Rejections': [
+              {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '8AM'},
+            ],
+          },
+        }),
+        200,
+      );
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          line: 'FY2',
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Log a fresh 10 AM output without touching the saved defect. Plan and the
+    // 8 AM output are locked boxes, so the fields run: 8 AM's saved-defect
+    // qty, 8 AM's new-defect qty, then the 10 AM output.
+    await tester.enterText(find.byType(TextFormField).at(2), '120');
+    await tester.pumpAndSettle();
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    expect(posted!['Output_10AM'], '120');
+    expect(
+      posted!.containsKey('Rejections'),
+      isFalse,
+      reason: 'nothing about the defect list changed, so it is left alone',
+    );
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();

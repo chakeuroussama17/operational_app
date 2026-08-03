@@ -22,6 +22,10 @@ class MachiningSlot {
 
   /// Column/field name of the backend-computed LOR%, e.g. "Output_LOR10AM".
   final String lorKey;
+
+  /// The bare hour ("10AM") — how the sheet tags a rejection and a LogMeta
+  /// entry to its slot.
+  String get slotKey => outputKey.replaceFirst('Output_', '');
 }
 
 /// Day shift: 8AM-6PM.
@@ -142,7 +146,7 @@ class MachiningRow {
         .toList();
   }
 
-  /// LOR cell formatted for the read-only badge, e.g. "10%".
+  /// LOR cell formatted for the read-only badge, e.g. "83.33%".
   ///
   /// Google Sheets stores a written "10%" as the fraction 0.1 (the cell keeps
   /// percent formatting), so a numeric value is a fraction and is scaled by
@@ -155,13 +159,15 @@ class MachiningRow {
     if (s.endsWith('%')) return s;
     final n = num.tryParse(s);
     if (n == null) return null;
-    final pct = n * 100;
-    final rounded = (pct * 10).round() / 10;
-    final label = rounded % 1 == 0
-        ? rounded.toInt().toString()
-        : rounded.toString();
-    return '$label%';
+    return formatLor(n * 100);
   }
+}
+
+/// A percentage as the LOR badge shows it: at most two decimals, and only
+/// where they carry information ("50%", "37.5%", "83.33%").
+String formatLor(num percent) {
+  final label = percent.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+  return '$label%';
 }
 
 /// Normalises a JSON/Sheets cell: null/blank/"null" -> null, and

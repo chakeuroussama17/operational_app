@@ -251,7 +251,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'LOR-CUM-v11';
+var BACKEND_VERSION = 'DEPARTMENTS-v12';
 
 function doGet(e) {
   try {
@@ -311,6 +311,13 @@ function doPost(e) {
       return jsonResponse({ status: 'error', message: 'Unauthorized' });
     }
     if (payload.action === 'config') {
+      // Editing a module's parts/groups is a write like any other, so it
+      // answers to the same department rule as logging into it.
+      try {
+        resolveWriter(payload, configModuleOf(payload));
+      } catch (userError) {
+        return jsonResponse({ status: 'error', message: userError.message });
+      }
       // Part ops that also carry an MO number (all three modules now) —
       // everything else (groups, lines) stays on the generic configMutate.
       if (payload.op === 'castingAddPart') return jsonResponse(addPartWithMo('casting', payload));
@@ -404,7 +411,7 @@ function getSecondaryRow(station, part, shift) {
 function upsertSecondaryRow(data) {
   var writer;
   try {
-    writer = resolveWriter(data);
+    writer = resolveWriter(data, 'secondary');
   } catch (userError) {
     return { status: 'error', message: userError.message };
   }
@@ -541,7 +548,7 @@ function getCastingRow(dcm, part, shift) {
 function upsertCastingRow(data) {
   var writer;
   try {
-    writer = resolveWriter(data);
+    writer = resolveWriter(data, 'casting');
   } catch (userError) {
     return { status: 'error', message: userError.message };
   }
@@ -919,7 +926,7 @@ function getMachiningRow(customer, part, line, shift) {
 function upsertMachiningRow(data) {
   var writer;
   try {
-    writer = resolveWriter(data);
+    writer = resolveWriter(data, 'machining');
   } catch (userError) {
     return { status: 'error', message: userError.message };
   }
@@ -1046,7 +1053,48 @@ function upsertMachiningRow(data) {
 // the next login. Registration appends here (Firebase confirms the email is
 // real; this sheet says who they are and whether they're still with us).
 var USERS_SHEET = 'Users';
-var USERS_HEADERS = ['Email', 'Name', 'EmployeeID', 'Status', 'RegisteredAt'];
+var USERS_HEADERS = ['Email', 'Name', 'EmployeeID', 'Department', 'Status', 'RegisteredAt'];
+
+// Sees every department and every dashboard. Everyone else is confined to the
+// one department on their Users row.
+var ADMIN_EMAIL = 'admin@hidsb.com';
+var DEPARTMENTS = ['Casting', 'Secondary', 'Machining'];
+var ALL_DEPARTMENTS = 'All';
+
+function isAdminEmail(email) {
+  return String(email || '').trim().toLowerCase() === ADMIN_EMAIL;
+}
+
+// The department as it should be stored: the admin owns all of them, everyone
+// else must name exactly one. Returns '' when the value isn't usable.
+function normaliseDepartment(email, raw) {
+  if (isAdminEmail(email)) return ALL_DEPARTMENTS;
+  var wanted = String(raw || '').trim().toLowerCase();
+  for (var i = 0; i < DEPARTMENTS.length; i++) {
+    if (DEPARTMENTS[i].toLowerCase() === wanted) return DEPARTMENTS[i];
+  }
+  return '';
+}
+
+// Which module a Config payload is aimed at. The part ops name it in the op
+// itself ("machiningAddPart"); everything else carries a `module` field.
+function configModuleOf(payload) {
+  var op = String(payload.op || '');
+  var match = op.match(/^(casting|secondary|machining)(AddPart|EditPart)$/);
+  if (match) return match[1];
+  return String(payload.module || '').trim().toLowerCase();
+}
+
+// Whether this person may write to this module. A user with no department on
+// their row can write nothing — they are sent back to finish registering
+// rather than being quietly granted the run of the place.
+function userCanAccessModule(user, module) {
+  if (!user) return true;               // unattributed pre-login write
+  if (user.isAdmin) return true;
+  var dept = String(user.department || '').trim().toLowerCase();
+  if (dept === ALL_DEPARTMENTS.toLowerCase()) return true;
+  return dept !== '' && dept === String(module || '').trim().toLowerCase();
+}
 
 function getUsersSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1069,7 +1117,9 @@ function getUserByEmail(email) {
     email: String(match.Email).trim(),
     name: String(match.Name || '').trim(),
     employeeId: String(match.EmployeeID || '').trim(),
+    department: String(match.Department || '').trim(),
     status: String(match.Status || '').trim().toLowerCase(),
+    isAdmin: isAdminEmail(match.Email),
   };
 }
 
@@ -1080,6 +1130,12 @@ function getUserProfile(email) {
   return { status: 'success', data: getUserByEmail(email) };
 }
 
+// First-time registration, and the one repair path for a row that predates
+// the Department column: a user already on the sheet but with no department
+// can fill it in here rather than needing the admin to type it for them —
+// which grants nothing a fresh registration wouldn't have granted anyway.
+// A row that already HAS a department is settled; changing it is the admin's
+// job, in the sheet.
 function registerUser(payload) {
   var email = String(payload.email || '').trim();
   var name = String(payload.name || '').trim();
@@ -1087,15 +1143,51 @@ function registerUser(payload) {
   if (!email || !name || !employeeId) {
     return { status: 'error', message: 'Email, full name and employee ID are all required' };
   }
-  if (getUserByEmail(email)) {
-    return { status: 'error', message: 'This email is already registered' };
+  var department = normaliseDepartment(email, payload.department);
+  if (!department) {
+    return {
+      status: 'error',
+      message: 'Choose your department (' + DEPARTMENTS.join(', ') + ')',
+    };
   }
+
   var sheet = getUsersSheet();
   var headers = getHeaders(sheet);
+  var needle = email.toLowerCase();
+  var existing = getAllRowsAsObjects(sheet).find(function (r) {
+    return String(r.Email).trim().toLowerCase() === needle;
+  });
+
+  if (existing) {
+    if (String(existing.Department || '').trim() !== '') {
+      return { status: 'error', message: 'This email is already registered' };
+    }
+    var merged = Object.assign({}, existing);
+    merged.Name = name;
+    merged.EmployeeID = employeeId;
+    merged.Department = department;
+    if (!String(merged.Status || '').trim()) merged.Status = 'active';
+    sheet.getRange(existing._rowNum, 1, 1, headers.length).setValues([
+      headers.map(function (h) {
+        return merged.hasOwnProperty(h) && h !== '_rowNum' ? merged[h] : '';
+      }),
+    ]);
+    return {
+      status: 'success',
+      data: {
+        email: email, name: name, employeeId: employeeId,
+        department: department,
+        status: String(merged.Status).trim().toLowerCase(),
+        isAdmin: isAdminEmail(email),
+      },
+    };
+  }
+
   var row = {
     Email: email,
     Name: name,
     EmployeeID: employeeId,
+    Department: department,
     Status: 'active',
     RegisteredAt: new Date(),
   };
@@ -1104,7 +1196,10 @@ function registerUser(payload) {
   }));
   return {
     status: 'success',
-    data: { email: email, name: name, employeeId: employeeId, status: 'active' },
+    data: {
+      email: email, name: name, employeeId: employeeId,
+      department: department, status: 'active', isAdmin: isAdminEmail(email),
+    },
   };
 }
 
@@ -1112,7 +1207,7 @@ function registerUser(payload) {
 // pre-login app during the rollout window — which is allowed through
 // unattributed rather than bricking every tablet the moment the backend
 // deploys. Once an email IS sent it must belong to a registered, ACTIVE user.
-function resolveWriter(data) {
+function resolveWriter(data, module) {
   var email = data.UserEmail === undefined ? '' : String(data.UserEmail).trim();
   if (!email) return null;
   var user = getUserByEmail(email);
@@ -1121,6 +1216,13 @@ function resolveWriter(data) {
   }
   if (user.status !== 'active') {
     throw new Error('This account has been deactivated. Contact the admin.');
+  }
+  if (module && !userCanAccessModule(user, module)) {
+    throw new Error(
+      String(user.department || '').trim()
+        ? 'Your department (' + user.department + ') cannot log ' + module + ' data.'
+        : 'No department is set for your account. Sign out and register again.'
+    );
   }
   return user;
 }

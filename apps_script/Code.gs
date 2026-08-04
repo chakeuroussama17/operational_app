@@ -251,7 +251,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'DEPARTMENTS-v12';
+var BACKEND_VERSION = 'DASHBOARD-DATA-v13';
 
 function doGet(e) {
   try {
@@ -1627,6 +1627,10 @@ function getAnalytics(module, days) {
 
   var outputPrefix = (module === 'secondary') ? 'Actual_' : 'Output_';
   var lorPrefix = (module === 'secondary') ? 'LOR_' : 'Output_LOR';
+  // The top-level selector each module's dashboard cards are keyed by — what
+  // the "which machine/station/customer is behind" bar chart groups on.
+  var groupField = (module === 'secondary') ? 'Station' :
+    (module === 'machining') ? 'Customer' : 'DCM';
   // All modules split into Day+Night shift columns — sum the full union so a
   // day's total reflects both shifts. Both shifts share the same shift-date,
   // so grouping by Date alone (below) puts them in one bucket.
@@ -1637,15 +1641,26 @@ function getAnalytics(module, days) {
   dateKeys.forEach(function (dk) {
     byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0 };
   });
+  // Same window as byDate, sliced by group instead of by day — feeds the
+  // "output by machine/station/customer" ranking bar chart.
+  var byGroup = {};
 
   rows.forEach(function (r) {
     var dk = formatDateOnly(r.Date);
     if (!byDate.hasOwnProperty(dk)) return;
     var bucket = byDate[dk];
 
+    var group = String(r[groupField] || '').trim();
+    if (group && !byGroup.hasOwnProperty(group)) {
+      byGroup[group] = { output: 0, lorSum: 0, lorCount: 0 };
+    }
+    var groupBucket = group ? byGroup[group] : null;
+
     outputKeys.forEach(function (k) {
       var v = parseFloat(r[k]);
-      if (!isNaN(v)) bucket.output += v;
+      if (isNaN(v)) return;
+      bucket.output += v;
+      if (groupBucket) groupBucket.output += v;
     });
 
     // LOR cells are cumulative (running total / plan), so a row's true
@@ -1670,11 +1685,17 @@ function getAnalytics(module, days) {
     if (rowLor !== null) {
       bucket.lorSum += rowLor;
       bucket.lorCount += 1;
+      if (groupBucket) {
+        groupBucket.lorSum += rowLor;
+        groupBucket.lorCount += 1;
+      }
     }
   });
 
   // Machining rejections are their own fact table now (one row per defect
-  // type), so they're totalled per date from there instead of off the row.
+  // type), so they're totalled per date — and per type, for the "what's
+  // actually failing" chart — from there instead of off the row.
+  var rejByType = {};
   if (module === 'machining') {
     var rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MACHINING_REJECTIONS_SHEET);
     if (rejSheet && getHeaders(rejSheet).length > 0) {
@@ -1682,7 +1703,11 @@ function getAnalytics(module, days) {
         var dk = formatDateOnly(r.Date);
         if (!byDate.hasOwnProperty(dk)) return;
         var qty = parseFloat(r.Qty);
-        if (!isNaN(qty)) byDate[dk].rejection += qty;
+        if (isNaN(qty)) return;
+        byDate[dk].rejection += qty;
+        var type = String(r.RejectionType || '').trim();
+        if (!type) return;
+        rejByType[type] = (rejByType[type] || 0) + qty;
       });
     }
   }
@@ -1697,8 +1722,24 @@ function getAnalytics(module, days) {
     rejection.push(Math.round(b.rejection * 10) / 10);
   });
 
-  var result = { dates: dateKeys, output: output, lorPercent: lorPercent };
-  if (module === 'machining') result.rejection = rejection;
+  var byGroupArr = Object.keys(byGroup).map(function (g) {
+    var b = byGroup[g];
+    return {
+      group: g,
+      output: Math.round(b.output * 10) / 10,
+      lorPercent: b.lorCount > 0 ? Math.round((b.lorSum / b.lorCount) * 10) / 10 : null,
+    };
+  }).sort(function (a, b) { return b.output - a.output; });
+
+  var result = {
+    dates: dateKeys, output: output, lorPercent: lorPercent, byGroup: byGroupArr,
+  };
+  if (module === 'machining') {
+    result.rejection = rejection;
+    result.rejectionsByType = Object.keys(rejByType).map(function (t) {
+      return { type: t, qty: Math.round(rejByType[t] * 10) / 10 };
+    }).sort(function (a, b) { return b.qty - a.qty; });
+  }
   return { status: 'success', data: result };
 }
 

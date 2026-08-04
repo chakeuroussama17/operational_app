@@ -251,7 +251,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'DASHBOARD-DATA-v13';
+var BACKEND_VERSION = 'DEPT-INSIGHTS-v14';
 
 function doGet(e) {
   try {
@@ -1605,17 +1605,24 @@ function getAnalytics(module, days) {
   // shift-date, so grouping by Date alone (below) already merges them into one
   // bucket. A day row has no night slot columns (and vice versa), so the union
   // of outputKeys/lorKeys below simply skips the columns a given row lacks.
-  var rows;
+  //
+  // Which SHEET a row came from is the only record of its shift (the tab is
+  // the shift — there's no Shift column), so tag each row on the way in;
+  // "which shift produces more" has no other way to be answered.
+  var dayRows, nightRows;
   if (module === 'secondary') {
-    rows = getAllRowsAsObjects(getSecondarySheetForShift('Day'))
-      .concat(getAllRowsAsObjects(getSecondarySheetForShift('Night')));
+    dayRows = getAllRowsAsObjects(getSecondarySheetForShift('Day'));
+    nightRows = getAllRowsAsObjects(getSecondarySheetForShift('Night'));
   } else if (module === 'machining') {
-    rows = getAllRowsAsObjects(getMachiningSheetForShift('Day'))
-      .concat(getAllRowsAsObjects(getMachiningSheetForShift('Night')));
+    dayRows = getAllRowsAsObjects(getMachiningSheetForShift('Day'));
+    nightRows = getAllRowsAsObjects(getMachiningSheetForShift('Night'));
   } else {
-    rows = getAllRowsAsObjects(getCastingSheetForShift('Day'))
-      .concat(getAllRowsAsObjects(getCastingSheetForShift('Night')));
+    dayRows = getAllRowsAsObjects(getCastingSheetForShift('Day'));
+    nightRows = getAllRowsAsObjects(getCastingSheetForShift('Night'));
   }
+  dayRows.forEach(function (r) { r._shift = 'Day'; });
+  nightRows.forEach(function (r) { r._shift = 'Night'; });
+  var rows = dayRows.concat(nightRows);
   var tz = Session.getScriptTimeZone();
 
   var dateKeys = [];
@@ -1644,6 +1651,19 @@ function getAnalytics(module, days) {
   // Same window as byDate, sliced by group instead of by day — feeds the
   // "output by machine/station/customer" ranking bar chart.
   var byGroup = {};
+  // One entry per (group, part) so the app can answer BOTH "which part runs
+  // most" (sum across groups) and "for DCM 1212, which part runs most"
+  // (filter by group) from one array, without a second request.
+  var byGroupPart = {};
+  // Day vs Night, both as a window total and as a daily series — "which
+  // shift produces more" and "is the gap widening" are different questions.
+  var byShift = { Day: { output: 0, lorSum: 0, lorCount: 0 }, Night: { output: 0, lorSum: 0, lorCount: 0 } };
+  var shiftDaily = { Day: {}, Night: {} };
+  // Daily output (and LOR) per group, so picking a machine redraws BOTH its
+  // trend lines client-side with no refetch — a filtered dashboard that
+  // silently drops a chart is worse than one that never had it.
+  var groupDaily = {};
+  var groupLorDaily = {};
 
   rows.forEach(function (r) {
     var dk = formatDateOnly(r.Date);
@@ -1653,15 +1673,39 @@ function getAnalytics(module, days) {
     var group = String(r[groupField] || '').trim();
     if (group && !byGroup.hasOwnProperty(group)) {
       byGroup[group] = { output: 0, lorSum: 0, lorCount: 0 };
+      groupDaily[group] = {};
+      groupLorDaily[group] = {};
     }
     var groupBucket = group ? byGroup[group] : null;
 
+    var part = String(r.PartNo === undefined ? '' : r.PartNo).trim();
+    var partKey = group + '||' + part;
+    if (part && !byGroupPart.hasOwnProperty(partKey)) {
+      byGroupPart[partKey] = {
+        group: group,
+        part: part,
+        name: String(r.PartName || '').trim(),
+        output: 0, lorSum: 0, lorCount: 0,
+      };
+    }
+    var partBucket = part ? byGroupPart[partKey] : null;
+
+    var shift = r._shift === 'Night' ? 'Night' : 'Day';
+
+    var rowOutput = 0;
     outputKeys.forEach(function (k) {
       var v = parseFloat(r[k]);
       if (isNaN(v)) return;
-      bucket.output += v;
-      if (groupBucket) groupBucket.output += v;
+      rowOutput += v;
     });
+    if (rowOutput !== 0) {
+      bucket.output += rowOutput;
+      if (groupBucket) groupBucket.output += rowOutput;
+      if (partBucket) partBucket.output += rowOutput;
+      byShift[shift].output += rowOutput;
+      shiftDaily[shift][dk] = (shiftDaily[shift][dk] || 0) + rowOutput;
+      if (group) groupDaily[group][dk] = (groupDaily[group][dk] || 0) + rowOutput;
+    }
 
     // LOR cells are cumulative (running total / plan), so a row's true
     // achievement is its LATEST checkpoint — the max, since a running total
@@ -1689,12 +1733,24 @@ function getAnalytics(module, days) {
         groupBucket.lorSum += rowLor;
         groupBucket.lorCount += 1;
       }
+      if (partBucket) {
+        partBucket.lorSum += rowLor;
+        partBucket.lorCount += 1;
+      }
+      byShift[shift].lorSum += rowLor;
+      byShift[shift].lorCount += 1;
+      if (group) {
+        if (!groupLorDaily[group][dk]) groupLorDaily[group][dk] = { sum: 0, count: 0 };
+        groupLorDaily[group][dk].sum += rowLor;
+        groupLorDaily[group][dk].count += 1;
+      }
     }
   });
 
   // Machining rejections are their own fact table now (one row per defect
-  // type), so they're totalled per date — and per type, for the "what's
-  // actually failing" chart — from there instead of off the row.
+  // type), so they're totalled per date — and per type, and per PART, for
+  // the "what's failing" and "what's failing WHERE" charts — from there
+  // instead of off the row.
   var rejByType = {};
   if (module === 'machining') {
     var rejSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MACHINING_REJECTIONS_SHEET);
@@ -1706,8 +1762,23 @@ function getAnalytics(module, days) {
         if (isNaN(qty)) return;
         byDate[dk].rejection += qty;
         var type = String(r.RejectionType || '').trim();
-        if (!type) return;
-        rejByType[type] = (rejByType[type] || 0) + qty;
+        if (type) rejByType[type] = (rejByType[type] || 0) + qty;
+
+        // Onto the matching (Customer, PartNo) bucket. A part with rejections
+        // but no output row in the window still deserves a bar, so create the
+        // bucket rather than skipping.
+        var rGroup = String(r.Customer || '').trim();
+        var rPart = String(r.PartNo === undefined ? '' : r.PartNo).trim();
+        if (!rPart) return;
+        var rKey = rGroup + '||' + rPart;
+        if (!byGroupPart.hasOwnProperty(rKey)) {
+          byGroupPart[rKey] = {
+            group: rGroup, part: rPart,
+            name: String(r.PartName || '').trim(),
+            output: 0, lorSum: 0, lorCount: 0,
+          };
+        }
+        byGroupPart[rKey].rejection = (byGroupPart[rKey].rejection || 0) + qty;
       });
     }
   }
@@ -1722,22 +1793,59 @@ function getAnalytics(module, days) {
     rejection.push(Math.round(b.rejection * 10) / 10);
   });
 
+  var round1 = function (v) { return Math.round(v * 10) / 10; };
+  var avg = function (b) {
+    return b.lorCount > 0 ? Math.round((b.lorSum / b.lorCount) * 10) / 10 : null;
+  };
+
   var byGroupArr = Object.keys(byGroup).map(function (g) {
-    var b = byGroup[g];
-    return {
-      group: g,
-      output: Math.round(b.output * 10) / 10,
-      lorPercent: b.lorCount > 0 ? Math.round((b.lorSum / b.lorCount) * 10) / 10 : null,
-    };
+    return { group: g, output: round1(byGroup[g].output), lorPercent: avg(byGroup[g]) };
   }).sort(function (a, b) { return b.output - a.output; });
 
+  var partsArr = Object.keys(byGroupPart).map(function (k) {
+    var b = byGroupPart[k];
+    var entry = {
+      group: b.group, part: b.part, name: b.name,
+      output: round1(b.output), lorPercent: avg(b),
+    };
+    if (module === 'machining') entry.rejection = round1(b.rejection || 0);
+    return entry;
+  }).sort(function (a, b) { return b.output - a.output; });
+
+  var shiftArr = ['Day', 'Night'].map(function (s) {
+    return { shift: s, output: round1(byShift[s].output), lorPercent: avg(byShift[s]) };
+  });
+
+  var seriesFor = function (daily) {
+    return dateKeys.map(function (dk) { return round1(daily[dk] || 0); });
+  };
+  var groupSeries = {};
+  var groupLorSeries = {};
+  Object.keys(groupDaily).forEach(function (g) {
+    groupSeries[g] = seriesFor(groupDaily[g]);
+    // null (not 0) on a day this group logged nothing — a gap in the line,
+    // not a crash to the floor. Matches the top-level lorPercent series.
+    groupLorSeries[g] = dateKeys.map(function (dk) {
+      var b = groupLorDaily[g][dk];
+      return b && b.count > 0 ? Math.round((b.sum / b.count) * 10) / 10 : null;
+    });
+  });
+
   var result = {
-    dates: dateKeys, output: output, lorPercent: lorPercent, byGroup: byGroupArr,
+    dates: dateKeys,
+    output: output,
+    lorPercent: lorPercent,
+    byGroup: byGroupArr,
+    parts: partsArr,
+    byShift: shiftArr,
+    shiftSeries: { Day: seriesFor(shiftDaily.Day), Night: seriesFor(shiftDaily.Night) },
+    groupSeries: groupSeries,
+    groupLorSeries: groupLorSeries,
   };
   if (module === 'machining') {
     result.rejection = rejection;
     result.rejectionsByType = Object.keys(rejByType).map(function (t) {
-      return { type: t, qty: Math.round(rejByType[t] * 10) / 10 };
+      return { type: t, qty: round1(rejByType[t]) };
     }).sort(function (a, b) { return b.qty - a.qty; });
   }
   return { status: 'success', data: result };

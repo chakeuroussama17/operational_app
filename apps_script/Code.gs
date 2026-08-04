@@ -1102,8 +1102,41 @@ function getUsersSheet() {
   if (!sheet) {
     createShiftSheets([{ name: USERS_SHEET, headers: USERS_HEADERS }]);
     sheet = ss.getSheetByName(USERS_SHEET);
+    setupUsersValidation();
   }
   return sheet;
+}
+
+// Dropdowns for the two columns an admin edits by hand.
+//
+// A data-validation rule belongs to the CELL, not to the header above it, so
+// a column that moves leaves its rule behind on whoever takes its place —
+// inserting Department where Status used to sit left Department refusing
+// everything except "active"/"inactive". Same trap as the number formats: the
+// migration has to re-set these from the header names, not assume they moved.
+function setupUsersValidation() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(USERS_SHEET);
+  if (!sheet) return 'SKIP (no such tab): ' + USERS_SHEET;
+  var headers = getHeaders(sheet);
+  if (!headers.length) return 'SKIP (no headers): ' + USERS_SHEET;
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+
+  headers.forEach(function (header, i) {
+    var range = sheet.getRange(2, i + 1, rows, 1);
+    range.clearDataValidations();
+    var choices = null;
+    if (header === 'Status') choices = ['active', 'inactive'];
+    if (header === 'Department') choices = DEPARTMENTS.concat([ALL_DEPARTMENTS]);
+    if (choices) {
+      range.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(choices, true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    }
+  });
+  return 'Users dropdowns refreshed (Status, Department)';
 }
 
 function getUserByEmail(email) {
@@ -1932,6 +1965,9 @@ function migrateColumnOrder() {
     // live tab is exactly what this function exists to do safely (row 1 alone
     // would be corruption — the values must move with their headers).
     reorderSheet(USERS_SHEET, USERS_HEADERS),
+    // Must follow the reorder: the dropdowns are re-set from the header names
+    // once the columns have finished moving.
+    setupUsersValidation(),
   ];
   Logger.log(log.join('\n'));
 }

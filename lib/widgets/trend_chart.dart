@@ -2,32 +2,65 @@ import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 
-/// Line-chart card for one metric over time (daily output, LOR%, rejection
-/// count). Null entries (no data logged that day) leave a gap in the line
-/// rather than dropping to zero.
+/// One named line on a [TrendChart].
+class TrendSeries {
+  const TrendSeries({
+    required this.name,
+    required this.values,
+    required this.color,
+  });
+
+  final String name;
+
+  /// Null entries (nothing logged that day) leave a gap in the line rather
+  /// than dropping it to zero.
+  final List<double?> values;
+  final Color color;
+}
+
+/// Line-chart card for one or more metrics over time.
 ///
-/// One series, one hue — a legend would just restate the title, so instead
-/// the latest value rides as a direct-labelled badge and the y-axis carries
-/// clean rounded gridline values. Tap or drag anywhere on the plot for a
-/// crosshair + exact value at that day; nothing here is tooltip-only — the
-/// same figures are also in the "Daily figures" table alongside it.
+/// A single series gets a filled wash under it and no legend — the title
+/// already says what is plotted, so a one-swatch legend would only restate
+/// it. Two or more get plain lines plus a legend, which is the dependable
+/// identity channel; fills would muddle where they overlap.
+///
+/// Tap or drag anywhere on the plot for a crosshair and the exact value(s)
+/// at that day. Nothing here is tooltip-only — the same figures are in the
+/// table alongside.
 class TrendChart extends StatefulWidget {
   const TrendChart({
     super.key,
     required this.title,
     required this.dates,
-    required this.values,
-    required this.color,
+    required this.series,
     this.suffix = '',
     this.latestLabel = 'Today',
   });
 
+  /// Convenience for the common one-line case.
+  TrendChart.single({
+    Key? key,
+    required String title,
+    required List<String> dates,
+    required List<double?> values,
+    required Color color,
+    String suffix = '',
+    String latestLabel = 'Today',
+  }) : this(
+         key: key,
+         title: title,
+         dates: dates,
+         series: [TrendSeries(name: title, values: values, color: color)],
+         suffix: suffix,
+         latestLabel: latestLabel,
+       );
+
   final String title;
   final List<String> dates;
-  final List<double?> values;
-  final Color color;
+  final List<TrendSeries> series;
 
-  /// Appended to the latest-value badge and axis labels, e.g. "%".
+  /// Appended to values in the badge, axis and tooltip, e.g. "%".
   final String suffix;
 
   /// What the top-right badge calls the last point, e.g. "Today".
@@ -40,19 +73,27 @@ class TrendChart extends StatefulWidget {
 class _TrendChartState extends State<TrendChart> {
   int? _touchIndex;
 
-  bool get _hasData => widget.values.any((v) => v != null);
+  int get _length =>
+      widget.series.isEmpty ? 0 : widget.series.first.values.length;
+
+  bool get _hasData => widget.series.any((s) => s.values.any((v) => v != null));
 
   void _updateTouch(Offset local, Size size) {
-    if (widget.values.length < 2) return;
-    final step = size.width / (widget.values.length - 1);
-    final i = (local.dx / step).round().clamp(0, widget.values.length - 1);
-    if (widget.values[i] == null) return;
+    if (_length < 2) return;
+    // The plot starts after the y-axis gutter; map the touch into it.
+    const axisWidth = 34.0;
+    final plotWidth = size.width - axisWidth;
+    final step = plotWidth / (_length - 1);
+    final i = ((local.dx - axisWidth) / step).round().clamp(0, _length - 1);
     setState(() => _touchIndex = i);
   }
 
   @override
   Widget build(BuildContext context) {
-    final latest = widget.values.isNotEmpty ? widget.values.last : null;
+    final single = widget.series.length == 1;
+    final latest = single && widget.series.first.values.isNotEmpty
+        ? widget.series.first.values.last
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -83,7 +124,7 @@ class _TrendChartState extends State<TrendChart> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.12),
+                    color: widget.series.first.color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -91,12 +132,22 @@ class _TrendChartState extends State<TrendChart> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: widget.color,
+                      color: widget.series.first.color,
                     ),
                   ),
                 ),
             ],
           ),
+          // A legend is not optional for two or more series — identity must
+          // never rest on color-matching alone.
+          if (!single) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              children: [for (final s in widget.series) _LegendKey(series: s)],
+            ),
+          ],
           const SizedBox(height: 14),
           SizedBox(
             height: 160,
@@ -116,8 +167,8 @@ class _TrendChartState extends State<TrendChart> {
                         child: CustomPaint(
                           size: Size.infinite,
                           painter: _LineChartPainter(
-                            values: widget.values,
-                            color: widget.color,
+                            series: widget.series,
+                            fill: single,
                             gridColor: AppColors.chartGrid,
                             axisColor: AppColors.chartAxisLabel,
                             surfaceColor: AppColors.surface,
@@ -151,7 +202,7 @@ class _TrendChartState extends State<TrendChart> {
                   Text(
                     _shortDate(widget.dates[_touchIndex!]),
                     style: _axisStyle.copyWith(
-                      color: widget.color,
+                      color: AppColors.textPrimary,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -180,10 +231,44 @@ class _TrendChartState extends State<TrendChart> {
   }
 }
 
+/// A coloured line-key beside the series name. The text itself stays in the
+/// ink tokens — a light categorical hue is illegible as text on the surface.
+class _LegendKey extends StatelessWidget {
+  const _LegendKey({required this.series});
+
+  final TrendSeries series;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 3,
+          decoration: BoxDecoration(
+            color: series.color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          series.name,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _LineChartPainter extends CustomPainter {
   _LineChartPainter({
-    required this.values,
-    required this.color,
+    required this.series,
+    required this.fill,
     required this.gridColor,
     required this.axisColor,
     required this.surfaceColor,
@@ -191,28 +276,35 @@ class _LineChartPainter extends CustomPainter {
     required this.touchIndex,
   });
 
-  final List<double?> values;
-  final Color color;
+  final List<TrendSeries> series;
+
+  /// Only a lone series gets a wash under it.
+  final bool fill;
   final Color gridColor;
   final Color axisColor;
   final Color surfaceColor;
   final String suffix;
   final int? touchIndex;
 
-  /// Rounds a chart ceiling up to a "clean" step (1/2/5 × a power of ten) so
-  /// gridline labels read as round numbers instead of "83.7".
+  static const _axisWidth = 34.0;
+
+  /// Rounds a chart ceiling up to a clean step so gridline labels read as
+  /// round numbers instead of "83.7".
+  ///
+  /// The ladder is finer than the usual 1/2/5 because a coarse one wastes the
+  /// plot: a series peaking at 105 would jump to a 200 ceiling and use half
+  /// the height. Every rung still halves cleanly, since the mid gridline is
+  /// labelled too (150 -> 75, 300 -> 150).
+  static const _ladder = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 10.0];
+
   static double _niceCeiling(double value) {
     if (value <= 0) return 1;
     final magnitude = _pow10Floor(value);
     final normalized = value / magnitude;
-    final step = normalized <= 1
-        ? 1.0
-        : normalized <= 2
-        ? 2.0
-        : normalized <= 5
-        ? 5.0
-        : 10.0;
-    return step * magnitude;
+    for (final step in _ladder) {
+      if (normalized <= step) return step * magnitude;
+    }
+    return 10 * magnitude;
   }
 
   static double _pow10Floor(double v) {
@@ -231,16 +323,20 @@ class _LineChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (values.isEmpty) return;
-    // Leave room on the left for y-axis value labels.
-    const axisWidth = 34.0;
-    final plotLeft = axisWidth;
-    final plotWidth = size.width - axisWidth;
+    if (series.isEmpty) return;
+    final length = series.first.values.length;
+    if (length == 0) return;
 
-    final nonNull = values.whereType<double>();
-    final maxV = nonNull.isEmpty
-        ? 1.0
-        : nonNull.reduce((a, b) => a > b ? a : b);
+    final plotLeft = _axisWidth;
+    final plotWidth = size.width - _axisWidth;
+
+    // One shared scale across every series — never a second y-axis.
+    var maxV = 0.0;
+    for (final s in series) {
+      for (final v in s.values) {
+        if (v != null && v > maxV) maxV = v;
+      }
+    }
     final top = _niceCeiling(maxV <= 0 ? 1 : maxV);
 
     // Hairline gridlines at 0 / half / top, each with a rounded value label —
@@ -261,115 +357,183 @@ class _LineChartPainter extends CustomPainter {
           fontWeight: FontWeight.w600,
         ),
       );
-      labelPainter.layout(maxWidth: axisWidth - 4);
+      labelPainter.layout(maxWidth: _axisWidth - 4);
       labelPainter.paint(
         canvas,
         Offset(0, (y - labelPainter.height / 2).clamp(0, size.height)),
       );
     }
 
-    final stepX = values.length > 1 ? plotWidth / (values.length - 1) : 0.0;
-    Offset? pointAt(int i) {
-      final v = values[i];
+    final stepX = length > 1 ? plotWidth / (length - 1) : 0.0;
+    Offset? pointAt(TrendSeries s, int i) {
+      final v = s.values[i];
       if (v == null) return null;
       final x = plotLeft + stepX * i;
       final y = size.height - (v / top) * size.height;
       return Offset(x, y.clamp(0, size.height));
     }
 
-    // Build contiguous segments, skipping gaps at null values.
-    final linePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
+    for (final s in series) {
+      final linePaint = Paint()
+        ..color = s.color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
 
-    Path? segment;
-    final segments = <Path>[];
-    for (var i = 0; i < values.length; i++) {
-      final p = pointAt(i);
-      if (p == null) {
-        segment = null;
-        continue;
+      // Contiguous segments, skipping gaps at null values.
+      Path? segment;
+      final segments = <Path>[];
+      for (var i = 0; i < s.values.length; i++) {
+        final p = pointAt(s, i);
+        if (p == null) {
+          segment = null;
+          continue;
+        }
+        if (segment == null) {
+          segment = Path()..moveTo(p.dx, p.dy);
+          segments.add(segment);
+        } else {
+          segment.lineTo(p.dx, p.dy);
+        }
       }
-      if (segment == null) {
-        segment = Path()..moveTo(p.dx, p.dy);
-        segments.add(segment);
-      } else {
-        segment.lineTo(p.dx, p.dy);
+
+      for (final path in segments) {
+        if (fill) {
+          // A wash, never a saturated block — 10% opacity per the mark spec.
+          final fillPath = Path.from(path)
+            ..lineTo(plotLeft + stepX * (length - 1), size.height)
+            ..lineTo(plotLeft, size.height)
+            ..close();
+          canvas.drawPath(
+            fillPath,
+            Paint()..color = s.color.withValues(alpha: 0.10),
+          );
+        }
+        canvas.drawPath(path, linePaint);
+      }
+
+      // End marker only — selective direct labelling, not a dot per point.
+      for (var i = s.values.length - 1; i >= 0; i--) {
+        final p = pointAt(s, i);
+        if (p != null) {
+          canvas.drawCircle(p, 5, Paint()..color = surfaceColor);
+          canvas.drawCircle(p, 4, Paint()..color = s.color);
+          break;
+        }
       }
     }
 
-    for (final path in segments) {
-      // A wash, never a saturated block — 10% opacity per the mark spec.
-      final fillPath = Path.from(path)
-        ..lineTo(plotLeft + stepX * (values.length - 1), size.height)
-        ..lineTo(plotLeft, size.height)
-        ..close();
-      canvas.drawPath(fillPath, Paint()..color = color.withValues(alpha: 0.10));
-      canvas.drawPath(path, linePaint);
-    }
+    if (touchIndex == null) return;
+    _paintCrosshair(canvas, size, plotLeft, pointAt, labelPainter);
+  }
 
-    // End marker only — selective direct labelling, not a dot on every point.
-    Offset? lastPoint;
-    for (var i = values.length - 1; i >= 0; i--) {
-      final p = pointAt(i);
+  void _paintCrosshair(
+    Canvas canvas,
+    Size size,
+    double plotLeft,
+    Offset? Function(TrendSeries, int) pointAt,
+    TextPainter labelPainter,
+  ) {
+    final i = touchIndex!;
+    // Anchor the crosshair on the first series that has a point here, so it
+    // still draws when only one of several logged that day.
+    double? x;
+    for (final s in series) {
+      final p = pointAt(s, i);
       if (p != null) {
-        lastPoint = p;
+        x = p.dx;
         break;
       }
     }
-    if (lastPoint != null) {
-      canvas.drawCircle(lastPoint, 5, Paint()..color = surfaceColor);
-      canvas.drawCircle(lastPoint, 4, Paint()..color = color);
+    if (x == null) return;
+
+    canvas.drawLine(
+      Offset(x, 0),
+      Offset(x, size.height),
+      Paint()
+        ..color = axisColor.withValues(alpha: 0.5)
+        ..strokeWidth = 1,
+    );
+
+    final lines = <_TooltipLine>[];
+    for (final s in series) {
+      final v = s.values[i];
+      if (v == null) continue;
+      final p = pointAt(s, i)!;
+      canvas.drawCircle(p, 6, Paint()..color = surfaceColor);
+      canvas.drawCircle(p, 4.5, Paint()..color = s.color);
+      lines.add(
+        _TooltipLine(
+          text: series.length == 1
+              ? '${_label(v)}$suffix'
+              : '${s.name}  ${_label(v)}$suffix',
+          color: s.color,
+        ),
+      );
     }
+    if (lines.isEmpty) return;
 
-    // Touch crosshair + tooltip.
-    if (touchIndex != null) {
-      final p = pointAt(touchIndex!);
-      final v = values[touchIndex!];
-      if (p != null && v != null) {
-        final crosshairPaint = Paint()
-          ..color = axisColor.withValues(alpha: 0.5)
-          ..strokeWidth = 1;
-        canvas.drawLine(
-          Offset(p.dx, 0),
-          Offset(p.dx, size.height),
-          crosshairPaint,
-        );
-        canvas.drawCircle(p, 6, Paint()..color = surfaceColor);
-        canvas.drawCircle(p, 4.5, Paint()..color = color);
-
-        final tooltipText = _label(v) + suffix;
-        labelPainter.text = TextSpan(
-          text: tooltipText,
+    // Measure every line first so the bubble is sized to fit its text — a
+    // clipped label is worse than no label.
+    var bubbleWidth = 0.0;
+    var bubbleHeight = 8.0;
+    final laid = <TextPainter>[];
+    for (final line in lines) {
+      final tp = TextPainter(
+        textDirection: TextDirection.ltr,
+        text: TextSpan(
+          text: line.text,
           style: const TextStyle(
             fontSize: 12,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             color: Colors.white,
           ),
+        ),
+      )..layout();
+      laid.add(tp);
+      final w = tp.width + (series.length == 1 ? 16 : 26);
+      if (w > bubbleWidth) bubbleWidth = w;
+      bubbleHeight += tp.height + 2;
+    }
+
+    var bubbleX = (x - bubbleWidth / 2).clamp(
+      plotLeft,
+      (size.width - bubbleWidth).clamp(plotLeft, double.infinity),
+    );
+    var bubbleY = 8.0;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bubbleX, bubbleY, bubbleWidth, bubbleHeight),
+        const Radius.circular(6),
+      ),
+      Paint()..color = const Color(0xE6211D3D),
+    );
+
+    var y = bubbleY + 4;
+    for (var n = 0; n < laid.length; n++) {
+      if (series.length > 1) {
+        canvas.drawCircle(
+          Offset(bubbleX + 9, y + laid[n].height / 2),
+          3.5,
+          Paint()..color = lines[n].color,
         );
-        labelPainter.layout();
-        final bubbleWidth = labelPainter.width + 16;
-        final bubbleHeight = labelPainter.height + 10;
-        var bubbleX = p.dx - bubbleWidth / 2;
-        bubbleX = bubbleX.clamp(plotLeft, size.width - bubbleWidth);
-        var bubbleY = p.dy - bubbleHeight - 10;
-        if (bubbleY < 0) bubbleY = p.dy + 10;
-        final rect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(bubbleX, bubbleY, bubbleWidth, bubbleHeight),
-          const Radius.circular(6),
-        );
-        canvas.drawRRect(rect, Paint()..color = color);
-        labelPainter.paint(canvas, Offset(bubbleX + 8, bubbleY + 5));
+        laid[n].paint(canvas, Offset(bubbleX + 18, y));
+      } else {
+        laid[n].paint(canvas, Offset(bubbleX + 8, y));
       }
+      y += laid[n].height + 2;
     }
   }
 
   @override
   bool shouldRepaint(covariant _LineChartPainter old) =>
-      old.values != values ||
-      old.color != color ||
-      old.touchIndex != touchIndex;
+      old.series != series || old.touchIndex != touchIndex || old.fill != fill;
+}
+
+class _TooltipLine {
+  const _TooltipLine({required this.text, required this.color});
+
+  final String text;
+  final Color color;
 }

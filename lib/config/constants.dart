@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbyMNTghXoxjsYjRaqjVxg2Kk20tgFTXcKaRGxwkTxmrrVub7DflN0W6aCzFisiUIe292A/exec';
+    'https://script.google.com/macros/s/AKfycbxlQWi-Wm7weiH2s25isSrm2m5UptpOxRWBJOz3wnbzye0ZEnEqMUFGuK8si_5iKGx_gA/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.
@@ -87,6 +87,11 @@ abstract class AppColors {
   // else in the app.
   static Color get chartGrid => borderSubtle;
   static Color get chartAxisLabel => textSecondary;
+
+  /// For the emphasis pattern: the one mark that matters keeps its hue, the
+  /// rest recede to this. Not a series color — never assign it as identity.
+  static Color get chartMuted =>
+      _dark ? const Color(0xFF4A4463) : const Color(0xFFC3BFD6);
 
   /// Fixed-order, colorblind-safe 8-hue set for telling distinct identities
   /// apart (currently: rejection defect types). Assigned by POSITION in this

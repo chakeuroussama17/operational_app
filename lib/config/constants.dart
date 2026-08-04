@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbyWXgKCOGKnhCWAXV0AFBQGyz-FQLAXVNxkzEcpC4XSgHCQwc9hRyKFzMU5cY0lxcXXAQ/exec';
+    'https://script.google.com/macros/s/AKfycbyMNTghXoxjsYjRaqjVxg2Kk20tgFTXcKaRGxwkTxmrrVub7DflN0W6aCzFisiUIe292A/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.
@@ -78,6 +78,44 @@ abstract class AppColors {
       b == Brightness.dark ? const Color(0xFFECEAF6) : const Color(0xFF211D3D);
   static Color borderOf(Brightness b) =>
       b == Brightness.dark ? const Color(0xFF322D47) : const Color(0xFFC6D0DA);
+
+  // --- Dashboard chart chrome ---
+  //
+  // Gridlines/axes reuse the app's own neutral tokens (already validated for
+  // contrast and already flip with brightness) rather than inventing a
+  // parallel set. Chart surfaces sit on the same card surface as everything
+  // else in the app.
+  static Color get chartGrid => borderSubtle;
+  static Color get chartAxisLabel => textSecondary;
+
+  /// Fixed-order, colorblind-safe 8-hue set for telling distinct identities
+  /// apart (currently: rejection defect types). Assigned by POSITION in this
+  /// list, never generated or cycled — a 9th distinct value folds into
+  /// "Other" rather than reusing or inventing a hue. Validated against both
+  /// a light and a dark chart surface (OKLab CVD-separation + contrast); see
+  /// the project's data-viz reference palette for the source values.
+  static const List<Color> categorical = [
+    Color(0xFF2A78D6), // blue
+    Color(0xFFEB6834), // orange
+    Color(0xFF1BAF7A), // aqua
+    Color(0xFFEDA100), // yellow
+    Color(0xFFE87BA4), // magenta
+    Color(0xFF008300), // green
+    Color(0xFF4A3AA7), // violet
+    Color(0xFFE34948), // red
+  ];
+  static const List<Color> _categoricalDark = [
+    Color(0xFF3987E5),
+    Color(0xFFD95926),
+    Color(0xFF199E70),
+    Color(0xFFC98500),
+    Color(0xFFD55181),
+    Color(0xFF008300),
+    Color(0xFF9085E9),
+    Color(0xFFE66767),
+  ];
+  static List<Color> get categoricalOf =>
+      _dark ? _categoricalDark : categorical;
 }
 
 /// Shared sizing for large, glove-friendly touch targets.

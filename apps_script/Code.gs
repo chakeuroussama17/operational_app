@@ -1928,6 +1928,10 @@ function migrateColumnOrder() {
     reorderSheet(MACHINING_NIGHT_SHEET, machiningHeadersForShift('Night')),
     reorderSheet(MACHINING_REJECTIONS_SHEET, machiningRejectionHeaders()),
     reorderSheet(CONFIG_SHEET, CONFIG_HEADERS),
+    // Users belongs here too: it gained Department, and adding a column to a
+    // live tab is exactly what this function exists to do safely (row 1 alone
+    // would be corruption — the values must move with their headers).
+    reorderSheet(USERS_SHEET, USERS_HEADERS),
   ];
   Logger.log(log.join('\n'));
 }
@@ -1991,7 +1995,7 @@ function applyColumnFormats(sheet, headers) {
       // Two decimals: LOR is cumulative (running total / plan), and 83.33%
       // vs 83% matters when the shift is being chased against its plan.
       range.setNumberFormat('0.00%');
-    } else if (header === 'LastUpdated') {
+    } else if (header === 'LastUpdated' || header === 'RegisteredAt') {
       range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
     } else if (header === 'Date') {
       range.setNumberFormat('yyyy-mm-dd');

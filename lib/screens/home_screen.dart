@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 import '../config/theme_controller.dart';
+import '../models/app_user.dart';
 import '../widgets/area_card.dart';
 import '../widgets/hicom_app_bar.dart';
+import 'auth_gate.dart';
 import 'casting_home_screen.dart';
 import 'dashboard_screen.dart';
 import 'machining_home_screen.dart';
@@ -24,15 +26,51 @@ class _HomeScreenState extends State<HomeScreen> {
 
   static const _titles = ['Production Shift Log', 'Dashboard — Analytics'];
 
-  void _showAccountPlaceholder(BuildContext context) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('User accounts & login are coming soon'),
-          behavior: SnackBarBehavior.floating,
+  /// The modules this person may work in. Without a signed-in user (widget
+  /// tests) that's all of them; the backend refuses anything out of scope
+  /// regardless of what the app draws.
+  List<String> get _visibleModules =>
+      _user?.allowedModules ?? [for (final d in departments) d.toLowerCase()];
+
+  /// Who is signed in — null in widget tests, which pump this screen without
+  /// a gate above it and therefore see every module.
+  AppUser? get _user => AuthScope.maybeOf(context)?.user;
+
+  void _showAccount(BuildContext context) {
+    final user = _user;
+    if (user == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(user.name.isEmpty ? 'Account' : user.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _AccountLine(icon: Icons.alternate_email, text: user.email),
+            if (user.employeeId.isNotEmpty)
+              _AccountLine(
+                icon: Icons.badge_outlined,
+                text: 'Employee ID ${user.employeeId}',
+              ),
+            _AccountLine(
+              icon: user.isAdmin
+                  ? Icons.workspace_premium_rounded
+                  : Icons.factory_rounded,
+              text: user.isAdmin
+                  ? 'Admin — all departments'
+                  : '${user.department} department',
+            ),
+          ],
         ),
-      );
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('CLOSE'),
+          ),
+        ],
+      ),
+    );
   }
 
   IconData _themeIcon(ThemeMode mode) => switch (mode) {
@@ -58,11 +96,12 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: _themeTooltip(themeController.value),
             onPressed: () => themeController.cycle(),
           ),
-          IconButton(
-            icon: const Icon(Icons.account_circle_rounded),
-            tooltip: 'Account',
-            onPressed: () => _showAccountPlaceholder(context),
-          ),
+          if (_user != null)
+            IconButton(
+              icon: const Icon(Icons.account_circle_rounded),
+              tooltip: 'Account',
+              onPressed: () => _showAccount(context),
+            ),
         ],
       ),
       body: SafeArea(
@@ -72,8 +111,10 @@ class _HomeScreenState extends State<HomeScreen> {
         // this whole tree. A const child would be canonicalised and skipped.
         child: IndexedStack(
           index: _tabIndex,
-          // ignore: prefer_const_constructors
-          children: [_LogTab(), DashboardScreen()],
+          children: [
+            _LogTab(modules: _visibleModules),
+            DashboardScreen(modules: _visibleModules),
+          ],
         ),
       ),
       bottomNavigationBar: NavigationBar(
@@ -98,9 +139,35 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// The original home content: pick a production area to log.
+/// One line of the account dialog.
+class _AccountLine extends StatelessWidget {
+  const _AccountLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textSecondary),
+          const SizedBox(width: 10),
+          Flexible(child: Text(text, style: const TextStyle(fontSize: 14.5))),
+        ],
+      ),
+    );
+  }
+}
+
+/// The original home content: pick a production area to log — narrowed to the
+/// modules this person's department covers.
 class _LogTab extends StatelessWidget {
-  const _LogTab();
+  const _LogTab({required this.modules});
+
+  /// Lowercase module keys, in display order.
+  final List<String> modules;
 
   static const _months = [
     'January',
@@ -176,7 +243,9 @@ class _LogTab extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Tap a module to view machines and log output',
+          modules.length == 1
+              ? 'Tap to view machines and log output'
+              : 'Tap a module to view machines and log output',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
@@ -184,27 +253,32 @@ class _LogTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        AreaCard(
-          title: 'Casting',
-          subtitle: 'Die-casting machines · hourly output by DCM & part',
-          icon: Icons.local_fire_department_rounded,
-          onTap: () => _open(context, const CastingHomeScreen()),
-        ),
-        const SizedBox(height: AppDimens.fieldSpacing),
-        AreaCard(
-          title: 'Secondary',
-          subtitle: 'Finishing stations · actual output & LOR%',
-          icon: Icons.handyman_rounded,
-          onTap: () => _open(context, const SecondaryHomeScreen()),
-        ),
-        const SizedBox(height: AppDimens.fieldSpacing),
-        AreaCard(
-          title: 'Machining',
-          subtitle: 'CNC lines by customer · output & rejection',
-          icon: Icons.precision_manufacturing_rounded,
-          onTap: () => _open(context, const MachiningHomeScreen()),
-        ),
+        for (final module in modules) ...[
+          _cardFor(context, module),
+          const SizedBox(height: AppDimens.fieldSpacing),
+        ],
       ],
     );
   }
+
+  Widget _cardFor(BuildContext context, String module) => switch (module) {
+    'casting' => AreaCard(
+      title: 'Casting',
+      subtitle: 'Die-casting machines · hourly output by DCM & part',
+      icon: Icons.local_fire_department_rounded,
+      onTap: () => _open(context, const CastingHomeScreen()),
+    ),
+    'secondary' => AreaCard(
+      title: 'Secondary',
+      subtitle: 'Finishing stations · actual output & LOR%',
+      icon: Icons.handyman_rounded,
+      onTap: () => _open(context, const SecondaryHomeScreen()),
+    ),
+    _ => AreaCard(
+      title: 'Machining',
+      subtitle: 'CNC lines by customer · output & rejection',
+      icon: Icons.precision_manufacturing_rounded,
+      onTap: () => _open(context, const MachiningHomeScreen()),
+    ),
+  };
 }

@@ -905,7 +905,7 @@ void main() {
       expect(await service.fetchUserProfile('new@hidsb.com'), isNull);
     });
 
-    test('registerUser posts the register op', () async {
+    test('registerUser posts the register op with the department', () async {
       late Map<String, dynamic> sent;
       final service = SheetsService(
         client: MockClient((request) async {
@@ -918,6 +918,7 @@ void main() {
         email: 'ahmad@hidsb.com',
         name: 'Ahmad Ali',
         employeeId: 'EMP-014',
+        department: 'Casting',
       );
 
       expect(sent['action'], 'user');
@@ -925,7 +926,52 @@ void main() {
       expect(sent['email'], 'ahmad@hidsb.com');
       expect(sent['name'], 'Ahmad Ali');
       expect(sent['employeeId'], 'EMP-014');
+      expect(sent['department'], 'Casting');
       expect(user.isActive, isTrue);
+    });
+
+    test('registerUser trusts the department the backend stored', () async {
+      // The admin is filed as "All" whatever they asked for.
+      final service = SheetsService(
+        client: MockClient(
+          (request) async => http.Response(
+            '{"status":"success","data":{"email":"admin@hidsb.com",'
+            '"name":"Boss","employeeId":"E0","department":"All",'
+            '"status":"active"}}',
+            200,
+          ),
+        ),
+      );
+
+      final user = await service.registerUser(
+        email: 'admin@hidsb.com',
+        name: 'Boss',
+        employeeId: 'E0',
+        department: 'Casting',
+      );
+
+      expect(user.department, 'All');
+      expect(user.isAdmin, isTrue);
+      expect(user.canAccess('machining'), isTrue);
+    });
+
+    test('config edits carry the signed-in email too', () async {
+      late Map<String, dynamic> sent;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          sent = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }),
+      );
+
+      SheetsService.currentUserEmail = 'ahmad@hidsb.com';
+      await service.addMachiningPart(customer: 'Mazda', part: '9');
+
+      expect(
+        sent['UserEmail'],
+        'ahmad@hidsb.com',
+        reason: 'the backend gates config edits by department as well',
+      );
     });
 
     test('saves carry the signed-in email; signed out, they do not', () async {

@@ -6,11 +6,18 @@ import '../services/sheets_service.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/trend_chart.dart';
 
-/// Real-time analytics tab: daily output/LOR%/rejection trend charts for
-/// each module, pulled live from the sheet. Independent of the Log tab —
-/// this never writes anything, only reads.
+/// Real-time analytics tab: daily output/LOR%/rejection trend charts, pulled
+/// live from the sheet. Independent of the Log tab — this never writes
+/// anything, only reads.
+///
+/// Shows one section per module the signed-in person's department covers, so
+/// a casting supervisor watches casting alone and the admin sees all three.
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, this.modules});
+
+  /// Lowercase module keys to chart, in display order. Null means all three
+  /// (widget tests, which pump this without a signed-in user).
+  final List<String>? modules;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -22,9 +29,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = true;
   String? _error;
   int _days = 14;
-  AnalyticsSeries? _casting;
-  AnalyticsSeries? _secondary;
-  AnalyticsSeries? _machining;
+  final Map<String, AnalyticsSeries> _series = {};
+
+  List<String> get _modules =>
+      widget.modules ?? const ['casting', 'secondary', 'machining'];
 
   @override
   void initState() {
@@ -44,16 +52,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _error = null;
     });
     try {
+      final modules = _modules;
       final results = await Future.wait([
-        _sheetsService.fetchAnalytics(module: 'casting', days: _days),
-        _sheetsService.fetchAnalytics(module: 'secondary', days: _days),
-        _sheetsService.fetchAnalytics(module: 'machining', days: _days),
+        for (final module in modules)
+          _sheetsService.fetchAnalytics(module: module, days: _days),
       ]);
       if (!mounted) return;
       setState(() {
-        _casting = results[0];
-        _secondary = results[1];
-        _machining = results[2];
+        _series
+          ..clear()
+          ..addEntries([
+            for (var i = 0; i < modules.length; i++)
+              MapEntry(modules[i], results[i]),
+          ]);
         _loading = false;
       });
     } on SheetsSubmissionException catch (error) {
@@ -64,6 +75,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
     }
   }
+
+  static const _titles = {
+    'casting': 'Casting',
+    'secondary': 'Secondary',
+    'machining': 'Machining',
+  };
+  static const _icons = {
+    'casting': Icons.local_fire_department_rounded,
+    'secondary': Icons.handyman_rounded,
+    'machining': Icons.precision_manufacturing_rounded,
+  };
 
   void _setDays(int days) {
     if (days == _days) return;
@@ -120,24 +142,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 18),
-          _ModuleSection(
-            title: 'Casting',
-            icon: Icons.local_fire_department_rounded,
-            series: _casting,
-          ),
-          const SizedBox(height: 22),
-          _ModuleSection(
-            title: 'Secondary',
-            icon: Icons.handyman_rounded,
-            series: _secondary,
-          ),
-          const SizedBox(height: 22),
-          _ModuleSection(
-            title: 'Machining',
-            icon: Icons.precision_manufacturing_rounded,
-            series: _machining,
-            showRejection: true,
-          ),
+          for (final module in _modules) ...[
+            _ModuleSection(
+              title: _titles[module] ?? module,
+              icon: _icons[module] ?? Icons.factory_rounded,
+              series: _series[module],
+              showRejection: module == 'machining',
+            ),
+            const SizedBox(height: 22),
+          ],
           const SizedBox(height: 12),
         ],
       ),

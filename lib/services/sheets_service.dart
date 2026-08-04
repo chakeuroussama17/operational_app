@@ -89,24 +89,34 @@ class SheetsService {
   }
 
   /// One-time registration after the first Firebase sign-in. The backend
-  /// appends to the Users tab with status "active".
+  /// appends to the Users tab with status "active" — and doubles as the
+  /// repair path for a row that predates the Department column.
   Future<AppUser> registerUser({
     required String email,
     required String name,
     required String employeeId,
+    required String department,
   }) async {
-    await _postJson(CASTING_WEBHOOK_URL, {
+    final decoded = await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'user',
       'op': 'register',
       'email': email,
       'name': name,
       'employeeId': employeeId,
+      'department': department,
     });
+    // The backend decides the stored department (the admin is always "All"),
+    // so prefer its answer over what was asked for.
+    if (decoded is Map<String, dynamic> &&
+        decoded['data'] is Map<String, dynamic>) {
+      return AppUser.fromJson(decoded['data'] as Map<String, dynamic>);
+    }
     return AppUser(
       email: email,
       name: name,
       employeeId: employeeId,
+      department: department,
       status: 'active',
     );
   }
@@ -182,6 +192,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'castingAddPart',
       'group': dcm,
       'part': part,
@@ -201,6 +212,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'castingEditPart',
       'group': dcm,
       'part': part,
@@ -285,6 +297,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'secondaryAddPart',
       'group': station,
       'part': part,
@@ -304,6 +317,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'secondaryEditPart',
       'group': station,
       'part': part,
@@ -407,6 +421,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'machiningAddPart',
       'group': customer,
       'part': part,
@@ -425,6 +440,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': 'machiningEditPart',
       'group': customer,
       'part': part,
@@ -489,6 +505,7 @@ class SheetsService {
   Future<ConfigSnapshot> fetchConfig(String module) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'module': module,
     });
     if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
@@ -538,6 +555,7 @@ class SheetsService {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
+      'UserEmail': ?currentUserEmail,
       'op': op,
       'module': module,
       'kind': kind,
@@ -570,7 +588,9 @@ class SheetsService {
 
   // ---------- Shared HTTP plumbing ----------
 
-  Future<void> _postJson(String url, Map<String, dynamic> payload) async {
+  /// Returns the decoded JSON body when the script sent one, else null —
+  /// registration reads its stored profile back out of it.
+  Future<dynamic> _postJson(String url, Map<String, dynamic> payload) async {
     late final http.Response response;
     try {
       response = await _client
@@ -607,11 +627,14 @@ class SheetsService {
     // failure result such as {"status": "error", "message": "..."}.
     if (response.statusCode == 200 && response.body.isNotEmpty) {
       try {
-        _throwIfErrorEnvelope(jsonDecode(response.body));
+        final decoded = jsonDecode(response.body);
+        _throwIfErrorEnvelope(decoded);
+        return decoded;
       } on FormatException {
         // Non-JSON body (e.g. redirect HTML) — treat as success.
       }
     }
+    return null;
   }
 
   /// GET with query params, following the Apps Script redirect, returning

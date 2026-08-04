@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbzkjkWeDggI3nyWgWme6RdqALzxlYRAdCC92JqTzN89z2L2Rv26iMnmQ3s7S9JBSPDPuA/exec';
+    'https://script.google.com/macros/s/AKfycbyWXgKCOGKnhCWAXV0AFBQGyz-FQLAXVNxkzEcpC4XSgHCQwc9hRyKFzMU5cY0lxcXXAQ/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.
@@ -13,6 +13,15 @@ const List<String> allowedEmailDomains = [
   '@hidsb.com',
   '@hicom-engineering.com',
 ];
+
+/// Sees every department and every dashboard. Everyone else is confined to
+/// the one department on their Users row. The backend enforces this too —
+/// this constant only decides what the app bothers to show.
+const String adminEmail = 'admin@hidsb.com';
+
+/// The three production departments, in the order they appear everywhere.
+/// Each maps 1:1 to a module ('Casting' -> 'casting').
+const List<String> departments = ['Casting', 'Secondary', 'Machining'];
 
 /// Shared secret checked by the Apps Script doPost (its SECRET_KEY).
 /// Sent as a top-level "secret" field with every submission.

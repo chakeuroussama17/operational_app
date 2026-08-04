@@ -74,6 +74,10 @@ class _AuthGateState extends State<AuthGate> {
   _GateState _state = _GateState.initializing;
   String _email = '';
   AppUser? _user;
+
+  /// Set when a registered account is missing its department — the register
+  /// screen reopens prefilled to collect just that.
+  AppUser? _incomplete;
   String _error = '';
 
   @override
@@ -127,9 +131,19 @@ class _AuthGateState extends State<AuthGate> {
       final user = await _service.fetchUserProfile(email);
       if (!mounted) return;
       if (user == null) {
-        setState(() => _state = _GateState.register);
+        setState(() {
+          _incomplete = null;
+          _state = _GateState.register;
+        });
       } else if (!user.isActive) {
         setState(() => _state = _GateState.blocked);
+      } else if (!user.hasDepartment) {
+        // Registered before departments existed: they can't be shown a module
+        // until they say which one is theirs.
+        setState(() {
+          _incomplete = user;
+          _state = _GateState.register;
+        });
       } else {
         _enter(user);
       }
@@ -156,6 +170,7 @@ class _AuthGateState extends State<AuthGate> {
     if (!mounted) return;
     setState(() {
       _user = null;
+      _incomplete = null;
       _email = '';
       _state = _GateState.loggedOut;
     });
@@ -181,6 +196,7 @@ class _AuthGateState extends State<AuthGate> {
         return RegisterScreen(
           email: _email,
           service: _service,
+          existing: _incomplete,
           onRegistered: _enter,
           onSignOut: _signOut,
         );

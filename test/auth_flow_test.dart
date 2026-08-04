@@ -120,6 +120,7 @@ void main() {
             'email': 'ahmad@hidsb.com',
             'name': 'Ahmad Ali',
             'employeeId': 'EMP-014',
+            'department': 'Casting',
             'status': 'active',
           }),
         ),
@@ -132,6 +133,95 @@ void main() {
     expect(find.text('Select production area'), findsOneWidget);
     expect(find.byIcon(Icons.logout_rounded), findsOneWidget);
     expect(SheetsService.currentUserEmail, 'ahmad@hidsb.com');
+  });
+
+  testWidgets('a casting user is shown casting and nothing else', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthGate(
+          backend: FakeAuthBackend(restoredEmail: 'ahmad@hidsb.com'),
+          service: userService({
+            'email': 'ahmad@hidsb.com',
+            'name': 'Ahmad Ali',
+            'employeeId': 'EMP-014',
+            'department': 'Casting',
+            'status': 'active',
+          }),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Casting'), findsOneWidget);
+    expect(find.text('Secondary'), findsNothing);
+    expect(find.text('Machining'), findsNothing);
+  });
+
+  testWidgets('the admin is shown every department', (tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthGate(
+          backend: FakeAuthBackend(restoredEmail: 'admin@hidsb.com'),
+          service: userService({
+            'email': 'admin@hidsb.com',
+            'name': 'Boss',
+            'employeeId': 'E0',
+            'department': 'All',
+            'status': 'active',
+          }),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Casting'), findsOneWidget);
+    expect(find.text('Secondary'), findsOneWidget);
+    expect(find.text('Machining'), findsOneWidget);
+  });
+
+  testWidgets('an account with no department is sent back to finish', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthGate(
+          backend: FakeAuthBackend(restoredEmail: 'old@hidsb.com'),
+          service: userService({
+            'email': 'old@hidsb.com',
+            'name': 'Old Hand',
+            'employeeId': 'E9',
+            'department': '',
+            'status': 'active',
+          }),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Prefilled with what the sheet already knows; only the department is
+    // missing, and nothing is logged until it is chosen.
+    expect(find.text('One more thing'), findsOneWidget);
+    expect(find.text('Old Hand'), findsOneWidget);
+    expect(find.text('Select production area'), findsNothing);
+    expect(SheetsService.currentUserEmail, isNull);
+
+    await tester.tap(find.text('Secondary'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('REGISTER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('REGISTER'));
+    await tester.pumpAndSettle();
+
+    // In, and confined to the department just chosen.
+    expect(find.text('Secondary'), findsOneWidget);
+    expect(find.text('Casting'), findsNothing);
   });
 
   testWidgets('gate: unregistered -> registration page -> in', (tester) async {
@@ -150,6 +240,19 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'New Person');
     await tester.enterText(find.byType(TextField).at(1), 'EMP-099');
+
+    // A department is required — registering without one goes nowhere.
+    await tester.ensureVisible(find.text('REGISTER'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('REGISTER'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose your department'), findsOneWidget);
+    expect(find.text('Select production area'), findsNothing);
+
+    await tester.tap(find.text('Machining'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('REGISTER'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('REGISTER'));
     await tester.pumpAndSettle();
 

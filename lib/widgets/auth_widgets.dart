@@ -1,29 +1,25 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 
-/// ---- Backdrop tuning: THE TWO NUMBERS TO CHANGE ----
+/// ---- Backdrop tuning: THE NUMBER TO CHANGE ----
 ///
-/// How far the factory photo recedes behind the form. Both are meant to be
-/// adjusted by eye — rebuild and look.
+/// How far the factory photo fades behind the form. The image itself stays
+/// SHARP — this only controls how much of it shows through.
 ///
-///   [kBackdropBlur]  softness. 0 = a sharp photo competing with the form;
-///                    ~10 = the floor reads as an atmospheric shadow.
-///   [kBackdropDim]   darkness at the TOP of the screen. The scrim deepens
-///                    toward the bottom automatically (the form sits there
-///                    and needs the most contrast).
+///   0.0  the untouched photo, full strength
+///   0.5  half faded (roughly what a photo behind frosted glass looks like)
+///   1.0  gone entirely, solid black
 ///
-/// Raise either to push the photo further back; drop both to 0 to see the
-/// untouched image.
-const double kBackdropBlur = 9;
-const double kBackdropDim = 0.45;
+/// This is the opacity at the TOP of the screen; the fade deepens toward the
+/// bottom automatically, because the form sits there and needs the most
+/// contrast behind it.
+const double kBackdropFade = 0.62;
 
-/// Full-bleed backdrop for the auth screens: the factory-floor photo,
-/// blurred and dimmed so it reads as depth rather than as a picture, with
-/// white text staying legible over every part of it. Wraps its own
-/// [Scaffold] and [SafeArea].
+/// Full-bleed backdrop for the auth screens: the factory-floor photo, kept
+/// sharp but faded back so it reads as atmosphere rather than as a picture
+/// competing with the form. White text stays legible over every part of it.
+/// Wraps its own [Scaffold] and [SafeArea].
 ///
 /// Also neutralises the app's global [InputDecorationTheme] for everything
 /// inside it. That theme fills every field with an opaque surface colour,
@@ -41,20 +37,11 @@ class AuthBackground extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(
-              sigmaX: kBackdropBlur,
-              sigmaY: kBackdropBlur,
-              // Clamp, or the blur samples past the bitmap and leaves a
-              // washed-out band down every edge.
-              tileMode: TileMode.clamp,
-            ),
-            child: Image.asset(
-              'assets/background.jpg',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) =>
-                  const ColoredBox(color: Color(0xFF14101F)),
-            ),
+          Image.asset(
+            'assets/background.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stack) =>
+                const ColoredBox(color: Color(0xFF14101F)),
           ),
           DecoratedBox(
             decoration: BoxDecoration(
@@ -62,12 +49,12 @@ class AuthBackground extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withValues(alpha: kBackdropDim),
+                  Colors.black.withValues(alpha: kBackdropFade),
                   Colors.black.withValues(
-                    alpha: (kBackdropDim + 0.12).clamp(0.0, 1.0),
+                    alpha: (kBackdropFade + 0.10).clamp(0.0, 1.0),
                   ),
                   Colors.black.withValues(
-                    alpha: (kBackdropDim + 0.28).clamp(0.0, 1.0),
+                    alpha: (kBackdropFade + 0.22).clamp(0.0, 1.0),
                   ),
                 ],
               ),

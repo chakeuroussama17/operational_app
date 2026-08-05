@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 import '../config/theme_controller.dart';
+import '../models/analytics_models.dart';
 import '../models/app_user.dart';
-import '../widgets/area_card.dart';
+import '../services/sheets_service.dart';
 import '../widgets/hicom_app_bar.dart';
+import '../widgets/home_widgets.dart';
 import 'auth_gate.dart';
 import 'casting_home_screen.dart';
 import 'dashboard_screen.dart';
@@ -12,10 +14,14 @@ import 'machining_home_screen.dart';
 import 'secondary_home_screen.dart';
 
 /// App root: bottom nav between the Log tab (pick a module, enter data) and
-/// the Dashboard tab (real-time analytics). Owns the persistent app bar,
-/// including the (placeholder) user-account icon.
+/// the Dashboard tab (real-time analytics). Owns the persistent app bar and
+/// the account/theme actions.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.service});
+
+  /// Test seam: the Log tab's KPI strip normally builds its own
+  /// [SheetsService]; widget tests inject one backed by a mock client.
+  final SheetsService? service;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -112,25 +118,48 @@ class _HomeScreenState extends State<HomeScreen> {
         child: IndexedStack(
           index: _tabIndex,
           children: [
-            _LogTab(modules: _visibleModules),
+            _LogTab(modules: _visibleModules, service: widget.service),
             DashboardScreen(modules: _visibleModules),
           ],
         ),
       ),
+      // Dark to sit with the navy app bar above it and the branded Log tab
+      // between them — the whole shell reads as one piece.
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         onDestinationSelected: (index) => setState(() => _tabIndex = index),
-        backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.surfaceTint,
-        destinations: const [
+        backgroundColor: const Color(0xFF14101F),
+        indicatorColor: AppColors.authViolet.withValues(alpha: 0.35),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: states.contains(WidgetState.selected)
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.6),
+          ),
+        ),
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.edit_note_rounded),
-            selectedIcon: Icon(Icons.edit_note_rounded, color: AppColors.navy),
+            icon: Icon(
+              Icons.edit_note_rounded,
+              color: Colors.white.withValues(alpha: 0.6),
+            ),
+            selectedIcon: const Icon(
+              Icons.edit_note_rounded,
+              color: Colors.white,
+            ),
             label: 'Log',
           ),
           NavigationDestination(
-            icon: Icon(Icons.insights_rounded),
-            selectedIcon: Icon(Icons.insights_rounded, color: AppColors.navy),
+            icon: Icon(
+              Icons.insights_rounded,
+              color: Colors.white.withValues(alpha: 0.6),
+            ),
+            selectedIcon: const Icon(
+              Icons.insights_rounded,
+              color: Colors.white,
+            ),
             label: 'Dashboard',
           ),
         ],
@@ -161,13 +190,28 @@ class _AccountLine extends StatelessWidget {
   }
 }
 
-/// The original home content: pick a production area to log — narrowed to the
-/// modules this person's department covers.
-class _LogTab extends StatelessWidget {
-  const _LogTab({required this.modules});
+/// The home content: today's headline numbers, then the production areas to
+/// log into. Styled to the auth screens rather than the working screens —
+/// this is where you land, not where you work.
+class _LogTab extends StatefulWidget {
+  const _LogTab({required this.modules, this.service});
 
   /// Lowercase module keys, in display order.
   final List<String> modules;
+  final SheetsService? service;
+
+  @override
+  State<_LogTab> createState() => _LogTabState();
+}
+
+class _LogTabState extends State<_LogTab> {
+  late final _service = widget.service ?? SheetsService();
+
+  /// Today's slice per module. Absent until it arrives; a failed fetch just
+  /// leaves the KPI tiles showing "—" rather than blocking the page — the
+  /// point of this screen is the buttons underneath, and those always work.
+  final Map<String, AnalyticsSeries> _series = {};
+  bool _loading = true;
 
   static const _months = [
     'January',
@@ -184,97 +228,230 @@ class _LogTab extends StatelessWidget {
     'December',
   ];
 
+  static const _icons = {
+    'casting': Icons.local_fire_department_rounded,
+    'secondary': Icons.handyman_rounded,
+    'machining': Icons.precision_manufacturing_rounded,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadKpis();
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadKpis() async {
+    setState(() => _loading = true);
+    try {
+      final modules = widget.modules;
+      final results = await Future.wait([
+        for (final module in modules)
+          _service.fetchAnalytics(module: module, days: 1),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _series
+          ..clear()
+          ..addEntries([
+            for (var i = 0; i < modules.length; i++)
+              MapEntry(modules[i], results[i]),
+          ]);
+        _loading = false;
+      });
+    } on SheetsSubmissionException {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
   /// Today's date as "24 July 2026".
   static String _formatToday() {
     final now = DateTime.now();
     return '${now.day} ${_months[now.month - 1]} ${now.year}';
   }
 
+  static String _fmt(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+
   void _open(BuildContext context, Widget screen) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
   }
 
+  double get _todayOutput {
+    var total = 0.0;
+    for (final s in _series.values) {
+      if (s.output.isNotEmpty) total += s.output.last;
+    }
+    return total;
+  }
+
+  double? get _todayLor {
+    final values = [
+      for (final s in _series.values)
+        if (s.lorPercent.isNotEmpty && s.lorPercent.last != null)
+          s.lorPercent.last!,
+    ];
+    if (values.isEmpty) return null;
+    return values.reduce((a, b) => a + b) / values.length;
+  }
+
+  double get _todayRejections {
+    var total = 0.0;
+    for (final s in _series.values) {
+      if (s.rejection.isNotEmpty) total += s.rejection.last;
+    }
+    return total;
+  }
+
+  /// How many machines/stations/customers reported anything today — the
+  /// stand-in third KPI for departments that don't track rejections.
+  int get _reportingCount {
+    var count = 0;
+    for (final s in _series.values) {
+      count += s.byGroup.length;
+    }
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(AppDimens.screenPadding),
-      children: [
-        const SizedBox(height: 8),
-        Row(
+    final showRejections = widget.modules.contains('machining');
+    final hasData = _series.isNotEmpty;
+    final lor = _todayLor;
+
+    return HomeBackdrop(
+      child: RefreshIndicator(
+        color: AppColors.authPink,
+        backgroundColor: const Color(0xFF1B1430),
+        onRefresh: _loadKpis,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceTint,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.event_rounded,
-                    size: 14,
-                    color: AppColors.navy,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'TODAY · ${_formatToday()}',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
-                      color: AppColors.navy,
-                    ),
-                  ),
-                ],
+            Center(
+              child: HomeHeroBadge(
+                icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
               ),
             ),
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                widget.modules.length == 1
+                    ? _titleFor(widget.modules.first)
+                    : 'HICOM Diecastings',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: Text(
+                'TODAY · ${_formatToday()}'.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  color: Colors.white.withValues(alpha: 0.55),
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                Expanded(
+                  child: HomeKpiTile(
+                    label: 'Output',
+                    value: _loading || !hasData ? '—' : _fmt(_todayOutput),
+                    unit: _loading || !hasData ? null : 'pcs',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: HomeKpiTile(
+                    label: 'Avg LOR',
+                    value: lor == null ? '—' : lor.toStringAsFixed(1),
+                    unit: lor == null ? null : '%',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: showRejections
+                      ? HomeKpiTile(
+                          label: 'Rejects',
+                          value: _loading || !hasData
+                              ? '—'
+                              : _fmt(_todayRejections),
+                          unit: _loading || !hasData ? null : 'pcs',
+                        )
+                      : HomeKpiTile(
+                          label: 'Reporting',
+                          value: _loading || !hasData
+                              ? '—'
+                              : '$_reportingCount',
+                        ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 26),
+            Text(
+              'Select production area',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              widget.modules.length == 1
+                  ? 'Tap to view machines and log output'
+                  : 'Tap a module to view machines and log output',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.55),
+              ),
+            ),
+            const SizedBox(height: 14),
+            for (final module in widget.modules) ...[
+              _tileFor(context, module),
+              const SizedBox(height: 12),
+            ],
           ],
         ),
-        const SizedBox(height: 10),
-        Text(
-          'Select production area',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: AppColors.textPrimary,
-            letterSpacing: 0.2,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          modules.length == 1
-              ? 'Tap to view machines and log output'
-              : 'Tap a module to view machines and log output',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: AppColors.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 20),
-        for (final module in modules) ...[
-          _cardFor(context, module),
-          const SizedBox(height: AppDimens.fieldSpacing),
-        ],
-      ],
+      ),
     );
   }
 
-  Widget _cardFor(BuildContext context, String module) => switch (module) {
-    'casting' => AreaCard(
+  static String _titleFor(String module) => switch (module) {
+    'casting' => 'Casting',
+    'secondary' => 'Secondary',
+    _ => 'Machining',
+  };
+
+  Widget _tileFor(BuildContext context, String module) => switch (module) {
+    'casting' => HomeModuleTile(
       title: 'Casting',
       subtitle: 'Die-casting machines · hourly output by DCM & part',
       icon: Icons.local_fire_department_rounded,
       onTap: () => _open(context, const CastingHomeScreen()),
     ),
-    'secondary' => AreaCard(
+    'secondary' => HomeModuleTile(
       title: 'Secondary',
       subtitle: 'Finishing stations · actual output & LOR%',
       icon: Icons.handyman_rounded,
       onTap: () => _open(context, const SecondaryHomeScreen()),
     ),
-    _ => AreaCard(
+    _ => HomeModuleTile(
       title: 'Machining',
       subtitle: 'CNC lines by customer · output & rejection',
       icon: Icons.precision_manufacturing_rounded,

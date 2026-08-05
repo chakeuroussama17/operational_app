@@ -283,7 +283,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Casting'), findsOneWidget);
+    // A department-scoped home names its module twice — the hero heading and
+    // the tile — so what matters is that the OTHER two never appear.
+    expect(find.text('Casting'), findsWidgets);
     expect(find.text('Secondary'), findsNothing);
     expect(find.text('Machining'), findsNothing);
   });
@@ -346,8 +348,9 @@ void main() {
     await tester.tap(find.text('CONTINUE'));
     await tester.pumpAndSettle();
 
-    // In, and confined to the department just chosen.
-    expect(find.text('Secondary'), findsOneWidget);
+    // In, and confined to the department just chosen (named on both the hero
+    // heading and the tile).
+    expect(find.text('Secondary'), findsWidgets);
     expect(find.text('Casting'), findsNothing);
   });
 

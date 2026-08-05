@@ -22,7 +22,16 @@ void main() {
   testWidgets('home screen shows the three production area cards', (
     tester,
   ) async {
+    // The home page leads with a hero badge and a KPI strip now, so the
+    // module tiles need a taller surface than the 600px default to all be
+    // laid out at once.
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(const HicomOpsApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('Casting'), findsOneWidget);
     expect(find.text('Secondary'), findsOneWidget);
@@ -126,7 +135,14 @@ void main() {
   testWidgets('casting home shows a retry error state when the fetch fails', (
     tester,
   ) async {
+    // See the note in 'home screen shows the three production area cards'.
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(const HicomOpsApp());
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Casting'));
     await tester.pumpAndSettle();
 

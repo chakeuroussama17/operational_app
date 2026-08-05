@@ -123,42 +123,36 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      // Dark to sit with the navy app bar above it and the branded Log tab
-      // between them — the whole shell reads as one piece.
+      // Follows the app's light/dark setting like every other surface; the
+      // brand accent rides the selection indicator rather than the whole bar.
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         onDestinationSelected: (index) => setState(() => _tabIndex = index),
-        backgroundColor: const Color(0xFF14101F),
-        indicatorColor: AppColors.authViolet.withValues(alpha: 0.35),
+        backgroundColor: AppColors.surface,
+        indicatorColor: AppColors.authViolet.withValues(alpha: 0.22),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
             color: states.contains(WidgetState.selected)
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.6),
+                ? AppColors.authViolet
+                : AppColors.textSecondary,
           ),
         ),
         destinations: [
           NavigationDestination(
-            icon: Icon(
+            icon: Icon(Icons.edit_note_rounded, color: AppColors.textSecondary),
+            selectedIcon: Icon(
               Icons.edit_note_rounded,
-              color: Colors.white.withValues(alpha: 0.6),
-            ),
-            selectedIcon: const Icon(
-              Icons.edit_note_rounded,
-              color: Colors.white,
+              color: AppColors.authViolet,
             ),
             label: 'Log',
           ),
           NavigationDestination(
-            icon: Icon(
+            icon: Icon(Icons.insights_rounded, color: AppColors.textSecondary),
+            selectedIcon: Icon(
               Icons.insights_rounded,
-              color: Colors.white.withValues(alpha: 0.6),
-            ),
-            selectedIcon: const Icon(
-              Icons.insights_rounded,
-              color: Colors.white,
+              color: AppColors.authViolet,
             ),
             label: 'Dashboard',
           ),
@@ -328,7 +322,7 @@ class _LogTabState extends State<_LogTab> {
     return HomeBackdrop(
       child: RefreshIndicator(
         color: AppColors.authPink,
-        backgroundColor: const Color(0xFF1B1430),
+        backgroundColor: AppColors.surface,
         onRefresh: _loadKpis,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
@@ -336,6 +330,13 @@ class _LogTabState extends State<_LogTab> {
             Center(
               child: HomeHeroBadge(
                 icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
+                // The one illustration we have is a die-casting cell, so it
+                // only stands in where casting is actually on screen; the
+                // other departments keep the gradient tile until they have
+                // artwork of their own.
+                imageAsset: widget.modules.contains('casting')
+                    ? 'assets/hero_casting.png'
+                    : null,
               ),
             ),
             const SizedBox(height: 6),
@@ -344,10 +345,10 @@ class _LogTabState extends State<_LogTab> {
                 widget.modules.length == 1
                     ? _titleFor(widget.modules.first)
                     : 'HICOM Diecastings',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
-                  color: Colors.white,
+                  color: AppColors.textPrimary,
                 ),
               ),
             ),
@@ -359,7 +360,7 @@ class _LogTabState extends State<_LogTab> {
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.0,
-                  color: Colors.white.withValues(alpha: 0.55),
+                  color: AppColors.textSecondary,
                 ),
               ),
             ),
@@ -403,10 +404,10 @@ class _LogTabState extends State<_LogTab> {
             const SizedBox(height: 26),
             Text(
               'Select production area',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 letterSpacing: 0.2,
               ),
             ),
@@ -418,7 +419,7 @@ class _LogTabState extends State<_LogTab> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.55),
+                color: AppColors.textSecondary,
               ),
             ),
             const SizedBox(height: 14),

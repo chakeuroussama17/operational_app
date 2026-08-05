@@ -25,6 +25,7 @@ flutter:
   assets:
     - assets/logo.png
     - assets/background.jpg
+    - assets/hero_casting.png
 
 # Launcher icon generated from assets/app_logo.png via:
 #   dart run flutter_launcher_icons

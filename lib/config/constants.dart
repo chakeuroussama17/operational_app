@@ -55,10 +55,10 @@ abstract class AppColors {
   static const Color success = Color(0xFF2E7D32);
   static const Color danger = Color(0xFFC62828);
 
-  // --- Auth screens (login / sign-up): a dark photo backdrop with a
-  // magenta->violet accent, distinct from the rest of the app's navy/amber
-  // brand on purpose — these two screens are the floor tablet's "cover", not
-  // a working screen, and are styled from the company's supplied mockup. ---
+  // --- The magenta->violet accent, from the company's supplied auth mockup.
+  // Started life on login/sign-up; now also carries the app bar rule, the
+  // home hero and every gradient icon chip, so the whole app reads as one
+  // palette rather than a branded cover bolted onto a navy app. ---
   static const Color authPink = Color(0xFFE91E63);
   static const Color authViolet = Color(0xFF7C3AED);
   static const LinearGradient authGradient = LinearGradient(
@@ -66,6 +66,21 @@ abstract class AppColors {
     end: Alignment.bottomRight,
     colors: [authPink, authViolet],
   );
+
+  /// The app bar's own gradient — the logo purple deepened, so the pink rule
+  /// beneath it has something dark to sit against in either mode.
+  static const LinearGradient headerGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF3B2F7F), Color(0xFF241C52)],
+  );
+
+  /// The Log tab's backdrop wash. Dark keeps the login's mood; light is the
+  /// same hue drained to near-white so day mode is genuinely light rather
+  /// than a dimmed dark theme.
+  static List<Color> get homeBackdrop => _dark
+      ? const [Color(0xFF1B1430), Color(0xFF120E1F), Color(0xFF0B0913)]
+      : const [Color(0xFFF7F5FC), Color(0xFFF1EDFA), Color(0xFFE8E3F5)];
 
   // --- Neutrals (flip with brightness) ---
   static Color get background =>

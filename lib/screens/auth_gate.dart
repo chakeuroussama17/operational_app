@@ -191,7 +191,11 @@ class _AuthGateState extends State<AuthGate> {
               'rebuild the app.\n\n$_error',
         );
       case _GateState.loggedOut:
-        return LoginScreen(backend: _backend, onSignedIn: _checkProfile);
+        return LoginScreen(
+          backend: _backend,
+          service: _service,
+          onSignedIn: _checkProfile,
+        );
       case _GateState.register:
         return RegisterScreen(
           email: _email,

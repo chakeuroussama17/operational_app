@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// modules, routed by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbxlQWi-Wm7weiH2s25isSrm2m5UptpOxRWBJOz3wnbzye0ZEnEqMUFGuK8si_5iKGx_gA/exec';
+    'https://script.google.com/macros/s/AKfycbwy82EToI38l6Q4QxwBoThPls1HWviOt3Y7DUQu4EVVls6xFM5NMkHUJwYCl2ymx_lS2Q/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.
@@ -54,6 +54,18 @@ abstract class AppColors {
   static const Color amberDark = Color(0xFFB26A00);
   static const Color success = Color(0xFF2E7D32);
   static const Color danger = Color(0xFFC62828);
+
+  // --- Auth screens (login / sign-up): a dark photo backdrop with a
+  // magenta->violet accent, distinct from the rest of the app's navy/amber
+  // brand on purpose — these two screens are the floor tablet's "cover", not
+  // a working screen, and are styled from the company's supplied mockup. ---
+  static const Color authPink = Color(0xFFE91E63);
+  static const Color authViolet = Color(0xFF7C3AED);
+  static const LinearGradient authGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [authPink, authViolet],
+  );
 
   // --- Neutrals (flip with brightness) ---
   static Color get background =>

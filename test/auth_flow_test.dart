@@ -15,6 +15,7 @@ class FakeAuthBackend implements AuthBackend {
   String? restoredEmail;
   int signInCalls = 0;
   int signOutCalls = 0;
+  int createAccountCalls = 0;
 
   @override
   String? get currentEmail => restoredEmail;
@@ -29,7 +30,10 @@ class FakeAuthBackend implements AuthBackend {
   }
 
   @override
-  Future<String> createAccount(String email, String password) async => email;
+  Future<String> createAccount(String email, String password) async {
+    createAccountCalls++;
+    return email;
+  }
 
   @override
   Future<void> sendPasswordReset(String email) async {}
@@ -41,7 +45,10 @@ class FakeAuthBackend implements AuthBackend {
   }
 }
 
-/// Users-tab backend stub: `profile` is what ?action=user returns.
+/// Users-tab backend stub: `profile` is what ?action=user returns; a
+/// registration POST is recorded rather than actually stored, so the same
+/// profile keeps coming back on the next GET unless the test wires its own
+/// stateful client (see the sign-up test below).
 SheetsService userService(Map<String, dynamic>? profile) {
   return SheetsService(
     client: MockClient((request) async {
@@ -56,6 +63,18 @@ SheetsService userService(Map<String, dynamic>? profile) {
   );
 }
 
+/// Opens an [AuthGlassDropdown] and picks [option] — it renders its choices
+/// in a popup route, so picking one is tap-to-open, then tap-the-item.
+Future<void> _pickDropdown(WidgetTester tester, String option) async {
+  final dropdown = find.byType(DropdownButtonFormField<String>);
+  await tester.ensureVisible(dropdown);
+  await tester.pumpAndSettle();
+  await tester.tap(dropdown);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(option).last);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   tearDown(() => SheetsService.currentUserEmail = null);
 
@@ -68,6 +87,7 @@ void main() {
       MaterialApp(
         home: LoginScreen(
           backend: backend,
+          service: userService(null),
           onSignedIn: (email) => signedIn = email,
         ),
       ),
@@ -75,7 +95,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'ahmad@gmail.com');
     await tester.enterText(find.byType(TextField).at(1), 'secret123');
-    await tester.tap(find.text('SIGN IN'));
+    await tester.tap(find.text('LOG IN'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Use your company email'), findsOneWidget);
@@ -92,6 +112,7 @@ void main() {
       MaterialApp(
         home: LoginScreen(
           backend: backend,
+          service: userService(null),
           onSignedIn: (email) => signedIn = email,
         ),
       ),
@@ -99,7 +120,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'Ahmad@hidsb.com');
     await tester.enterText(find.byType(TextField).at(1), 'secret123');
-    await tester.tap(find.text('SIGN IN'));
+    await tester.tap(find.text('LOG IN'));
     // Plain pumps: on success the screen keeps its busy spinner (the gate
     // normally swaps it out), so pumpAndSettle would never settle here.
     await tester.pump();
@@ -108,6 +129,114 @@ void main() {
     expect(backend.signInCalls, 1);
     expect(signedIn, 'ahmad@hidsb.com', reason: 'email is normalised');
   });
+
+  testWidgets('login: Sign up opens the combined create-account screen', (
+    tester,
+  ) async {
+    final backend = FakeAuthBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          backend: backend,
+          service: userService(null),
+          onSignedIn: (_) {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Sign up'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create an'), findsOneWidget);
+    expect(find.text('Full Name'), findsOneWidget);
+    expect(find.text('Confirm Password'), findsOneWidget);
+    expect(find.text('Employee ID'), findsOneWidget);
+  });
+
+  testWidgets(
+    'sign-up: creates the Firebase account and the profile in one go',
+    (tester) async {
+      final backend = FakeAuthBackend();
+      Map<String, dynamic>? registered;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          if (request.method == 'POST') {
+            registered = jsonDecode(request.body) as Map<String, dynamic>;
+            return http.Response('{"status":"success"}', 200);
+          }
+          return http.Response('{"status":"success","data":null}', 200);
+        }),
+      );
+      String? signedUp;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            backend: backend,
+            service: service,
+            onSignedIn: (email) => signedUp = email,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Sign up'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'New Person'); // Full Name
+      await tester.enterText(fields.at(1), 'new@hidsb.com'); // Email
+      await tester.enterText(fields.at(2), 'secret123'); // Password
+      await tester.enterText(fields.at(3), 'secret123'); // Confirm
+      await tester.enterText(fields.at(4), 'EMP-200'); // Employee ID
+      await _pickDropdown(tester, 'Machining');
+
+      await tester.ensureVisible(find.text('SIGN UP'));
+      await tester.tap(find.text('SIGN UP'));
+      // Plain pumps: on success the screen keeps its busy spinner (the gate
+      // normally swaps it out), so pumpAndSettle would never settle here.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(backend.createAccountCalls, 1);
+      expect(registered!['op'], 'register');
+      expect(registered!['email'], 'new@hidsb.com');
+      expect(registered!['name'], 'New Person');
+      expect(registered!['employeeId'], 'EMP-200');
+      expect(registered!['department'], 'Machining');
+      expect(signedUp, 'new@hidsb.com');
+    },
+  );
+
+  testWidgets(
+    'sign-up: mismatched passwords are refused before Firebase is called',
+    (tester) async {
+      final backend = FakeAuthBackend();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            backend: backend,
+            service: userService(null),
+            onSignedIn: (_) {},
+          ),
+        ),
+      );
+      await tester.tap(find.text('Sign up'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'New Person');
+      await tester.enterText(fields.at(1), 'new@hidsb.com');
+      await tester.enterText(fields.at(2), 'secret123');
+      await tester.enterText(fields.at(3), 'different');
+      await tester.enterText(fields.at(4), 'EMP-200');
+
+      await tester.ensureVisible(find.text('SIGN UP'));
+      await tester.tap(find.text('SIGN UP'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining("don't match"), findsOneWidget);
+      expect(backend.createAccountCalls, 0);
+    },
+  );
 
   testWidgets('gate: a restored active session goes straight in', (
     tester,
@@ -207,16 +336,14 @@ void main() {
 
     // Prefilled with what the sheet already knows; only the department is
     // missing, and nothing is logged until it is chosen.
-    expect(find.text('One more thing'), findsOneWidget);
+    expect(find.text('One more'), findsOneWidget);
     expect(find.text('Old Hand'), findsOneWidget);
     expect(find.text('Select production area'), findsNothing);
     expect(SheetsService.currentUserEmail, isNull);
 
-    await tester.tap(find.text('Secondary'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('REGISTER'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('REGISTER'));
+    await _pickDropdown(tester, 'Secondary');
+    await tester.ensureVisible(find.text('CONTINUE'));
+    await tester.tap(find.text('CONTINUE'));
     await tester.pumpAndSettle();
 
     // In, and confined to the department just chosen.
@@ -235,25 +362,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Almost there'), findsOneWidget);
+    expect(find.text('Almost'), findsOneWidget);
     expect(find.text('new@hidsb.com'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).first, 'New Person');
     await tester.enterText(find.byType(TextField).at(1), 'EMP-099');
 
     // A department is required — registering without one goes nowhere.
-    await tester.ensureVisible(find.text('REGISTER'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('REGISTER'));
+    await tester.ensureVisible(find.text('CONTINUE'));
+    await tester.tap(find.text('CONTINUE'));
     await tester.pumpAndSettle();
     expect(find.text('Choose your department'), findsOneWidget);
     expect(find.text('Select production area'), findsNothing);
 
-    await tester.tap(find.text('Machining'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('REGISTER'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('REGISTER'));
+    await _pickDropdown(tester, 'Machining');
+    await tester.ensureVisible(find.text('CONTINUE'));
+    await tester.tap(find.text('CONTINUE'));
     await tester.pumpAndSettle();
 
     expect(find.text('Select production area'), findsOneWidget);
@@ -286,7 +410,7 @@ void main() {
     await tester.tap(find.text('SIGN OUT'));
     await tester.pumpAndSettle();
     expect(backend.signOutCalls, 1);
-    expect(find.text('SIGN IN'), findsOneWidget); // back at the login screen
+    expect(find.text('LOG IN'), findsOneWidget); // back at the login screen
   });
 
   testWidgets('gate: signed out -> login screen', (tester) async {
@@ -297,7 +421,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('SIGN IN'), findsOneWidget);
-    expect(find.text('CREATE ACCOUNT'), findsOneWidget);
+    expect(find.text('LOG IN'), findsOneWidget);
+    expect(find.text('Sign up'), findsOneWidget);
   });
 }

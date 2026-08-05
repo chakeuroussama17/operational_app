@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 import '../services/auth_backend.dart';
+import '../services/sheets_service.dart';
+import '../widgets/auth_widgets.dart';
+import 'signup_screen.dart';
 
 /// Company sign-in: Firebase email + password, restricted to the company
-/// domains before Firebase is even called. CREATE ACCOUNT is the same form —
-/// first-timers make their Firebase account here, then the gate sends them to
-/// the one-time registration page (name + employee ID).
+/// domains before Firebase is even called. "Sign up" opens [SignUpScreen],
+/// which creates the Firebase account and the Users-tab profile together.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
     required this.backend,
+    required this.service,
     required this.onSignedIn,
   });
 
   final AuthBackend backend;
+  final SheetsService service;
   final void Function(String email) onSignedIn;
 
   @override
@@ -26,6 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   String? _emailError;
   String? _passwordError;
+  bool _obscure = true;
   bool _busy = false;
 
   @override
@@ -37,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String get _email => _emailController.text.trim().toLowerCase();
 
-  bool _validate({required bool forCreate}) {
+  bool _validate() {
     setState(() {
       _emailError = null;
       _passwordError = null;
@@ -50,41 +55,36 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       ok = false;
     }
-    if (forCreate && _passwordController.text.length < 6) {
-      setState(() => _passwordError = 'At least 6 characters');
-      ok = false;
-    } else if (_passwordController.text.isEmpty) {
+    if (_passwordController.text.isEmpty) {
       setState(() => _passwordError = 'Enter your password');
       ok = false;
     }
     return ok;
   }
 
-  Future<void> _run(Future<String> Function() action) async {
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.danger),
+      );
+  }
+
+  Future<void> _signIn() async {
+    if (!_validate()) return;
     setState(() => _busy = true);
     try {
-      final email = await action();
+      final email = await widget.backend.signIn(
+        _email,
+        _passwordController.text,
+      );
       if (!mounted) return;
       widget.onSignedIn(email);
     } on AuthFailure catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
-        );
+      _showError(e.message);
     }
-  }
-
-  void _signIn() {
-    if (!_validate(forCreate: false)) return;
-    _run(() => widget.backend.signIn(_email, _passwordController.text));
-  }
-
-  void _createAccount() {
-    if (!_validate(forCreate: true)) return;
-    _run(() => widget.backend.createAccount(_email, _passwordController.text));
   }
 
   Future<void> _forgotPassword() async {
@@ -102,111 +102,111 @@ class _LoginScreenState extends State<LoginScreen> {
         );
     } on AuthFailure catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
-        );
+      _showError(e.message);
     }
+  }
+
+  Future<void> _openSignUp() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SignUpScreen(
+          backend: widget.backend,
+          service: widget.service,
+          onSignedUp: widget.onSignedIn,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(28),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(Icons.factory_rounded, size: 56, color: AppColors.navy),
-                  const SizedBox(height: 12),
-                  Text(
-                    'HICOM DIECASTINGS',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      color: AppColors.navy,
-                    ),
-                  ),
-                  Text(
-                    'Production shift log',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 34),
-                  TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    decoration: InputDecoration(
-                      labelText: 'Company email',
-                      prefixIcon: const Icon(Icons.alternate_email),
-                      errorText: _emailError,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      errorText: _passwordError,
-                    ),
-                    onSubmitted: (_) => _busy ? null : _signIn(),
-                  ),
-                  const SizedBox(height: 22),
-                  FilledButton(
-                    onPressed: _busy ? null : _signIn,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.navy,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: _busy
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text(
-                            'SIGN IN',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.6,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton(
-                    onPressed: _busy ? null : _createAccount,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.navy,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: const Text(
-                      'CREATE ACCOUNT',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _busy ? null : _forgotPassword,
-                    child: const Text('Forgot password?'),
-                  ),
-                ],
+    return AuthBackground(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(26, 20, 26, 28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const AuthLogoLockup(),
+              const SizedBox(height: 44),
+              const AuthHeadline(line1: 'Welcome', line2: 'Back!'),
+              const SizedBox(height: 34),
+              AuthGlassField(
+                controller: _emailController,
+                hint: 'Email Address',
+                icon: Icons.email_outlined,
+                keyboardType: TextInputType.emailAddress,
+                errorText: _emailError,
               ),
-            ),
+              const SizedBox(height: 16),
+              AuthGlassField(
+                controller: _passwordController,
+                hint: 'Password',
+                icon: Icons.lock_outline_rounded,
+                obscureText: _obscure,
+                errorText: _passwordError,
+                onSubmitted: (_) => _busy ? null : _signIn(),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    color: Colors.white.withValues(alpha: 0.6),
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 26),
+              AuthGradientButton(
+                label: 'LOG IN',
+                busy: _busy,
+                onPressed: _signIn,
+              ),
+              const SizedBox(height: 14),
+              Center(
+                child: TextButton(
+                  onPressed: _busy ? null : _forgotPassword,
+                  child: Text(
+                    'Forgot Password?',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontWeight: FontWeight.w600,
+                      decoration: TextDecoration.underline,
+                      decorationColor: Colors.white.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 32),
+              Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Don't have an account?  ",
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white.withValues(alpha: 0.75),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _busy ? null : _openSignUp,
+                      child: const Text(
+                        'Sign up',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.authPink,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

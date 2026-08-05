@@ -1,11 +1,34 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
 
-/// Full-bleed backdrop for the login/sign-up screens: the factory-floor
-/// photo with a dark scrim so white text stays legible over any part of it,
-/// darkest toward the bottom where the form sits. Wraps its own [Scaffold]
-/// (transparent, so the photo shows through) and [SafeArea].
+/// ---- Backdrop tuning: THE TWO NUMBERS TO CHANGE ----
+///
+/// How far the factory photo recedes behind the form. Both are meant to be
+/// adjusted by eye — rebuild and look.
+///
+///   [kBackdropBlur]  softness. 0 = a sharp photo competing with the form;
+///                    ~10 = the floor reads as an atmospheric shadow.
+///   [kBackdropDim]   darkness at the TOP of the screen. The scrim deepens
+///                    toward the bottom automatically (the form sits there
+///                    and needs the most contrast).
+///
+/// Raise either to push the photo further back; drop both to 0 to see the
+/// untouched image.
+const double kBackdropBlur = 9;
+const double kBackdropDim = 0.45;
+
+/// Full-bleed backdrop for the auth screens: the factory-floor photo,
+/// blurred and dimmed so it reads as depth rather than as a picture, with
+/// white text staying legible over every part of it. Wraps its own
+/// [Scaffold] and [SafeArea].
+///
+/// Also neutralises the app's global [InputDecorationTheme] for everything
+/// inside it. That theme fills every field with an opaque surface colour,
+/// which is right on the working screens and fatal here — it paints over
+/// the translucent glass fields and hides their white hints and icons.
 class AuthBackground extends StatelessWidget {
   const AuthBackground({super.key, required this.child});
 
@@ -18,30 +41,62 @@ class AuthBackground extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset(
-            'assets/background.jpg',
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stack) =>
-                const ColoredBox(color: Color(0xFF14101F)),
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(
+              sigmaX: kBackdropBlur,
+              sigmaY: kBackdropBlur,
+              // Clamp, or the blur samples past the bitmap and leaves a
+              // washed-out band down every edge.
+              tileMode: TileMode.clamp,
+            ),
+            child: Image.asset(
+              'assets/background.jpg',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stack) =>
+                  const ColoredBox(color: Color(0xFF14101F)),
+            ),
           ),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                // Just enough scrim to keep white text readable over the
-                // brightest parts of the photo (the DCM-07 label, the ladle
-                // glow) without crushing the photo to black — the mockup
-                // keeps the factory floor visibly in frame throughout.
                 colors: [
-                  Colors.black.withValues(alpha: 0.25),
-                  Colors.black.withValues(alpha: 0.40),
-                  Colors.black.withValues(alpha: 0.62),
+                  Colors.black.withValues(alpha: kBackdropDim),
+                  Colors.black.withValues(
+                    alpha: (kBackdropDim + 0.12).clamp(0.0, 1.0),
+                  ),
+                  Colors.black.withValues(
+                    alpha: (kBackdropDim + 0.28).clamp(0.0, 1.0),
+                  ),
                 ],
               ),
             ),
           ),
-          SafeArea(child: child),
+          SafeArea(
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                inputDecorationTheme: const InputDecorationTheme(
+                  filled: false,
+                  fillColor: Colors.transparent,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  focusedErrorBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 18),
+                ),
+                textSelectionTheme: TextSelectionThemeData(
+                  cursorColor: Colors.white,
+                  selectionColor: AppColors.authPink.withValues(alpha: 0.4),
+                  selectionHandleColor: AppColors.authPink,
+                ),
+              ),
+              child: child,
+            ),
+          ),
         ],
       ),
     );
@@ -199,7 +254,14 @@ class AuthGlassField extends StatelessWidget {
                 size: 20,
               ),
               suffixIcon: suffixIcon,
+              // Explicit as well as the Theme override in AuthBackground —
+              // the app's global InputDecorationTheme fills fields with an
+              // opaque surface colour, which would paint over the glass.
+              filled: false,
+              fillColor: Colors.transparent,
               border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 18),
             ),
@@ -269,7 +331,11 @@ class AuthGlassDropdown extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.65),
                   size: 20,
                 ),
+                filled: false,
+                fillColor: Colors.transparent,
                 border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 18),
               ),

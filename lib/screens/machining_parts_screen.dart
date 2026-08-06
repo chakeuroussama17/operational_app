@@ -259,7 +259,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               crossAxisCount: columns,
               mainAxisSpacing: AppDimens.fieldSpacing,
               crossAxisSpacing: AppDimens.fieldSpacing,
-              childAspectRatio: 1.35,
+              childAspectRatio: 1.15,
             ),
             itemCount: _parts.length + 1,
             itemBuilder: (context, index) {
@@ -322,28 +322,48 @@ class _PartCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppDimens.cardRadius),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          // Extra headroom so the content clears the ⋮ menu button that is
+          // stacked over the card's top-right corner.
+          padding: const EdgeInsets.fromLTRB(10, 18, 10, 10),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.tag_rounded, color: AppColors.amber, size: 24),
-              const SizedBox(height: 6),
-              Text(
-                part.part,
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
+              const Icon(
+                Icons.tag_rounded,
+                color: AppColors.authPink,
+                size: 20,
+              ),
+              const SizedBox(height: 4),
+              // Part codes vary in length; scale rather than overflow.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  part.part,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                _partSubtitle(part),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
+              // Names like "2244-MAR-NO2-BRKT-ENGINE-LH-MACH" ran to three
+              // lines and blew the tile apart; cap and ellipsise instead.
+              Flexible(
+                child: Text(
+                  _partSubtitle(part),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
             ],

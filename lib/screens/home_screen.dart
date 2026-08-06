@@ -30,6 +30,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
 
+  /// The Dashboard tab is not built until it is first opened. Both tabs live
+  /// in an IndexedStack (so their state survives switching), but that also
+  /// means both would fetch on launch — doubling the requests before the
+  /// first screen has even painted, on a backend where each one costs
+  /// seconds. It stays mounted once visited.
+  bool _dashboardOpened = false;
+
   static const _titles = ['Production Shift Log', 'Dashboard — Analytics'];
 
   /// The modules this person may work in. Without a signed-in user (widget
@@ -119,7 +126,10 @@ class _HomeScreenState extends State<HomeScreen> {
           index: _tabIndex,
           children: [
             _LogTab(modules: _visibleModules, service: widget.service),
-            DashboardScreen(modules: _visibleModules),
+            if (_dashboardOpened)
+              DashboardScreen(modules: _visibleModules)
+            else
+              const SizedBox.shrink(),
           ],
         ),
       ),
@@ -127,7 +137,10 @@ class _HomeScreenState extends State<HomeScreen> {
       // brand accent rides the selection indicator rather than the whole bar.
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: (index) => setState(() => _tabIndex = index),
+        onDestinationSelected: (index) => setState(() {
+          _tabIndex = index;
+          if (index == 1) _dashboardOpened = true;
+        }),
         backgroundColor: AppColors.surface,
         indicatorColor: AppColors.authViolet.withValues(alpha: 0.22),
         labelTextStyle: WidgetStateProperty.resolveWith(
@@ -330,13 +343,11 @@ class _LogTabState extends State<_LogTab> {
             Center(
               child: HomeHeroBadge(
                 icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
-                // The one illustration we have is a die-casting cell, so it
-                // only stands in where casting is actually on screen; the
-                // other departments keep the gradient tile until they have
-                // artwork of their own.
-                imageAsset: widget.modules.contains('casting')
-                    ? 'assets/hero_casting.png'
-                    : null,
+                // Everyone gets the artwork — it's the company's own plant,
+                // not a per-department badge, and a machining supervisor
+                // landing on a plain icon while casting gets a render reads
+                // as a half-finished app rather than as scoping.
+                imageAsset: 'assets/hero_casting.png',
               ),
             ),
             const SizedBox(height: 6),

@@ -142,6 +142,11 @@ class _PartCodeDialog extends StatefulWidget {
 }
 
 class _PartCodeDialogState extends State<_PartCodeDialog> {
+  /// Everything in the dialog that is NOT the scrolling list: the title, the
+  /// search field, the count line, the MO field, the action row and the
+  /// dialog's own margins. Measured once rather than guessed per-frame.
+  static const double _dialogChromeHeight = 330;
+
   final _searchController = TextEditingController();
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
@@ -179,11 +184,20 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
               )
               .toList();
 
+    // With the keyboard up there is very little room left, and a fixed-height
+    // list pushed the MO field under the action buttons. Give the list
+    // whatever is left after the rest of the dialog, down to a floor where
+    // it still shows a couple of rows.
+    final media = MediaQuery.of(context);
+    final roomForList =
+        media.size.height - media.viewInsets.bottom - _dialogChromeHeight;
+    final listHeight = roomForList.clamp(96.0, 240.0);
+
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         // Roomy on a tablet/desktop, never wider than a phone screen.
-        width: math.min(380, MediaQuery.of(context).size.width * 0.86),
+        width: math.min(380, media.size.width * 0.86),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -213,60 +227,68 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
               ),
             ),
             const SizedBox(height: 6),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 240),
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.borderSubtle),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: matches.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        widget.codes.isEmpty
-                            ? 'No part codes for this module.'
-                            : 'No code or name matches that search.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.textSecondary),
-                      ),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: matches.length,
-                      itemBuilder: (context, i) {
-                        final option = matches[i];
-                        final isSelected = option.code == _selectedCode;
-                        return ListTile(
-                          dense: true,
-                          selected: isSelected,
-                          selectedTileColor: AppColors.surfaceTint,
-                          title: Text(
-                            option.code,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+            SizedBox(
+              height: listHeight,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.borderSubtle),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: matches.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            widget.codes.isEmpty
+                                ? 'No part codes for this module.'
+                                : 'No code or name matches that search.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppColors.textSecondary),
                           ),
-                          subtitle: option.name == null
-                              ? null
-                              : Text(
-                                  option.name!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 11.5),
+                        )
+                      // No shrinkWrap: the box already has a definite height,
+                      // and shrinkWrap would lay out all ~230 rows on every
+                      // keystroke instead of just the visible handful.
+                      : ListView.builder(
+                          itemCount: matches.length,
+                          itemBuilder: (context, i) {
+                            final option = matches[i];
+                            final isSelected = option.code == _selectedCode;
+                            return ListTile(
+                              dense: true,
+                              selected: isSelected,
+                              selectedTileColor: AppColors.surfaceTint,
+                              title: Text(
+                                option.code,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
                                 ),
-                          trailing: isSelected
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: AppColors.success,
-                                  size: 20,
-                                )
-                              : null,
-                          onTap: () => setState(() {
-                            _selectedCode = option.code;
-                            _error = null;
-                          }),
-                        );
-                      },
-                    ),
+                              ),
+                              subtitle: option.name == null
+                                  ? null
+                                  : Text(
+                                      option.name!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 11.5),
+                                    ),
+                              trailing: isSelected
+                                  ? const Icon(
+                                      Icons.check_circle,
+                                      color: AppColors.success,
+                                      size: 20,
+                                    )
+                                  : null,
+                              onTap: () => setState(() {
+                                _selectedCode = option.code;
+                                _error = null;
+                              }),
+                            );
+                          },
+                        ),
+                ),
+              ),
             ),
             const SizedBox(height: 14),
             TextField(

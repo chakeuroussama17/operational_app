@@ -142,16 +142,20 @@ class _PartCodeDialog extends StatefulWidget {
 }
 
 class _PartCodeDialogState extends State<_PartCodeDialog> {
-  /// Everything in the dialog that is NOT the scrolling list: the title, the
-  /// search field, the count line, the MO field, the action row and the
-  /// dialog's own margins. Measured once rather than guessed per-frame.
-  static const double _dialogChromeHeight = 330;
+  /// Everything in the dialog that is NOT the open list: title, the closed
+  /// picker row, the MO field, the action row and the dialog's own margins.
+  static const double _dialogChromeHeight = 340;
 
   final _searchController = TextEditingController();
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
   );
   late String _selectedCode = widget.initialCode ?? '';
+
+  /// The list is shut until the picker row is tapped, and shuts again the
+  /// moment a code is chosen. Keeping it closed is what leaves room for the
+  /// MO field below — an always-open list covered it.
+  bool _open = false;
   String? _error;
 
   @override
@@ -161,9 +165,38 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     super.dispose();
   }
 
+  /// The chosen entry, so the closed row can show its name as well as code.
+  PartCode? get _selected {
+    for (final c in widget.codes) {
+      if (c.code == _selectedCode) return c;
+    }
+    return null;
+  }
+
+  void _toggle() {
+    setState(() {
+      _open = !_open;
+      _error = null;
+    });
+    if (!_open) FocusScope.of(context).unfocus();
+  }
+
+  void _choose(PartCode option) {
+    setState(() {
+      _selectedCode = option.code;
+      _error = null;
+      _open = false; // close on pick, like a real dropdown
+      _searchController.clear();
+    });
+    FocusScope.of(context).unfocus();
+  }
+
   void _save() {
     if (_selectedCode.isEmpty) {
-      setState(() => _error = 'Choose a part code');
+      setState(() {
+        _error = 'Choose a part code';
+        _open = true;
+      });
       return;
     }
     Navigator.of(
@@ -184,14 +217,12 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
               )
               .toList();
 
-    // With the keyboard up there is very little room left, and a fixed-height
-    // list pushed the MO field under the action buttons. Give the list
-    // whatever is left after the rest of the dialog, down to a floor where
-    // it still shows a couple of rows.
+    // Only matters while open: give the list whatever is left once the
+    // keyboard and the rest of the dialog have taken their share.
     final media = MediaQuery.of(context);
-    final roomForList =
+    final room =
         media.size.height - media.viewInsets.bottom - _dialogChromeHeight;
-    final listHeight = roomForList.clamp(96.0, 240.0);
+    final listHeight = room.clamp(120.0, 260.0);
 
     return AlertDialog(
       title: Text(widget.title),
@@ -202,94 +233,100 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
-              controller: _searchController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Search part code or name',
-                prefixIcon: const Icon(Icons.search),
-                isDense: true,
-                errorText: _error,
-              ),
-              onChanged: (_) => setState(() => _error = null),
+            _PickerField(
+              open: _open,
+              selected: _selected,
+              selectedCode: _selectedCode,
+              error: _error,
+              onTap: _toggle,
             ),
-            const SizedBox(height: 8),
-            // The same code exists in several departments (a part is cast,
-            // then fettled, then machined), so spell out that this list is
-            // only this module's operations.
-            Text(
-              '${matches.length} of ${widget.codes.length} '
-              '${widget.moduleLabel} parts',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: listHeight,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.borderSubtle),
-                  borderRadius: BorderRadius.circular(10),
+            if (_open) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search code or name',
+                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: matches.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Text(
-                            widget.codes.isEmpty
-                                ? 'No part codes for this module.'
-                                : 'No code or name matches that search.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.textSecondary),
-                          ),
-                        )
-                      // No shrinkWrap: the box already has a definite height,
-                      // and shrinkWrap would lay out all ~230 rows on every
-                      // keystroke instead of just the visible handful.
-                      : ListView.builder(
-                          itemCount: matches.length,
-                          itemBuilder: (context, i) {
-                            final option = matches[i];
-                            final isSelected = option.code == _selectedCode;
-                            return ListTile(
-                              dense: true,
-                              selected: isSelected,
-                              selectedTileColor: AppColors.surfaceTint,
-                              title: Text(
-                                option.code,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 6),
+              // The same code exists in several departments (a part is cast,
+              // then fettled, then machined), so spell out that this list is
+              // only this module's operations.
+              Text(
+                '${matches.length} of ${widget.codes.length} '
+                '${widget.moduleLabel} parts',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              SizedBox(
+                height: listHeight,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.borderSubtle),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: matches.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Text(
+                              widget.codes.isEmpty
+                                  ? 'No part codes for this module.'
+                                  : 'No code or name matches that search.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppColors.textSecondary),
+                            ),
+                          )
+                        // No shrinkWrap: the box has a definite height, and
+                        // shrinkWrap would lay out all ~230 rows on every
+                        // keystroke instead of the visible handful.
+                        : ListView.builder(
+                            itemCount: matches.length,
+                            itemBuilder: (context, i) {
+                              final option = matches[i];
+                              final isSelected = option.code == _selectedCode;
+                              return ListTile(
+                                dense: true,
+                                selected: isSelected,
+                                selectedTileColor: AppColors.surfaceTint,
+                                title: Text(
+                                  option.code,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                              ),
-                              subtitle: option.name == null
-                                  ? null
-                                  : Text(
-                                      option.name!,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 11.5),
-                                    ),
-                              trailing: isSelected
-                                  ? const Icon(
-                                      Icons.check_circle,
-                                      color: AppColors.success,
-                                      size: 20,
-                                    )
-                                  : null,
-                              onTap: () => setState(() {
-                                _selectedCode = option.code;
-                                _error = null;
-                              }),
-                            );
-                          },
-                        ),
+                                subtitle: option.name == null
+                                    ? null
+                                    : Text(
+                                        option.name!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 11.5),
+                                      ),
+                                trailing: isSelected
+                                    ? const Icon(
+                                        Icons.check_circle,
+                                        color: AppColors.success,
+                                        size: 20,
+                                      )
+                                    : null,
+                                onTap: () => _choose(option),
+                              );
+                            },
+                          ),
+                  ),
                 ),
               ),
-            ),
+            ],
             const SizedBox(height: 14),
             TextField(
               controller: _moController,
@@ -298,6 +335,11 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                 labelText: 'MO number (optional)',
                 isDense: true,
               ),
+              // Tapping into MO shuts the list, so the two never contend for
+              // the same space.
+              onTap: () {
+                if (_open) setState(() => _open = false);
+              },
               onSubmitted: (_) => _save(),
             ),
           ],
@@ -312,6 +354,119 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
           onPressed: _save,
           child: Text(_selectedCode.isEmpty ? 'SAVE' : 'SAVE $_selectedCode'),
         ),
+      ],
+    );
+  }
+}
+
+/// The closed state of the part picker: what is chosen (or a prompt), and a
+/// chevron that turns as the list opens.
+class _PickerField extends StatelessWidget {
+  const _PickerField({
+    required this.open,
+    required this.selected,
+    required this.selectedCode,
+    required this.error,
+    required this.onTap,
+  });
+
+  final bool open;
+  final PartCode? selected;
+  final String selectedCode;
+  final String? error;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = error != null;
+    final chosen = selectedCode.isNotEmpty;
+    final name = selected?.name;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: hasError
+                    ? AppColors.danger
+                    : open
+                    ? AppColors.authViolet
+                    : AppColors.borderSubtle,
+                width: open || hasError ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.tag_rounded,
+                  size: 18,
+                  color: AppColors.textSecondary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        chosen ? selectedCode : 'Choose part code',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: chosen
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: chosen
+                              ? AppColors.textPrimary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                      if (chosen && name != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (hasError)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              error!,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.danger,
+              ),
+            ),
+          ),
       ],
     );
   }

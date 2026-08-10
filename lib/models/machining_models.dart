@@ -10,6 +10,7 @@
 /// sheet. See [RejectionEntry] in models/rejection.dart.
 library;
 
+import 'part_code.dart';
 import 'rejection.dart';
 
 /// One of the six checkpoints logged for a given shift.
@@ -103,6 +104,40 @@ String machiningOperationLabel(String value) {
     if (operation.value == value) return operation.label;
   }
   return value;
+}
+
+/// The part-master entries belonging to [operation].
+///
+/// The plant names its machining parts by what happens to them: every entry
+/// ends in `-MACH` or `-ASSY` (`2244-MAR-NO2-BRKT-ENGINE-LH-MACH`), so the
+/// suffix IS the operation and the add-part picker shows one half of the list
+/// instead of all of it.
+///
+/// A handful of names describe the step rather than the operation
+/// (`2230-PR2-BRKT-OIL-FILTER-LEAKTEST`). Those fall back to the barcode's own
+/// `-M`/`-A` suffix, which the master carries on every row — without it such a
+/// part would match neither operation and become impossible to add at all.
+List<PartCode> partCodesForOperation(
+  List<PartCode> codes,
+  MachiningOperation operation,
+) {
+  return codes
+      .where((code) => _operationOf(code) == operation.value)
+      .toList(growable: false);
+}
+
+/// Which operation a master entry belongs to, or null when nothing identifies
+/// it — an unclassifiable part is left out of both lists rather than guessed
+/// into one.
+String? _operationOf(PartCode code) {
+  final name = (code.name ?? '').trim().toUpperCase();
+  if (name.endsWith('MACH')) return 'machining';
+  if (name.endsWith('ASSY')) return 'assembly';
+
+  final barcode = (code.barcode ?? '').trim().toUpperCase();
+  if (barcode.endsWith('-M')) return 'machining';
+  if (barcode.endsWith('-A')) return 'assembly';
+  return null;
 }
 
 /// Dashboard card: one customer and when it was last logged today.

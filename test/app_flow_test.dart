@@ -10,7 +10,9 @@ import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/casting_home_screen.dart';
 import 'package:hicom_ops/widgets/card_menu_button.dart';
+import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/machining_models.dart';
+import 'package:hicom_ops/models/part_code.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_operations_screen.dart';
 import 'package:hicom_ops/screens/secondary_home_screen.dart';
@@ -545,5 +547,141 @@ void main() {
     await tester.enterText(planField, 'abc123');
 
     expect(find.text('123'), findsOneWidget); // letters were filtered out
+  });
+
+  group('part picker is split by operation', () {
+    // Real entries from the plant's Parts master.
+    const master = [
+      PartCode(
+        code: '2244',
+        barcode: '2244-MAR-M',
+        name: '2244-MAR-NO2-BRKT-ENGINE-LH-MACH',
+      ),
+      PartCode(
+        code: '2215',
+        barcode: '2215-MAZ-A',
+        name: '2215-MAZ-PIPE-CONNECTOR-ASSY',
+      ),
+      // Name says ASSY in the MIDDLE and MACH at the end — the END is what
+      // decides, or every "…-CASE-ASSY-CHAIN-MACH" would land in assembly.
+      PartCode(
+        code: '2266',
+        barcode: '2266-HON-M',
+        name: '2266-HON-CASE-ASSY-CHAIN-MACH',
+      ),
+      // Named for the step, not the operation; only the barcode classifies it.
+      PartCode(
+        code: '2230',
+        barcode: '2230-PR2-A',
+        name: '2230-PR2-BRKT-OIL-FILTER-LEAKTEST',
+      ),
+      PartCode(code: '9999', barcode: null, name: null),
+    ];
+
+    test('machining takes the MACH names', () {
+      final codes = partCodesForOperation(master, machiningOperation);
+      expect(codes.map((c) => c.code), ['2244', '2266']);
+    });
+
+    test('assembly takes the ASSY names', () {
+      final codes = partCodesForOperation(master, assemblyOperation);
+      expect(codes.map((c) => c.code), ['2215', '2230']);
+    });
+
+    test('a part with nothing to classify it lands in neither list', () {
+      final everything = [
+        ...partCodesForOperation(master, machiningOperation),
+        ...partCodesForOperation(master, assemblyOperation),
+      ];
+      expect(everything.map((c) => c.code), isNot(contains('9999')));
+    });
+  });
+
+  testWidgets('part picker: a code missing from the list can be typed in', (
+    tester,
+  ) async {
+    PartWithMoInput? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                result = await promptPartCode(
+                  context,
+                  title: 'Add Part',
+                  moduleLabel: 'Machining',
+                  codes: const [
+                    PartCode(
+                      code: '2244',
+                      barcode: '2244-MAR-M',
+                      name: '2244-MAR-NO2-BRKT-ENGINE-LH-MACH',
+                    ),
+                  ],
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // The list starts shut; tapping the picker row opens it.
+    await tester.tap(find.text('Choose part code'));
+    await tester.pumpAndSettle();
+
+    // A code the Parts master doesn't have.
+    await tester.enterText(find.byType(TextField).first, '2299');
+    await tester.pumpAndSettle();
+    expect(find.text('Use "2299"'), findsOneWidget);
+
+    await tester.tap(find.text('Use "2299"'));
+    await tester.pumpAndSettle();
+
+    // Closes like a normal pick, and says the code is off-list.
+    expect(find.text('2299'), findsOneWidget);
+    expect(find.text('Typed in — not on the parts list'), findsOneWidget);
+
+    await tester.tap(find.text('SAVE 2299'));
+    await tester.pumpAndSettle();
+    expect(result?.name, '2299');
+  });
+
+  testWidgets('part picker: an existing code is picked, not re-typed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => promptPartCode(
+                context,
+                title: 'Add Part',
+                moduleLabel: 'Machining',
+                codes: const [
+                  PartCode(code: '2244', barcode: '2244-MAR-M', name: 'BRKT'),
+                ],
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose part code'));
+    await tester.pumpAndSettle();
+
+    // Typing a code that IS on the list must not offer to duplicate it.
+    await tester.enterText(find.byType(TextField).first, '2244');
+    await tester.pumpAndSettle();
+    expect(find.text('Use "2244"'), findsNothing);
   });
 }

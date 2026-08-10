@@ -95,9 +95,13 @@ class PartWithMoInput {
 
 /// Add/edit dialog for a part. The part code is picked from [codes] (the
 /// module's slice of the master list) — a search box filtering an inline list
-/// of code + name, so nothing can be typed that isn't a real code. On edit,
-/// [initialCode] starts selected and can be changed (the backend re-resolves
-/// the barcode/name for the new code). Returns null if cancelled.
+/// of code + name. When the search matches nothing the typed text can be used
+/// as the code anyway: the Parts master is not always complete or up to date,
+/// and a supervisor who can see the part in front of them should not be
+/// blocked from logging it. Such a code carries no barcode/name to snapshot,
+/// so the dialog says so before it is accepted. On edit, [initialCode] starts
+/// selected and can be changed (the backend re-resolves the barcode/name for
+/// the new code). Returns null if cancelled.
 ///
 /// The list is inline rather than an [Autocomplete] overlay: inside a dialog
 /// the floating options box is clipped/mispositioned, and an inline list has
@@ -143,8 +147,13 @@ class _PartCodeDialog extends StatefulWidget {
 
 class _PartCodeDialogState extends State<_PartCodeDialog> {
   /// Everything in the dialog that is NOT the open list: title, the closed
-  /// picker row, the MO field, the action row and the dialog's own margins.
-  static const double _dialogChromeHeight = 340;
+  /// picker row, the search box, the count line, the MO field, the action row,
+  /// and AlertDialog's own inset padding.
+  ///
+  /// Measured, not estimated: at 340 the dialog overflowed a 600px-tall
+  /// viewport by 74px with the list at its 260 maximum. Only short screens
+  /// feel this number — anywhere taller, `room` exceeds the 260 cap anyway.
+  static const double _dialogChromeHeight = 420;
 
   final _searchController = TextEditingController();
   late final _moController = TextEditingController(
@@ -173,6 +182,22 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     return null;
   }
 
+  /// A code the user typed rather than picked. It has no master row behind it,
+  /// so the picker row flags it instead of showing a part name.
+  bool get _isManual => _selectedCode.isNotEmpty && _selected == null;
+
+  /// Takes the search text as the code. Same closing behaviour as picking from
+  /// the list, so the two paths feel identical.
+  void _useTyped(String typed) {
+    setState(() {
+      _selectedCode = typed;
+      _error = null;
+      _open = false;
+      _searchController.clear();
+    });
+    FocusScope.of(context).unfocus();
+  }
+
   void _toggle() {
     setState(() {
       _open = !_open;
@@ -194,7 +219,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   void _save() {
     if (_selectedCode.isEmpty) {
       setState(() {
-        _error = 'Choose a part code';
+        _error = 'Pick a part code, or type one in';
         _open = true;
       });
       return;
@@ -206,7 +231,8 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final query = _searchController.text.trim().toLowerCase();
+    final typed = _searchController.text.trim();
+    final query = typed.toLowerCase();
     final matches = query.isEmpty
         ? widget.codes
         : widget.codes
@@ -216,6 +242,13 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                     (c.name ?? '').toLowerCase().contains(query),
               )
               .toList();
+
+    // Offer the typed text as a code once it is worth offering: there IS
+    // something typed, and it isn't already a code in the list (in which case
+    // the user should pick that row rather than duplicate it).
+    final canUseTyped =
+        typed.isNotEmpty &&
+        !widget.codes.any((c) => c.code.toLowerCase() == query);
 
     // Only matters while open: give the list whatever is left once the
     // keyboard and the rest of the dialog have taken their share.
@@ -237,6 +270,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
               open: _open,
               selected: _selected,
               selectedCode: _selectedCode,
+              manual: _isManual,
               error: _error,
               onTap: _toggle,
             ),
@@ -246,7 +280,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                 controller: _searchController,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  hintText: 'Search code or name',
+                  hintText: 'Search, or type a code that is missing',
                   prefixIcon: Icon(Icons.search),
                   isDense: true,
                 ),
@@ -254,8 +288,9 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
               ),
               const SizedBox(height: 6),
               // The same code exists in several departments (a part is cast,
-              // then fettled, then machined), so spell out that this list is
-              // only this module's operations.
+              // then fettled, then machined), and Machining narrows further
+              // still to one operation's half of the master — so name the
+              // slice rather than leaving the count unexplained.
               Text(
                 '${matches.length} of ${widget.codes.length} '
                 '${widget.moduleLabel} parts',
@@ -276,22 +311,36 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: matches.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              widget.codes.isEmpty
-                                  ? 'No part codes for this module.'
-                                  : 'No code or name matches that search.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.textSecondary),
-                            ),
-                          )
+                        ? (canUseTyped
+                              ? _UseTypedTile(
+                                  typed: typed,
+                                  onTap: () => _useTyped(typed),
+                                )
+                              : Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: Text(
+                                    widget.codes.isEmpty
+                                        ? 'No part codes for this module.'
+                                        : 'Type the part code to add one that '
+                                              'is not on the list.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ))
                         // No shrinkWrap: the box has a definite height, and
                         // shrinkWrap would lay out all ~230 rows on every
                         // keystroke instead of the visible handful.
                         : ListView.builder(
-                            itemCount: matches.length,
+                            itemCount: matches.length + (canUseTyped ? 1 : 0),
                             itemBuilder: (context, i) {
+                              if (i == matches.length) {
+                                return _UseTypedTile(
+                                  typed: typed,
+                                  onTap: () => _useTyped(typed),
+                                );
+                              }
                               final option = matches[i];
                               final isSelected = option.code == _selectedCode;
                               return ListTile(
@@ -366,6 +415,7 @@ class _PickerField extends StatelessWidget {
     required this.open,
     required this.selected,
     required this.selectedCode,
+    required this.manual,
     required this.error,
     required this.onTap,
   });
@@ -373,6 +423,10 @@ class _PickerField extends StatelessWidget {
   final bool open;
   final PartCode? selected;
   final String selectedCode;
+
+  /// True when the code was typed rather than picked — shown explicitly, since
+  /// it means no barcode or part name gets snapshotted onto the logged rows.
+  final bool manual;
   final String? error;
   final VoidCallback onTap;
 
@@ -439,6 +493,18 @@ class _PickerField extends StatelessWidget {
                             color: AppColors.textSecondary,
                           ),
                         ),
+                      ] else if (manual) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Typed in — not on the parts list',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.amberDark,
+                          ),
+                        ),
                       ],
                     ],
                   ),
@@ -468,6 +534,43 @@ class _PickerField extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The escape hatch at the bottom of the part list: use exactly what was typed
+/// as the code. Deliberately styled apart from the real rows (amber, dashed
+/// intent) so nobody takes it for a master entry they found.
+class _UseTypedTile extends StatelessWidget {
+  const _UseTypedTile({required this.typed, required this.onTap});
+
+  final String typed;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      onTap: onTap,
+      leading: const Icon(
+        Icons.edit_note_rounded,
+        color: AppColors.amberDark,
+        size: 22,
+      ),
+      title: Text(
+        'Use "$typed"',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          color: AppColors.amberDark,
+        ),
+      ),
+      subtitle: Text(
+        'Not on the list — logs under this code with no part name',
+        maxLines: 2,
+        style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+      ),
     );
   }
 }

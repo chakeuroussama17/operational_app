@@ -114,7 +114,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Add Part',
-      moduleLabel: 'Machining',
+      moduleLabel: widget.operation.label,
       codes: codes,
     );
     if (input == null) return;
@@ -133,7 +133,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     final input = await promptPartCode(
       context,
       title: 'Edit Part',
-      moduleLabel: 'Machining',
+      moduleLabel: widget.operation.label,
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
@@ -149,14 +149,24 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     );
   }
 
-  /// Part codes for Machining (from the Parts master), or null after telling
-  /// the user why the picker can't open.
+  /// This operation's half of the Parts master, or null after telling the user
+  /// why the picker can't open. The whole machining list is fetched (and
+  /// cached) once, then split by suffix — so switching operation costs nothing.
   Future<List<PartCode>?> _availableCodes() async {
     try {
-      final codes = await _sheetsService.fetchPartCodes('machining');
+      final all = await _sheetsService.fetchPartCodes('machining');
       if (!mounted) return null;
-      if (codes.isEmpty) {
+      if (all.isEmpty) {
         _snack('No Machining part codes found — import the Parts sheet first.');
+        return null;
+      }
+      final codes = partCodesForOperation(all, widget.operation);
+      if (codes.isEmpty) {
+        _snack(
+          'No ${widget.operation.label.toLowerCase()} parts in the Parts '
+          'sheet — those are the ones ending in '
+          '${widget.operation.value == 'machining' ? 'MACH' : 'ASSY'}.',
+        );
         return null;
       }
       return codes;

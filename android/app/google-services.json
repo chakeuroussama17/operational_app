@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "878600121764",
+    "project_id": "hicom-ops",
+    "storage_bucket": "hicom-ops.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:878600121764:android:945678bada04583f996531",
+        "android_client_info": {
+          "package_name": "com.hicom.hicom_ops"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHgTOiKbgQbpaT9TqoJpPvZ-2ltyaIlgw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -35,8 +35,8 @@ class SheetsSubmissionException implements Exception {
 ///   POST { "secret": ..., "module": X, "data": { Shift, ...changed fields } }
 ///        -> backend upserts this shift's row and recalculates LOR%
 ///
-/// Machining adds a `?action=lines` step (Customer -> Part -> Line) since it
-/// is keyed by Customer + PartNo + Line instead of two selectors.
+/// Machining runs one level deeper (Operation -> Customer -> Part) since it
+/// is keyed by Customer + PartNo + Operation instead of two selectors.
 ///
 /// ALL THREE modules are now shift-aware: every dashboard/parts/row call takes
 /// `shift` ("Day" | "Night") and submitted data must include a `Shift` field —
@@ -44,11 +44,11 @@ class SheetsSubmissionException implements Exception {
 /// midnight). All three also carry an MO (manufacturing order) number per part
 /// (see the config ops below).
 ///
-/// A separate Config API manages the list of valid groups/parts/lines
+/// A separate Config API manages the list of valid groups/parts
 /// itself (add/delete/rename), backing the manage/settings screens:
-///   GET  ?action=config&module=X -> { groups, partsByGroup, lines }
+///   GET  ?action=config&module=X -> { groups, partsByGroup, operations }
 ///   POST { secret, action: 'config', op: 'add'|'delete'|'rename', module,
-///          kind: 'group'|'part'|'line', group?, value, newValue? }
+///          kind: 'group'|'part'|'operation', group?, value, newValue? }
 ///   POST { secret, action: 'config', op: `<module>AddPart`/`<module>EditPart`
 ///          (casting|secondary|machining), group, part, newPart?, mo? } --
 ///          part rows in all three modules carry an MO number.
@@ -328,13 +328,18 @@ class SheetsService {
 
   // ---------- Machining incremental API (shift-aware: Day or Night) ----------
 
+  /// Customers with anything logged against [operation] this shift. Every
+  /// read below the operation picker is scoped to it — a part machined and
+  /// then assembled is two independent rows.
   Future<List<CustomerStatus>> fetchMachiningDashboard({
     required String shift,
+    required String operation,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'dashboard',
       'module': 'machining',
       'shift': shift,
+      'operation': operation,
     });
     return _asList(
       decoded,
@@ -344,12 +349,14 @@ class SheetsService {
   Future<List<MachiningPartStatus>> fetchMachiningParts(
     String customer, {
     required String shift,
+    required String operation,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'parts',
       'module': 'machining',
       'customer': customer,
       'shift': shift,
+      'operation': operation,
     });
     return _asList(decoded)
         .whereType<Map<String, dynamic>>()
@@ -357,29 +364,11 @@ class SheetsService {
         .toList();
   }
 
-  Future<List<MachiningLineStatus>> fetchMachiningLines({
-    required String customer,
-    required String part,
-    required String shift,
-  }) async {
-    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
-      'action': 'lines',
-      'module': 'machining',
-      'customer': customer,
-      'part': part,
-      'shift': shift,
-    });
-    return _asList(decoded)
-        .whereType<Map<String, dynamic>>()
-        .map(MachiningLineStatus.fromJson)
-        .toList();
-  }
-
-  /// This shift's saved row for this Customer + Part + Line, or null if none.
+  /// This shift's saved row for this Customer + Part + Operation, or null.
   Future<MachiningRow?> fetchMachiningRow({
     required String customer,
     required String part,
-    required String line,
+    required String operation,
     required String shift,
   }) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
@@ -387,7 +376,7 @@ class SheetsService {
       'module': 'machining',
       'customer': customer,
       'part': part,
-      'line': line,
+      'operation': operation,
       'shift': shift,
     });
     if (decoded == null) return null;
@@ -402,7 +391,7 @@ class SheetsService {
   }
 
   /// Saves a partial machining update. [data] must contain Customer, PartNo,
-  /// Line and Shift plus ONLY the fields the user filled/changed.
+  /// Operation and Shift plus ONLY the fields the user filled/changed.
   Future<void> submitMachiningUpdate(Map<String, String> data) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -412,7 +401,7 @@ class SheetsService {
   }
 
   /// Adds a new Machining part under [customer], optionally with its current
-  /// MO (manufacturing order) number. MO is per-part — shared by all its lines.
+  /// MO (manufacturing order) number. MO is per-part — shared by both operations.
   Future<void> addMachiningPart({
     required String customer,
     required String part,
@@ -501,7 +490,7 @@ class SheetsService {
   // ---------- Config: manage groups/parts/lines ----------
 
   /// The full set of groups (DCM/Station/Customer), their parts, and (for
-  /// Machining) the global line list — used by the manage/settings screens.
+  /// Machining) the global operation list — used by the manage/settings screens.
   Future<ConfigSnapshot> fetchConfig(String module) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'config',
@@ -517,7 +506,7 @@ class SheetsService {
   }
 
   /// Adds a group ('group', no [group] parent), a part ('part', requires
-  /// [group]) or a Machining line ('kind'='line', global).
+  /// [group]) or a Machining operation ('kind'='operation', global).
   Future<void> configAdd({
     required String module,
     required String kind,
@@ -525,7 +514,7 @@ class SheetsService {
     required String value,
   }) => _configMutate('add', module, kind, group, value, null);
 
-  /// Deletes a group (cascades to its parts), a part, or a line.
+  /// Deletes a group (cascades to its parts), a part, or an operation.
   Future<void> configDelete({
     required String module,
     required String kind,
@@ -534,7 +523,7 @@ class SheetsService {
   }) => _configMutate('delete', module, kind, group, value, null);
 
   /// Renames a group (cascades to its parts' group reference), a part, or a
-  /// line. Only updates the Config sheet — historical production rows keep
+  /// operation. Only updates the Config sheet — historical production rows keep
   /// whatever name was in effect when they were logged.
   Future<void> configRename({
     required String module,
@@ -568,7 +557,7 @@ class SheetsService {
   // ---------- Analytics: daily trend totals for the Dashboard tab ----------
 
   /// Daily output/LOR% (and, for Machining, rejection) totals for the last
-  /// [days] days, summed across every group/part/line in the module.
+  /// [days] days, summed across every group/part/operation in the module.
   Future<AnalyticsSeries> fetchAnalytics({
     required String module,
     int days = 14,

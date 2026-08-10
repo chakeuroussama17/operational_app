@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 /// Unified Apps Script Web App backend (Code.gs). Handles the incremental
-/// dashboard/parts(/lines)/row GETs and the upsert POST for all three
-/// modules, routed by a `module` field ("casting" | "secondary" | "machining").
+/// dashboard/parts/row GETs and the upsert POST for all three modules, routed
+/// by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbwy82EToI38l6Q4QxwBoThPls1HWviOt3Y7DUQu4EVVls6xFM5NMkHUJwYCl2ymx_lS2Q/exec';
+    'https://script.google.com/macros/s/AKfycbzyxj8mN7GR_j5UPNIWvRP7-DbvMC_m2TyaCK9X9jx5ZLDBl8o_jTUHt6zKKNG1CboG/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.

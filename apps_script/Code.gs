@@ -6,12 +6,18 @@
  * 8PM-6AM crossing midnight), each split into two per-shift sheet tabs with
  * no Shift column, keyed by their selectors + shift-date (see getShiftDate).
  * Casting/Secondary key on (DCM|Station) + Part; Machining adds a third
- * selector, Line, so it keys on Customer + Part + Line. Parts in all three
- * carry an MO number, snapshotted onto a row once at creation.
+ * selector, Operation, so it keys on Customer + Part + Operation. Parts in all
+ * three carry an MO number, snapshotted onto a row once at creation.
  *
- * The list of valid DCMs/Stations/Customers/Parts/Lines is no longer
- * hardcoded — it lives in a "Config" sheet tab so supervisors can add/edit/
- * delete them from the app (Settings/manage screens) without a redeploy.
+ * Operation is the FIRST thing the app asks for (before the customer) and is
+ * a fixed pair — "machining" or "assembly" — shipped in the app rather than
+ * configured, since the plant has exactly these two. It was called Line up to
+ * v14, chosen last instead of first; migrateColumnOrder() renames the sheet
+ * column in place so historical rows keep their value.
+ *
+ * The list of valid DCMs/Stations/Customers/Parts is no longer hardcoded — it
+ * lives in a "Config" sheet tab so supervisors can add/edit/delete them from
+ * the app (Settings/manage screens) without a redeploy.
  *
  * === REQUIRED: Sheet header rows (row 1), spelled EXACTLY like this ===
  *
@@ -21,12 +27,13 @@
  *     Value blank. (Lets a group exist with zero parts yet.)
  *   - Kind = "part": one row per part under a group. Group = the parent
  *     DCM/Station/Customer name, Value = the part name.
- *   - Kind = "line": Machining only, global (not per-part). Group blank,
- *     Value = the line name (e.g. "Line 1").
+ *   - Kind = "operation": Machining only, global (not per-part). Group blank,
+ *     Value = "machining" or "assembly". Optional — the app ships the pair,
+ *     and getConfigOperations() falls back to it when no rows exist.
  *   Module is stored lowercase ("casting" | "secondary" | "machining").
  *   MO (part rows, all three modules — see getConfigPartMo): the part's
  *     current manufacturing order number, editable from the app; blank/unused
- *     for group/line rows. Added by the setup*ShiftSheets() migrations.
+ *     for group/operation rows. Added by the setup*ShiftSheets() migrations.
  *   Run seedDefaultConfig() once from the Apps Script editor (Run menu)
  *   after creating this tab to populate it with the current defaults.
  *
@@ -71,15 +78,15 @@
  *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
  *
  * Machining (shift-split like the others — two tabs, keyed Customer+PartNo+
- * Line+shift-date, MO per part. Run setupMachiningShiftSheets() once):
+ * Operation+shift-date, MO per part. Run setupMachiningShiftSheets() once):
  *
  *   Machining_Day (Day shift, checkpoints 8AM-6PM) / Machining_Night (8PM-6AM):
- *     Date | Customer | PartNo | Line | Barcode | PartName | MO | Plan |
+ *     Date | Customer | PartNo | Operation | Barcode | PartName | MO | Plan |
  *     Output_<slot> | Output_LOR<slot> (x6) | LastUpdated
  *
  *   Machining_Rejections — rejections are a typed LIST per entry, not one
  *   number per slot, so they live here, one row per defect type:
- *     Date | Shift | Customer | PartNo | Line | Barcode | PartName | MO |
+ *     Date | Shift | Customer | PartNo | Operation | Barcode | PartName | MO |
  *     RejectionCode | RejectionType | Qty | LastUpdated
  *   The app always posts the whole list, which replaces that entry's rows.
  *   The machining row also carries RejectionTotal (a number) and
@@ -109,9 +116,14 @@ var REJECTION_TYPES_SHEET = 'RejectionTypes';
 
 // Machining rejections are a LIST per entry (5 POROSITY, 2 COLD SHUT, ...),
 // not one number per time slot, so they get their own fact table: one row per
-// defect type per Customer+Part+Line+shift+date. That keeps the shape open
-// ended and makes "which defect costs us most" a plain pivot.
+// defect type per Customer+Part+Operation+shift+date. That keeps the shape
+// open ended and makes "which defect costs us most" a plain pivot.
 var MACHINING_REJECTIONS_SHEET = 'Machining_Rejections';
+
+// The two operations a Machining log can belong to, stored in the sheet's
+// Operation column exactly as spelled here. The app ships the same pair, so
+// these are only the fallback for getConfigOperations().
+var MACHINING_OPERATIONS = ['machining', 'assembly'];
 
 // A small always-current rollup of the detail table (RejectionType | Qty),
 // built as a live QUERY formula rather than rows the script maintains — a
@@ -121,7 +133,7 @@ var REJECTION_SUMMARY_SHEET = 'Rejection_Summary';
 function machiningRejectionHeaders() {
   // Hour is deliberately LAST: the Rejection_Summary QUERY formulas reference
   // the other columns by letter, and appending keeps every letter stable.
-  return ['Date', 'Shift', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName',
+  return ['Date', 'Shift', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName',
     'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated', 'Hour'];
 }
 
@@ -200,10 +212,10 @@ function castingHeadersForShift(shift) {
 }
 
 // Header frame for a Machining shift sheet — like Casting but one level
-// deeper (Line). Rejections used to be one count per time slot; they are now
-// a typed list in MACHINING_REJECTIONS_SHEET, so this frame is output-only.
+// deeper (Operation). Rejections used to be one count per time slot; they are
+// now a typed list in MACHINING_REJECTIONS_SHEET, so this frame is output-only.
 function machiningHeadersForShift(shift) {
-  var headers = ['Date', 'Customer', 'PartNo', 'Line', 'Barcode', 'PartName', 'MO', 'Plan'];
+  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Output_' + slot);
     headers.push('Output_LOR' + slot);
@@ -251,7 +263,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'DEPT-INSIGHTS-v14';
+var BACKEND_VERSION = 'MACHINING-OPERATION-v15';
 
 function doGet(e) {
   try {
@@ -265,15 +277,15 @@ function doGet(e) {
     if (action === 'user') return jsonResponse(getUserProfile(e.parameter.email));
 
     if (module === 'machining') {
-      // Machining is now shift-aware too (Machining_Day/Machining_Night) and
-      // one level deeper: Customer -> Part -> Line -> entry. Every call
-      // carries a shift.
+      // Machining is shift-aware (Machining_Day/Machining_Night) and one level
+      // deeper: Operation -> Customer -> Part -> entry. Every call carries a
+      // shift, and everything below the operation picker carries an operation.
       var mShift = e.parameter.shift;
-      if (action === 'dashboard') return jsonResponse(getMachiningDashboard(mShift));
-      if (action === 'parts') return jsonResponse(getMachiningParts(e.parameter.customer, mShift));
-      if (action === 'lines') return jsonResponse(getMachiningLines(e.parameter.customer, e.parameter.part, mShift));
+      var mOp = e.parameter.operation;
+      if (action === 'dashboard') return jsonResponse(getMachiningDashboard(mShift, mOp));
+      if (action === 'parts') return jsonResponse(getMachiningParts(e.parameter.customer, mShift, mOp));
       if (action === 'row') {
-        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, e.parameter.line, mShift));
+        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, mOp, mShift));
       }
     } else if (module === 'secondary') {
       // Secondary is now shift-aware too (Secondary_Day/Secondary_Night),
@@ -831,14 +843,16 @@ function editPartWithMo(module, payload) {
   return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
 
-// ---------- Machining: reads (shift-aware — Customer -> Part -> Line -> entry) ----------
+// ---------- Machining: reads (shift-aware — Operation -> Customer -> Part -> entry) ----------
 //
-// Now mirrors Casting/Secondary: two per-shift sheets (Machining_Day/
-// Machining_Night), keyed by Customer + PartNo + Line + shift-date. Adds the
-// Line dimension; rejections are a typed list in MACHINING_REJECTIONS_SHEET.
-// MO is per-PART (scoped to Customer+Part), shared across that part's lines.
+// Two per-shift sheets (Machining_Day/Machining_Night), keyed by Customer +
+// PartNo + Operation + shift-date. Operation is picked FIRST in the app, so
+// every read below is scoped to one operation — a part machined and then
+// assembled is two independent rows, and neither list should show the other's
+// progress. Rejections are a typed list in MACHINING_REJECTIONS_SHEET. MO is
+// per-PART (scoped to Customer+Part), shared across both operations.
 
-function getMachiningDashboard(shift) {
+function getMachiningDashboard(shift, operation) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
@@ -846,7 +860,8 @@ function getMachiningDashboard(shift) {
   var result = customers.map(function (customer) {
     var latest = null;
     rows.forEach(function (r) {
-      if (String(r.Customer) === customer && formatDateOnly(r.Date) === shiftDate && r.LastUpdated) {
+      if (String(r.Customer) === customer && matchesOperation(r, operation) &&
+          formatDateOnly(r.Date) === shiftDate && r.LastUpdated) {
         if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
       }
     });
@@ -855,40 +870,18 @@ function getMachiningDashboard(shift) {
   return { status: 'success', data: result };
 }
 
-function getMachiningParts(customer, shift) {
-  shift = shift === 'Night' ? 'Night' : 'Day';
-  var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
-  var shiftDate = getShiftDate(shift);
-  var parts = getConfigParts('machining', customer);
-  var result = parts.map(function (part) {
-    var latest = null;
-    rows.forEach(function (r) {
-      if (String(r.Customer) === customer && String(r.PartNo) === part &&
-          formatDateOnly(r.Date) === shiftDate && r.LastUpdated) {
-        if (!latest || new Date(r.LastUpdated) > new Date(latest)) latest = r.LastUpdated;
-      }
-    });
-    var info = getConfigPartInfo('machining', customer, part);
-    return {
-      part: part,
-      mo: info.mo,
-      name: info.name,
-      lastUpdated: latest ? hhmm(latest) : null,
-    };
-  });
-  return { status: 'success', data: result };
-}
-
-function getMachiningLines(customer, part, shift) {
+// Part is now the level that opens the entry form (Line used to be), so these
+// cards carry the shift's completion level as well as the part's identity.
+function getMachiningParts(customer, shift, operation) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
   var slots = slotsForShift(shift);
-  var lines = getConfigLines();
-  var result = lines.map(function (line) {
+  var parts = getConfigParts('machining', customer);
+  var result = parts.map(function (part) {
     var match = rows.find(function (r) {
       return String(r.Customer) === customer && String(r.PartNo) === part &&
-        String(r.Line) === line && formatDateOnly(r.Date) === shiftDate;
+        matchesOperation(r, operation) && formatDateOnly(r.Date) === shiftDate;
     });
     var filled = 0;
     if (match) {
@@ -897,8 +890,11 @@ function getMachiningLines(customer, part, shift) {
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
+    var info = getConfigPartInfo('machining', customer, part);
     return {
-      part: line,
+      part: part,
+      mo: info.mo,
+      name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
     };
@@ -906,19 +902,27 @@ function getMachiningLines(customer, part, shift) {
   return { status: 'success', data: result };
 }
 
-function getMachiningRow(customer, part, line, shift) {
+function getMachiningRow(customer, part, operation, shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
   var match = rows.find(function (r) {
     return String(r.Customer) === customer && String(r.PartNo) === part &&
-      String(r.Line) === line && formatDateOnly(r.Date) === shiftDate;
+      matchesOperation(r, operation) && formatDateOnly(r.Date) === shiftDate;
   });
   if (!match) return { status: 'success', data: null };
   delete match._rowNum;
   // The entry screen edits the defect list in place, so it ships with the row.
-  match.Rejections = getMachiningRejections(customer, part, line, shift);
+  match.Rejections = getMachiningRejections(customer, part, operation, shift);
   return { status: 'success', data: match };
+}
+
+// A missing/blank operation parameter means "don't filter" — rows logged
+// before v15 have no Operation value, and they should still surface rather
+// than vanish from every list the day the app updates.
+function matchesOperation(row, operation) {
+  if (operation === undefined || operation === null || operation === '') return true;
+  return String(row.Operation) === String(operation);
 }
 
 // ---------- Machining: upsert (per-shift sheet, snapshots MO, Rejection per slot) ----------
@@ -942,7 +946,7 @@ function upsertMachiningRow(data) {
   var existing = rows.find(function (r) {
     return String(r.Customer) === String(data.Customer) &&
       String(r.PartNo) === String(data.PartNo) &&
-      String(r.Line) === String(data.Line) &&
+      String(r.Operation) === String(data.Operation) &&
       formatDateOnly(r.Date) === shiftDate;
   });
 
@@ -970,11 +974,11 @@ function upsertMachiningRow(data) {
   merged.Date = shiftDate;
   merged.Customer = data.Customer;
   merged.PartNo = data.PartNo;
-  merged.Line = data.Line;
+  merged.Operation = data.Operation;
   if (!existing) {
     // Snapshot the part's currently-configured MO onto the row once, at
     // creation — later Config MO edits never rewrite already-logged rows.
-    // MO is per-part, so every line of a part logs the same MO.
+    // MO is per-part, so both operations of a part log the same MO.
     var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo);
     merged.MO = pinfo.mo;
     merged.Barcode = pinfo.barcode;
@@ -995,7 +999,7 @@ function upsertMachiningRow(data) {
   var rejections = parseRejectionList(data);
   var finalRejections = null;
   if (rejections !== null) {
-    var storedRejections = getMachiningRejections(data.Customer, data.PartNo, data.Line, shift);
+    var storedRejections = getMachiningRejections(data.Customer, data.PartNo, data.Operation, shift);
     var reconciled = reconcileRejections(rejections, storedRejections);
     finalRejections = reconciled.list;
 
@@ -1380,8 +1384,8 @@ function summariseRejections(list) {
 // what the hour actually produced, and that total is history. Editing a saved
 // rejection's qty only RECLASSIFIES pieces between scrap and good — lowering
 // 20 to 18 hands 2 pieces back to that hour's output. Nothing else about a
-// saved line can change, and saved lines are never deleted from here (that is
-// the admin's job, in the sheet).
+// saved defect row can change, and saved rows are never deleted from here
+// (that is the admin's job, in the sheet).
 //
 // Reconciles the incoming hour-tagged entries against what the sheet holds:
 //   - same (hour, code, type) with a new qty  -> update + output delta
@@ -1430,7 +1434,7 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
   var stale = getAllRowsAsObjects(sheet).filter(function (r) {
     return String(r.Customer) === String(data.Customer) &&
       String(r.PartNo) === String(data.PartNo) &&
-      String(r.Line) === String(data.Line) &&
+      String(r.Operation) === String(data.Operation) &&
       String(r.Shift) === shift &&
       formatDateOnly(r.Date) === shiftDate;
   });
@@ -1445,7 +1449,7 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
       Shift: shift,
       Customer: data.Customer,
       PartNo: data.PartNo,
-      Line: data.Line,
+      Operation: data.Operation,
       Barcode: row.Barcode || '',
       PartName: row.PartName || '',
       MO: row.MO || '',
@@ -1473,7 +1477,7 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
   });
 }
 
-function getMachiningRejections(customer, part, line, shift) {
+function getMachiningRejections(customer, part, operation, shift) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MACHINING_REJECTIONS_SHEET);
   if (!sheet || getHeaders(sheet).length === 0) return [];
   var shiftDate = getShiftDate(shift);
@@ -1481,7 +1485,7 @@ function getMachiningRejections(customer, part, line, shift) {
     .filter(function (r) {
       return String(r.Customer) === String(customer) &&
         String(r.PartNo) === String(part) &&
-        String(r.Line) === String(line) &&
+        String(r.Operation) === String(operation) &&
         String(r.Shift) === shift &&
         formatDateOnly(r.Date) === shiftDate;
     })
@@ -1495,7 +1499,7 @@ function getMachiningRejections(customer, part, line, shift) {
     });
 }
 
-// ---------- Config: reads (drives every group/part/line list) ----------
+// ---------- Config: reads (drives every group/part/operation list) ----------
 
 function getConfigSheet() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG_SHEET);
@@ -1563,16 +1567,19 @@ function getConfigParts(module, group) {
   return parts;
 }
 
-// Machining-only, global (not tied to a customer or part).
-function getConfigLines() {
+// Machining-only, global (not tied to a customer or part). The app ships the
+// pair rather than fetching it, so an empty Config falls back to the constant
+// instead of leaving the operation picker blank. Legacy Kind="line" rows are
+// ignored: "Line 1/2/3" are not operations.
+function getConfigOperations() {
   var rows = getConfigRows();
-  var lines = [];
+  var operations = [];
   rows.forEach(function (r) {
-    if (String(r.Module).toLowerCase() === 'machining' && r.Kind === 'line' && r.Value) {
-      lines.push(String(r.Value));
+    if (String(r.Module).toLowerCase() === 'machining' && r.Kind === 'operation' && r.Value) {
+      operations.push(String(r.Value));
     }
   });
-  return lines;
+  return operations.length ? operations : MACHINING_OPERATIONS.slice();
 }
 
 function getConfigSnapshot(module) {
@@ -1583,7 +1590,7 @@ function getConfigSnapshot(module) {
     partsByGroup[g] = getConfigParts(module, g);
   });
   var result = { groups: groups, partsByGroup: partsByGroup };
-  if (module === 'machining') result.lines = getConfigLines();
+  if (module === 'machining') result.operations = getConfigOperations();
   return { status: 'success', data: result };
 }
 
@@ -1862,14 +1869,14 @@ function getAnalytics(module, days) {
 function configMutate(payload) {
   var op = payload.op;
   var module = String(payload.module || '').toLowerCase();
-  var kind = payload.kind; // 'group' | 'part' | 'line'
+  var kind = payload.kind; // 'group' | 'part' | 'operation'
   var group = payload.group !== undefined && payload.group !== null ? String(payload.group) : '';
   var value = payload.value !== undefined && payload.value !== null ? String(payload.value) : '';
   var newValue = payload.newValue !== undefined && payload.newValue !== null ? String(payload.newValue) : '';
 
   if (!module) return { status: 'error', message: 'module is required' };
-  if (['group', 'part', 'line'].indexOf(kind) === -1) {
-    return { status: 'error', message: 'kind must be group, part or line' };
+  if (['group', 'part', 'operation'].indexOf(kind) === -1) {
+    return { status: 'error', message: 'kind must be group, part or operation' };
   }
   if (kind === 'part' && !group) {
     return { status: 'error', message: 'group is required for kind=part' };
@@ -1886,7 +1893,7 @@ function configMutate(payload) {
     if (kind === 'group') {
       // A group's own name lives in the Group column (so getConfigGroups,
       // and the delete/rename cascade below, can find it) — NOT the Value
-      // column, unlike part/line rows where Value holds the item's name.
+      // column, unlike part/operation rows where Value holds the item's name.
       var dupGroup = rows.some(function (r) {
         return String(r.Module).toLowerCase() === module && String(r.Group || '') === value;
       });
@@ -1961,7 +1968,7 @@ function deleteSheetRows(sheet, rowsToDelete) {
 // ---------- One-time setup: run manually from the Apps Script editor ----------
 //
 // Populates the Config sheet with the entities the app currently ships with
-// (1212/3131/4141, ST1-3, Mazda/Proton/Toyota, Line 1-3). Select this
+// (1212/3131/4141, ST1-3, Mazda/Proton/Toyota, machining/assembly). Select this
 // function in the editor toolbar and click Run once, after creating the
 // Config tab with its header row. Refuses to run if the sheet already has
 // data, so it's safe to leave in place.
@@ -1975,7 +1982,7 @@ function seedDefaultConfig() {
   var rows = [];
   function addGroup(module, group) { rows.push([module, 'group', group, '']); }
   function addPart(module, group, part) { rows.push([module, 'part', group, part]); }
-  function addLine(line) { rows.push(['machining', 'line', '', line]); }
+  function addOperation(op) { rows.push(['machining', 'operation', '', op]); }
 
   addGroup('casting', '1212');
   ['1', '2', '3', '4'].forEach(function (p) { addPart('casting', '1212', p); });
@@ -1997,7 +2004,7 @@ function seedDefaultConfig() {
   ['4', '5', '6'].forEach(function (p) { addPart('machining', 'Proton', p); });
   addGroup('machining', 'Toyota');
   ['7', '8', '9'].forEach(function (p) { addPart('machining', 'Toyota', p); });
-  ['Line 1', 'Line 2', 'Line 3'].forEach(addLine);
+  MACHINING_OPERATIONS.forEach(addOperation);
 
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
   Logger.log('Seeded ' + rows.length + ' config rows.');
@@ -2102,6 +2109,14 @@ function setupMachiningShiftSheets() {
 // Safe to re-run: a tab already in the right order is left alone.
 function migrateColumnOrder() {
   var log = [
+    // MUST run before the reorders below. reorderSheet maps rows BY HEADER
+    // NAME, so to a tab still titled "Line" the new "Operation" column looks
+    // like a brand-new empty one: every row's operation would be blanked and
+    // the old values parked in a leftover "Line" column at the far right.
+    // Renaming the title first keeps the data where it is.
+    renameHeader(MACHINING_DAY_SHEET, 'Line', 'Operation'),
+    renameHeader(MACHINING_NIGHT_SHEET, 'Line', 'Operation'),
+    renameHeader(MACHINING_REJECTIONS_SHEET, 'Line', 'Operation'),
     reorderSheet(CASTING_DAY_SHEET, castingHeadersForShift('Day')),
     reorderSheet(CASTING_NIGHT_SHEET, castingHeadersForShift('Night')),
     reorderSheet(SECONDARY_DAY_SHEET, secondaryHeadersForShift('Day')),
@@ -2119,6 +2134,23 @@ function migrateColumnOrder() {
     setupUsersValidation(),
   ];
   Logger.log(log.join('\n'));
+}
+
+// Retitles one header cell, leaving the column and all its data in place.
+// Idempotent: a tab already carrying [to] (renamed by hand in the sheet, or by
+// an earlier run) is left alone, and one carrying neither name is skipped.
+function renameHeader(sheetName, from, to) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) return 'SKIP (no such tab): ' + sheetName;
+
+  var headers = getHeaders(sheet);
+  if (headers.indexOf(to) !== -1) return 'already "' + to + '": ' + sheetName;
+  var col = headers.indexOf(from);
+  if (col === -1) return 'SKIP (no "' + from + '" column): ' + sheetName;
+
+  sheet.getRange(1, col + 1).setValue(to);
+  invalidateCaches();
+  return 'renamed "' + from + '" -> "' + to + '": ' + sheetName;
 }
 
 function reorderSheet(sheetName, desired) {

@@ -10,7 +10,7 @@ import '../widgets/home_widgets.dart';
 import 'auth_gate.dart';
 import 'casting_home_screen.dart';
 import 'dashboard_screen.dart';
-import 'machining_home_screen.dart';
+import 'machining_operations_screen.dart';
 import 'secondary_home_screen.dart';
 
 /// App root: bottom nav between the Log tab (pick a module, enter data) and
@@ -465,9 +465,9 @@ class _LogTabState extends State<_LogTab> {
     ),
     _ => HomeModuleTile(
       title: 'Machining',
-      subtitle: 'CNC lines by customer · output & rejection',
+      subtitle: 'Machining & assembly · output & rejection',
       icon: Icons.precision_manufacturing_rounded,
-      onTap: () => _open(context, const MachiningHomeScreen()),
+      onTap: () => _open(context, const MachiningOperationsScreen()),
     ),
   };
 }

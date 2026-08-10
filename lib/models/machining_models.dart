@@ -1,8 +1,9 @@
 /// Data types for the Machining module's incremental logging API.
 ///
-/// One level deeper than Casting/Secondary: Customer -> Part -> Line -> entry
-/// (keyed by Customer + PartNo + Line + shift-date). Shift-aware like the
-/// others (Day 8AM-6PM / Night 8PM-6AM crossing midnight), MO number per part.
+/// One level deeper than Casting/Secondary: Operation -> Customer -> Part ->
+/// entry (keyed by Customer + PartNo + Operation + shift-date). Shift-aware
+/// like the others (Day 8AM-6PM / Night 8PM-6AM crossing midnight), MO number
+/// per part.
 ///
 /// Rejections are NOT per slot — they're a typed list for the whole entry
 /// ("5 POROSITY, 2 COLD SHUT"), posted as `Rejections` and stored in their own
@@ -59,6 +60,51 @@ String autoDetectMachiningShift() {
   return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
 }
 
+/// Which operation a log belongs to — the first thing the module asks for,
+/// ahead of the customer. The plant runs exactly two, so they ship with the
+/// app rather than being configured; [value] is what lands in the sheet's
+/// Operation column and must stay lowercase to match the rows already there.
+class MachiningOperation {
+  const MachiningOperation({
+    required this.value,
+    required this.label,
+    required this.description,
+  });
+
+  final String value;
+  final String label;
+  final String description;
+}
+
+/// Named so they can be used where a compile-time constant is required —
+/// `machiningOperations.first` is not one, since indexing a const list isn't
+/// itself a constant expression.
+const MachiningOperation machiningOperation = MachiningOperation(
+  value: 'machining',
+  label: 'Machining',
+  description: 'CNC and machining lines',
+);
+
+const MachiningOperation assemblyOperation = MachiningOperation(
+  value: 'assembly',
+  label: 'Assembly',
+  description: 'Assembly and fitting lines',
+);
+
+const List<MachiningOperation> machiningOperations = [
+  machiningOperation,
+  assemblyOperation,
+];
+
+/// Display name for a stored Operation value, falling back to the raw value so
+/// a row logged under an operation that has since been retired still reads.
+String machiningOperationLabel(String value) {
+  for (final operation in machiningOperations) {
+    if (operation.value == value) return operation.label;
+  }
+  return value;
+}
+
 /// Dashboard card: one customer and when it was last logged today.
 class CustomerStatus {
   const CustomerStatus({required this.customer, this.lastUpdated});
@@ -73,14 +119,16 @@ class CustomerStatus {
 }
 
 /// Part selector card: one part of a customer, with its current MO
-/// (manufacturing order) number. A navigation step to the Line selector below
-/// it, so it carries no fill percentage of its own.
+/// (manufacturing order) number and this shift's completion level. Since the
+/// Line step was removed, this is the level that opens the entry form — hence
+/// the fill percentage.
 class MachiningPartStatus {
   const MachiningPartStatus({
     required this.part,
     this.mo,
     this.name,
     this.lastUpdated,
+    this.fillPercent = 0,
   });
 
   /// The part CODE (chosen from the master list) — this card's title.
@@ -91,41 +139,22 @@ class MachiningPartStatus {
   final String? name;
   final String? lastUpdated;
 
-  factory MachiningPartStatus.fromJson(Map<String, dynamic> json) =>
-      MachiningPartStatus(
-        part: cleanCell(json['part']) ?? '',
-        mo: cleanCell(json['mo']),
-        name: cleanCell(json['name']),
-        lastUpdated: cleanCell(json['lastUpdated']),
-      );
-}
-
-/// Line selector card: one line of a customer + part, with today's
-/// completion level. This is the level that opens the entry form.
-class MachiningLineStatus {
-  const MachiningLineStatus({
-    required this.line,
-    this.lastUpdated,
-    required this.fillPercent,
-  });
-
-  final String line;
-  final String? lastUpdated;
-
-  /// 0-100: how many of the six time slots are filled today.
+  /// 0-100: how many of the six time slots are filled this shift.
   final int fillPercent;
 
-  factory MachiningLineStatus.fromJson(Map<String, dynamic> json) {
-    final raw = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
-    return MachiningLineStatus(
-      line: cleanCell(json['part']) ?? '',
+  factory MachiningPartStatus.fromJson(Map<String, dynamic> json) {
+    final fill = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
+    return MachiningPartStatus(
+      part: cleanCell(json['part']) ?? '',
+      mo: cleanCell(json['mo']),
+      name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
-      fillPercent: raw.clamp(0, 100).round(),
+      fillPercent: fill.clamp(0, 100).round(),
     );
   }
 }
 
-/// Today's saved row for a Customer + Part + Line. Field access is by
+/// Today's saved row for a Customer + Part + Operation. Field access is by
 /// column name so the row survives backend column additions untouched.
 class MachiningRow {
   const MachiningRow(this.raw);

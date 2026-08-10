@@ -406,12 +406,16 @@ void main() {
         }),
       );
 
-      final customers = await service.fetchMachiningDashboard(shift: 'Day');
+      final customers = await service.fetchMachiningDashboard(
+        shift: 'Day',
+        operation: 'machining',
+      );
 
       expect(requested.queryParameters, {
         'action': 'dashboard',
         'module': 'machining',
         'shift': 'Day',
+        'operation': 'machining',
       });
       expect(customers, hasLength(2));
       expect(customers[0].customer, 'Mazda');
@@ -419,66 +423,43 @@ void main() {
       expect(customers[1].lastUpdated, isNull);
     });
 
-    test('parts: passes customer+shift, parses part cards + MO', () async {
+    test('parts: passes customer+shift+operation, clamps fillPercent', () async {
       late Uri requested;
       final service = SheetsService(
         client: MockClient((request) async {
           requested = request.url;
           return http.Response(
             '{"status":"success","data":['
-            '{"part":"1","mo":"MACH-77","lastUpdated":"08:00"},'
-            '{"part":"2","lastUpdated":null}]}',
+            '{"part":"1","mo":"MACH-77","lastUpdated":"08:00",'
+            '"fillPercent":"33.4"},'
+            '{"part":"2","lastUpdated":null,"fillPercent":140}]}',
             200,
           );
         }),
       );
 
-      final parts = await service.fetchMachiningParts('Mazda', shift: 'Night');
+      final parts = await service.fetchMachiningParts(
+        'Mazda',
+        shift: 'Night',
+        operation: 'assembly',
+      );
 
       expect(requested.queryParameters, {
         'action': 'parts',
         'module': 'machining',
         'customer': 'Mazda',
         'shift': 'Night',
+        'operation': 'assembly',
       });
+      expect(parts, hasLength(2));
       expect(parts[0].part, '1');
       expect(parts[0].mo, 'MACH-77');
       expect(parts[0].lastUpdated, '08:00');
+      // Part is the level that opens the entry form now, so it carries the
+      // shift's fill percentage the Line card used to.
+      expect(parts[0].fillPercent, 33);
       expect(parts[1].mo, isNull);
-      expect(parts[1].lastUpdated, isNull);
-    });
-
-    test('lines: passes customer+part+shift, clamps fillPercent', () async {
-      late Uri requested;
-      final service = SheetsService(
-        client: MockClient((request) async {
-          requested = request.url;
-          return http.Response(
-            '{"status":"success","data":['
-            '{"part":"Line 1","lastUpdated":"09:00","fillPercent":"33.4"},'
-            '{"part":"Line 2","lastUpdated":null,"fillPercent":140}]}',
-            200,
-          );
-        }),
-      );
-
-      final lines = await service.fetchMachiningLines(
-        customer: 'Mazda',
-        part: '1',
-        shift: 'Day',
-      );
-
-      expect(requested.queryParameters, {
-        'action': 'lines',
-        'module': 'machining',
-        'customer': 'Mazda',
-        'part': '1',
-        'shift': 'Day',
-      });
-      expect(lines[0].line, 'Line 1');
-      expect(lines[0].fillPercent, 33);
-      expect(lines[1].fillPercent, 100);
-      expect(lines[1].lastUpdated, isNull);
+      expect(parts[1].fillPercent, 100);
     });
 
     test('row: returns null when backend envelopes a null data', () async {
@@ -492,7 +473,7 @@ void main() {
       final row = await service.fetchMachiningRow(
         customer: 'Mazda',
         part: '1',
-        line: 'Line 1',
+        operation: 'machining',
         shift: 'Day',
       );
 
@@ -508,7 +489,7 @@ void main() {
             requested = request.url;
             return http.Response(
               '{"status":"success","data":{"Date":"2026-07-23",'
-              '"Customer":"Mazda","PartNo":"1","Line":"Line 1","MO":"MACH-77",'
+              '"Customer":"Mazda","PartNo":"1","Operation":"machining","MO":"MACH-77",'
               '"Plan":300,'
               '"Output_8AM":30,"Output_LOR8AM":0.1,"Rejection_8AM":2,'
               '"Output_10AM":"","Output_LOR10AM":"","Rejection_10AM":"",'
@@ -521,7 +502,7 @@ void main() {
         final row = await service.fetchMachiningRow(
           customer: 'Mazda',
           part: '1',
-          line: 'Line 1',
+          operation: 'machining',
           shift: 'Day',
         );
 
@@ -530,7 +511,7 @@ void main() {
           'module': 'machining',
           'customer': 'Mazda',
           'part': '1',
-          'line': 'Line 1',
+          'operation': 'machining',
           'shift': 'Day',
         });
         expect(row!.value('Plan'), '300');
@@ -555,7 +536,7 @@ void main() {
       await service.submitMachiningUpdate({
         'Customer': 'Mazda',
         'PartNo': '1',
-        'Line': 'Line 1',
+        'Operation': 'machining',
         'Shift': 'Night',
         'Plan': '300',
         'Output_8PM': '30',
@@ -567,7 +548,7 @@ void main() {
       expect(sent['data'], {
         'Customer': 'Mazda',
         'PartNo': '1',
-        'Line': 'Line 1',
+        'Operation': 'machining',
         'Shift': 'Night',
         'Plan': '300',
         'Output_8PM': '30',
@@ -628,7 +609,11 @@ void main() {
       );
 
       await expectLater(
-        service.fetchMachiningParts('Nobody', shift: 'Day'),
+        service.fetchMachiningParts(
+          'Nobody',
+          shift: 'Day',
+          operation: 'machining',
+        ),
         throwsA(
           isA<SheetsSubmissionException>().having(
             (e) => e.message,
@@ -749,7 +734,7 @@ void main() {
         client: MockClient(
           (request) async => http.Response(
             '{"status":"success","data":{"Customer":"Mazda","PartNo":"2244",'
-            '"Line":"FY2","Output_8AM":150,"Output_LOR8AM":0.5,'
+            '"Operation":"machining","Output_8AM":150,"Output_LOR8AM":0.5,'
             '"Rejections":[{"code":"064","type":"POROSITY","qty":5},'
             '{"code":"006","type":"BLOW HOLE","qty":2}]}}',
             200,
@@ -760,7 +745,7 @@ void main() {
       final row = await service.fetchMachiningRow(
         customer: 'Mazda',
         part: '2244',
-        line: 'FY2',
+        operation: 'machining',
         shift: 'Day',
       );
 
@@ -787,7 +772,7 @@ void main() {
       final row = await service.fetchMachiningRow(
         customer: 'Mazda',
         part: '2244',
-        line: 'FY2',
+        operation: 'machining',
         shift: 'Day',
       );
 
@@ -824,7 +809,7 @@ void main() {
       await service.submitMachiningUpdate({
         'Customer': 'Mazda',
         'PartNo': '2244',
-        'Line': 'FY2',
+        'Operation': 'machining',
         'Shift': 'Day',
         'Rejections': jsonEncode([
           for (final entry in totals.entries)
@@ -854,7 +839,7 @@ void main() {
       await service.submitMachiningUpdate({
         'Customer': 'Mazda',
         'PartNo': '2244',
-        'Line': 'FY2',
+        'Operation': 'machining',
         'Shift': 'Day',
         'Rejections': '[{"qty":"5","code":"064","type":"POROSITY"}]',
       });
@@ -1062,7 +1047,7 @@ void main() {
 
   group('config manage API', () {
     test(
-      'fetchConfig: passes action+module, parses groups/parts/lines',
+      'fetchConfig: passes action+module, parses groups/parts/operations',
       () async {
         late Uri requested;
         final service = SheetsService(
@@ -1072,7 +1057,7 @@ void main() {
               '{"status":"success","data":{'
               '"groups":["Mazda","Proton"],'
               '"partsByGroup":{"Mazda":["1","2"],"Proton":["4"]},'
-              '"lines":["Line 1","Line 2"]}}',
+              '"operations":["machining","assembly"]}}',
               200,
             );
           }),
@@ -1087,7 +1072,7 @@ void main() {
         expect(snapshot.groups, ['Mazda', 'Proton']);
         expect(snapshot.partsByGroup['Mazda'], ['1', '2']);
         expect(snapshot.partsByGroup['Proton'], ['4']);
-        expect(snapshot.lines, ['Line 1', 'Line 2']);
+        expect(snapshot.operations, ['machining', 'assembly']);
       },
     );
 
@@ -1106,7 +1091,7 @@ void main() {
 
         final snapshot = await service.fetchConfig('casting');
 
-        expect(snapshot.lines, isEmpty);
+        expect(snapshot.operations, isEmpty);
       },
     );
 
@@ -1162,15 +1147,15 @@ void main() {
 
       await service.configRename(
         module: 'machining',
-        kind: 'line',
-        value: 'Line 1',
-        newValue: 'Line 1B',
+        kind: 'operation',
+        value: 'machining',
+        newValue: 'milling',
       );
 
       expect(sent['op'], 'rename');
-      expect(sent['kind'], 'line');
-      expect(sent['value'], 'Line 1');
-      expect(sent['newValue'], 'Line 1B');
+      expect(sent['kind'], 'operation');
+      expect(sent['value'], 'machining');
+      expect(sent['newValue'], 'milling');
     });
 
     test('configDelete: posts op=delete', () async {

@@ -10,9 +10,18 @@ import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'machining_parts_screen.dart';
 
-/// Machining module root: pick a customer (Mazda, Proton, Toyota).
+/// Customer selector (Mazda, Proton, Toyota) for one operation. Second step
+/// of the module now — [MachiningOperationsScreen] picks the operation and the
+/// shift above it, and both are carried down to the entry form.
 class MachiningHomeScreen extends StatefulWidget {
-  const MachiningHomeScreen({super.key});
+  const MachiningHomeScreen({
+    super.key,
+    required this.operation,
+    required this.shift,
+  });
+
+  final MachiningOperation operation;
+  final String shift;
 
   @override
   State<MachiningHomeScreen> createState() => _MachiningHomeScreenState();
@@ -24,10 +33,6 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
   bool _loading = true;
   String? _error;
   List<CustomerStatus> _customers = const [];
-
-  /// Defaults to whatever shift wall-clock time suggests; the supervisor can
-  /// flip it any time (e.g. logging a late entry after shift changeover).
-  String _shift = autoDetectMachiningShift();
 
   @override
   void initState() {
@@ -48,7 +53,8 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
     });
     try {
       final customers = await _sheetsService.fetchMachiningDashboard(
-        shift: _shift,
+        shift: widget.shift,
+        operation: widget.operation.value,
       );
       if (!mounted) return;
       setState(() {
@@ -64,19 +70,14 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
     }
   }
 
-  void _setShift(String shift) {
-    if (shift == _shift) return;
-    setState(() => _shift = shift);
-    _load();
-  }
-
   void _openCustomer(CustomerStatus customer) {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
             builder: (_) => MachiningPartsScreen(
               customer: customer.customer,
-              shift: _shift,
+              operation: widget.operation,
+              shift: widget.shift,
             ),
           ),
         )
@@ -156,7 +157,10 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const HicomAppBar(subtitle: 'Machining — Customers'),
+      appBar: HicomAppBar(
+        subtitle:
+            'Machining — ${widget.operation.label} · ${widget.shift} shift',
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -170,8 +174,6 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ShiftToggle(shift: _shift, onChanged: _setShift),
-                  const SizedBox(height: 14),
                   Text(
                     'Select customer',
                     style: TextStyle(
@@ -182,7 +184,7 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Tap to log · ⋮ to rename or delete',
+                    'Tap to open · ⋮ to rename or delete',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textSecondary,
@@ -249,89 +251,6 @@ class _MachiningHomeScreenState extends State<MachiningHomeScreen> {
             },
           );
         },
-      ),
-    );
-  }
-}
-
-/// Day/Night selector — Machining runs the same real shift schedule as the
-/// other modules (Day 8AM-6PM, Night 8PM-6AM crossing midnight), not calendar
-/// midnight. Everything below this screen operates within the selected shift.
-class _ShiftToggle extends StatelessWidget {
-  const _ShiftToggle({required this.shift, required this.onChanged});
-
-  final String shift;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _ShiftButton(
-            label: 'Day shift',
-            icon: Icons.wb_sunny_rounded,
-            selected: shift == 'Day',
-            onTap: () => onChanged('Day'),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _ShiftButton(
-            label: 'Night shift',
-            icon: Icons.nightlight_round,
-            selected: shift == 'Night',
-            onTap: () => onChanged('Night'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ShiftButton extends StatelessWidget {
-  const _ShiftButton({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.navy : AppColors.surfaceTint,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: selected ? AppColors.amber : AppColors.steelBlue,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w800,
-                color: selected ? Colors.white : AppColors.steelBlue,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

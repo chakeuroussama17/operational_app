@@ -10,8 +10,9 @@ import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/casting_home_screen.dart';
 import 'package:hicom_ops/widgets/card_menu_button.dart';
+import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
-import 'package:hicom_ops/screens/machining_home_screen.dart';
+import 'package:hicom_ops/screens/machining_operations_screen.dart';
 import 'package:hicom_ops/screens/secondary_home_screen.dart';
 import 'package:hicom_ops/widgets/submit_button.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -100,7 +101,9 @@ void main() {
 
     await tester.tap(find.text('Machining'));
     await tester.pumpAndSettle();
-    expect(find.byType(MachiningHomeScreen), findsOneWidget);
+    expect(find.byType(MachiningOperationsScreen), findsOneWidget);
+    // Operation comes first now: machining or assembly, then the customer.
+    expect(find.text('Assembly'), findsOneWidget);
   });
 
   testWidgets('card 3-dots menu shows Edit/Delete and fires callbacks', (
@@ -207,6 +210,12 @@ void main() {
     await tester.tap(find.text('Machining'));
     await tester.pumpAndSettle();
 
+    // The module opens on the operation picker, which makes no network call
+    // of its own — the customer fetch is one level down.
+    expect(find.text('Select operation'), findsOneWidget);
+    await tester.tap(find.text('Assembly'));
+    await tester.pumpAndSettle();
+
     // Dashboard fetch failed (stubbed 400) -> error body with Retry, and
     // the customer-selector heading is still present.
     expect(find.text('Select customer'), findsOneWidget);
@@ -221,7 +230,7 @@ void main() {
         home: MachiningEntryScreen(
           customer: 'Mazda',
           part: '1',
-          line: 'Line 1',
+          operation: machiningOperation,
           shift: 'Day',
         ),
       ),
@@ -273,7 +282,7 @@ void main() {
         home: MachiningEntryScreen(
           customer: 'Mazda',
           part: '2244',
-          line: 'FY2',
+          operation: machiningOperation,
           shift: 'Day',
         ),
       ),
@@ -371,7 +380,7 @@ void main() {
           'data': {
             'Customer': 'Mazda',
             'PartNo': '2244',
-            'Line': 'FY2',
+            'Operation': 'machining',
             'Plan': 400,
             'Output_8AM': 150,
             'Output_LOR8AM': 0.375,
@@ -389,7 +398,7 @@ void main() {
         home: MachiningEntryScreen(
           customer: 'Mazda',
           part: '2244',
-          line: 'FY2',
+          operation: machiningOperation,
           shift: 'Day',
           service: SheetsService(client: mock),
         ),
@@ -485,7 +494,7 @@ void main() {
         home: MachiningEntryScreen(
           customer: 'Mazda',
           part: '2244',
-          line: 'FY2',
+          operation: machiningOperation,
           shift: 'Day',
           service: SheetsService(client: mock),
         ),
@@ -524,7 +533,7 @@ void main() {
         home: MachiningEntryScreen(
           customer: 'Mazda',
           part: '1',
-          line: 'Line 1',
+          operation: machiningOperation,
           shift: 'Day',
         ),
       ),

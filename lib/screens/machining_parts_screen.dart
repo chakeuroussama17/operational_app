@@ -7,21 +7,24 @@ import '../services/sheets_service.dart';
 import '../widgets/add_tile.dart';
 import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
+import '../widgets/fill_tank_card.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
-import 'machining_lines_screen.dart';
+import 'machining_entry_screen.dart';
 
-/// Part selector for one customer. An intermediate navigation step — Line is
-/// the level that actually opens the entry form, so these are plain cards
-/// rather than fill-tanks.
+/// Part selector for one customer + operation. Since the Line step was
+/// removed this is the level that opens the entry form, so the cards are
+/// fill-tanks showing how much of the shift is already logged.
 class MachiningPartsScreen extends StatefulWidget {
   const MachiningPartsScreen({
     super.key,
     required this.customer,
+    required this.operation,
     required this.shift,
   });
 
   final String customer;
+  final MachiningOperation operation;
   final String shift;
 
   @override
@@ -56,6 +59,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       final parts = await _sheetsService.fetchMachiningParts(
         widget.customer,
         shift: widget.shift,
+        operation: widget.operation.value,
       );
       if (!mounted) return;
       setState(() {
@@ -75,9 +79,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) => MachiningLinesScreen(
+            builder: (_) => MachiningEntryScreen(
               customer: widget.customer,
               part: part.part,
+              operation: widget.operation,
               shift: widget.shift,
               mo: part.mo,
             ),
@@ -193,7 +198,9 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: HicomAppBar(
-        subtitle: 'Machining — ${widget.customer} · ${widget.shift} shift',
+        subtitle:
+            'Machining — ${widget.operation.label} · ${widget.customer} · '
+            '${widget.shift} shift',
       ),
       body: SafeArea(
         child: Column(
@@ -220,7 +227,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Tap to open · ⋮ to rename or delete',
+                      'Tap to log · ⋮ to rename or delete',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -259,7 +266,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               crossAxisCount: columns,
               mainAxisSpacing: AppDimens.fieldSpacing,
               crossAxisSpacing: AppDimens.fieldSpacing,
-              childAspectRatio: 1.15,
+              childAspectRatio: 1.0,
             ),
             itemCount: _parts.length + 1,
             itemBuilder: (context, index) {
@@ -270,7 +277,12 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               return Stack(
                 children: [
                   Positioned.fill(
-                    child: _PartCard(part: part, onTap: () => _openPart(part)),
+                    child: FillTankCard(
+                      title: part.part,
+                      subtitle: _partSubtitle(part),
+                      fillPercent: part.fillPercent,
+                      onTap: () => _openPart(part),
+                    ),
                   ),
                   Positioned(
                     top: 2,
@@ -300,76 +312,4 @@ String _partSubtitle(MachiningPartStatus part) {
   if (mo != null) return 'MO $mo';
   if (updated != null) return 'Last updated: $updated';
   return 'No entries yet today';
-}
-
-class _PartCard extends StatelessWidget {
-  const _PartCard({required this.part, required this.onTap});
-
-  final MachiningPartStatus part;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      elevation: 2,
-      shadowColor: Colors.black26,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
-        side: BorderSide(color: AppColors.borderSubtle),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
-        child: Padding(
-          // Extra headroom so the content clears the ⋮ menu button that is
-          // stacked over the card's top-right corner.
-          padding: const EdgeInsets.fromLTRB(10, 18, 10, 10),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.tag_rounded,
-                color: AppColors.authPink,
-                size: 20,
-              ),
-              const SizedBox(height: 4),
-              // Part codes vary in length; scale rather than overflow.
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  part.part,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              // Names like "2244-MAR-NO2-BRKT-ENGINE-LH-MACH" ran to three
-              // lines and blew the tile apart; cap and ellipsise instead.
-              Flexible(
-                child: Text(
-                  _partSubtitle(part),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    height: 1.25,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

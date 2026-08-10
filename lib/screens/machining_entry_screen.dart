@@ -13,7 +13,8 @@ import '../widgets/rejection_type_picker.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
 
-/// Data entry for one Customer + Part + Line + Shift. Pre-fills this shift's
+/// Data entry for one Operation + Customer + Part + Shift. Pre-fills this
+/// shift's
 /// saved values, lets the supervisor fill any subset of time slots, and
 /// submits only the fields that changed — the backend upserts and
 /// recalculates LOR%.
@@ -22,7 +23,7 @@ class MachiningEntryScreen extends StatefulWidget {
     super.key,
     required this.customer,
     required this.part,
-    required this.line,
+    required this.operation,
     required this.shift,
     this.mo,
     this.service,
@@ -30,7 +31,7 @@ class MachiningEntryScreen extends StatefulWidget {
 
   final String customer;
   final String part;
-  final String line;
+  final MachiningOperation operation;
   final String shift;
 
   /// The part's MO (manufacturing order) number — shown as read-only context.
@@ -287,7 +288,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       final row = await _sheetsService.fetchMachiningRow(
         customer: widget.customer,
         part: widget.part,
-        line: widget.line,
+        operation: widget.operation.value,
         shift: widget.shift,
       );
       if (!mounted) return;
@@ -399,7 +400,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       await _sheetsService.submitMachiningUpdate({
         'Customer': widget.customer,
         'PartNo': widget.part,
-        'Line': widget.line,
+        'Operation': widget.operation.value,
         'Shift': widget.shift,
         ...changed,
       });
@@ -469,8 +470,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     return Scaffold(
       appBar: HicomAppBar(
         subtitle:
-            'Machining — ${widget.customer} · Part ${widget.part} · '
-            '${widget.line} · ${widget.shift} shift',
+            'Machining — ${widget.operation.label} · ${widget.customer} · '
+            'Part ${widget.part} · ${widget.shift} shift',
       ),
       body: SafeArea(
         child: _loading
@@ -487,7 +488,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                       _ContextHeader(
                         customer: widget.customer,
                         part: widget.part,
-                        line: widget.line,
+                        operation: widget.operation,
                         shift: widget.shift,
                         mo: widget.mo,
                       ),
@@ -553,21 +554,21 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   }
 }
 
-/// Customer / Part / Line / Shift / MO context chips so the supervisor always
-/// knows where this entry is going. MO is read-only here — edit it from the
-/// part's Edit action on the Parts screen.
+/// Operation / Customer / Part / Shift / MO context chips so the supervisor
+/// always knows where this entry is going. MO is read-only here — edit it from
+/// the part's Edit action on the Parts screen.
 class _ContextHeader extends StatelessWidget {
   const _ContextHeader({
     required this.customer,
     required this.part,
-    required this.line,
+    required this.operation,
     required this.shift,
     this.mo,
   });
 
   final String customer;
   final String part;
-  final String line;
+  final MachiningOperation operation;
   final String shift;
   final String? mo;
 
@@ -600,9 +601,9 @@ class _ContextHeader extends StatelessWidget {
       spacing: 10,
       runSpacing: 10,
       children: [
+        chip(Icons.settings_rounded, operation.label),
         chip(Icons.precision_manufacturing_rounded, customer),
         chip(Icons.tag_rounded, 'Part $part'),
-        chip(Icons.linear_scale_rounded, line),
         chip(
           shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
           '$shift shift',

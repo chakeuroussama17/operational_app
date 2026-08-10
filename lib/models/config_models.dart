@@ -1,22 +1,22 @@
-/// Data types for the admin "manage groups/parts/lines" API shared by all
-/// three modules. A "group" is a DCM (Casting), Station (Secondary) or
-/// Customer (Machining); Machining also has a flat, global list of Lines.
+/// Data types for the admin "manage groups/parts/operations" API shared by
+/// all three modules. A "group" is a DCM (Casting), Station (Secondary) or
+/// Customer (Machining); Machining also has a flat, global list of operations.
 library;
 
 /// Snapshot of one module's configured groups, their parts, and (Machining
-/// only) the global line list.
+/// only) the global operation list.
 class ConfigSnapshot {
   const ConfigSnapshot({
     required this.groups,
     required this.partsByGroup,
-    this.lines = const [],
+    this.operations = const [],
   });
 
   final List<String> groups;
   final Map<String, List<String>> partsByGroup;
 
   /// Machining only; empty for Casting/Secondary.
-  final List<String> lines;
+  final List<String> operations;
 
   factory ConfigSnapshot.fromJson(Map<String, dynamic> json) {
     final groups = (json['groups'] as List? ?? const [])
@@ -29,13 +29,13 @@ class ConfigSnapshot {
             .map((e) => e.toString())
             .toList(),
     };
-    final lines = (json['lines'] as List? ?? const [])
+    final operations = (json['operations'] as List? ?? const [])
         .map((e) => e.toString())
         .toList();
     return ConfigSnapshot(
       groups: groups,
       partsByGroup: partsByGroup,
-      lines: lines,
+      operations: operations,
     );
   }
 }

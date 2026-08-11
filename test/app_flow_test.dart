@@ -10,6 +10,7 @@ import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/casting_home_screen.dart';
 import 'package:hicom_ops/widgets/card_menu_button.dart';
+import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
@@ -683,5 +684,85 @@ void main() {
     await tester.enterText(find.byType(TextField).first, '2244');
     await tester.pumpAndSettle();
     expect(find.text('Use "2244"'), findsNothing);
+  });
+
+  group('casting machine picker', () {
+    Future<String?> open(
+      WidgetTester tester, {
+      String? initialValue,
+      Set<String> taken = const {},
+    }) async {
+      String? picked;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  picked = await promptFromList(
+                    context,
+                    title: 'Add machine',
+                    options: castingMachines,
+                    initialValue: initialValue,
+                    taken: taken,
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return picked;
+    }
+
+    testWidgets('picking a machine returns it and closes', (tester) async {
+      await open(tester);
+      expect(find.text('DCM08'), findsOneWidget);
+
+      await tester.tap(find.text('DCM08'));
+      await tester.pumpAndSettle();
+      // Dialog is gone; the button that opened it is showing again.
+      expect(find.text('DCM08'), findsNothing);
+      expect(find.text('open'), findsOneWidget);
+    });
+
+    testWidgets('a machine already on the grid cannot be added twice', (
+      tester,
+    ) async {
+      await open(tester, taken: {'DCM08'});
+
+      expect(find.text('Already added'), findsOneWidget);
+      await tester.tap(find.text('DCM08'));
+      await tester.pumpAndSettle();
+      // Still open — the tap did nothing.
+      expect(find.text('DCM08'), findsOneWidget);
+      expect(find.text('CANCEL'), findsOneWidget);
+    });
+
+    testWidgets('a legacy name is listed so it can be moved onto a real one', (
+      tester,
+    ) async {
+      // The seeded placeholders (1212, 3131...) predate this list; renaming is
+      // how they become real machines, so the old name needs a row.
+      await open(tester, initialValue: '1212', taken: {'1212'});
+
+      expect(find.text('1212'), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.text('DCM08'), findsOneWidget);
+    });
+
+    test('the machine list matches the plant, gaps included', () {
+      expect(castingMachines, hasLength(21));
+      expect(castingMachines.first, 'DCM08');
+      expect(castingMachines.last, 'WELD');
+      // Machines that do not exist must never be offered.
+      for (final missing in ['DCM09', 'DCM10', 'DCM13', 'DCM14', 'DCM16', 'DCM22']) {
+        expect(castingMachines, isNot(contains(missing)));
+      }
+      expect(castingMachines.toSet(), hasLength(castingMachines.length));
+    });
   });
 }

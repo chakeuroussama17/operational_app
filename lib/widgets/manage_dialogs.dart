@@ -93,6 +93,132 @@ class PartWithMoInput {
   final String mo;
 }
 
+/// Single-select picker over a fixed list of names — the casting machines.
+///
+/// Free text let the same machine into the sheet under several spellings
+/// ("DCM8", "dcm 08"), and every one of those is a separate group that splits
+/// its own history. Picking from a list makes that impossible.
+///
+/// [taken] are names already configured: shown, but greyed and unselectable,
+/// so it's obvious the machine exists rather than the list being wrong.
+/// [initialValue] is always selectable even when taken (that's the row being
+/// renamed) and is shown even when it isn't in [options] at all — which is how
+/// a legacy name like "1212" can be moved onto a real one.
+///
+/// Returns the chosen name, or null if dismissed.
+Future<String?> promptFromList(
+  BuildContext context, {
+  required String title,
+  required List<String> options,
+  String? initialValue,
+  Set<String> taken = const {},
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => _ListPickerDialog(
+      title: title,
+      options: options,
+      initialValue: initialValue,
+      taken: taken,
+    ),
+  );
+}
+
+class _ListPickerDialog extends StatelessWidget {
+  const _ListPickerDialog({
+    required this.title,
+    required this.options,
+    required this.initialValue,
+    required this.taken,
+  });
+
+  final String title;
+  final List<String> options;
+  final String? initialValue;
+  final Set<String> taken;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = initialValue;
+    // A name being renamed that predates this list still needs a row to sit
+    // on, otherwise the dialog opens with nothing selected and no way to see
+    // what is being changed.
+    final entries = [
+      if (current != null && current.isNotEmpty && !options.contains(current))
+        current,
+      ...options,
+    ];
+
+    final media = MediaQuery.of(context);
+    final listHeight = (media.size.height - 260).clamp(160.0, 380.0);
+
+    return AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: math.min(380, media.size.width * 0.86),
+        height: listHeight,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.borderSubtle),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ListView.builder(
+              itemCount: entries.length,
+              itemBuilder: (context, i) {
+                final name = entries[i];
+                final isSelected = name == current;
+                final isTaken = taken.contains(name) && !isSelected;
+                return ListTile(
+                  dense: true,
+                  enabled: !isTaken,
+                  selected: isSelected,
+                  selectedTileColor: AppColors.surfaceTint,
+                  title: Text(
+                    name,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: isTaken
+                          ? AppColors.textSecondary
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                  subtitle: isTaken
+                      ? Text(
+                          'Already added',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.textSecondary,
+                          ),
+                        )
+                      : null,
+                  trailing: isSelected
+                      ? const Icon(
+                          Icons.check_circle,
+                          color: AppColors.success,
+                          size: 20,
+                        )
+                      : null,
+                  onTap: isTaken
+                      ? null
+                      : () => Navigator.of(context).pop(name),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('CANCEL'),
+        ),
+      ],
+    );
+  }
+}
+
 /// Add/edit dialog for a part. The part code is picked from [codes] (the
 /// module's slice of the master list) — a search box filtering an inline list
 /// of code + name. When the search matches nothing the typed text can be used

@@ -23,6 +23,38 @@ const String adminEmail = 'admin@hidsb.com';
 /// Each maps 1:1 to a module ('Casting' -> 'casting').
 const List<String> departments = ['Casting', 'Secondary', 'Machining'];
 
+/// The casting bay's machines, in plant order. A DCM is a die-casting machine;
+/// WELD is not one, but it logs output the same way so it sits in the same
+/// list. The numbering has gaps (no 09, 10, 13, 14, 16, 22) — those machines
+/// don't exist, so the list is written out rather than generated.
+///
+/// Adding a DCM picks from here instead of typing, so a machine can't enter
+/// the sheet as "DCM8" one shift and "dcm 08" the next. Retiring or
+/// commissioning a machine means editing this list and shipping a build.
+const List<String> castingMachines = [
+  'DCM08',
+  'DCM11',
+  'DCM12',
+  'DCM15',
+  'DCM17',
+  'DCM18',
+  'DCM19',
+  'DCM20',
+  'DCM21',
+  'DCM23',
+  'DCM24',
+  'DCM25',
+  'DCM26',
+  'DCM27',
+  'DCM28',
+  'DCM29',
+  'DCM30',
+  'DCM31',
+  'DCM32',
+  'DCM33',
+  'WELD',
+];
+
 /// Shared secret checked by the Apps Script doPost (its SECRET_KEY).
 /// Sent as a top-level "secret" field with every submission.
 // ignore: constant_identifier_names

@@ -82,7 +82,14 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
   }
 
   Future<void> _addDcm() async {
-    final name = await promptText(context, title: 'Add DCM', label: 'DCM');
+    final name = await promptFromList(
+      context,
+      title: 'Add machine',
+      options: castingMachines,
+      // Machines already on the grid stay listed but greyed, so a full list
+      // reads as "all present" rather than "the list is broken".
+      taken: {for (final m in _machines) m.dcm},
+    );
     if (name == null) return;
     await _mutate(
       () => _sheetsService.configAdd(
@@ -94,11 +101,12 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
   }
 
   Future<void> _renameDcm(DcmStatus machine) async {
-    final name = await promptText(
+    final name = await promptFromList(
       context,
-      title: 'Rename DCM',
-      label: 'DCM',
+      title: 'Change machine',
+      options: castingMachines,
       initialValue: machine.dcm,
+      taken: {for (final m in _machines) m.dcm},
     );
     if (name == null || name == machine.dcm) return;
     await _mutate(
@@ -218,7 +226,7 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
             itemCount: _machines.length + 1,
             itemBuilder: (context, index) {
               if (index == _machines.length) {
-                return AddTile(label: 'Add DCM', onTap: _addDcm);
+                return AddTile(label: 'Add machine', onTap: _addDcm);
               }
               final machine = _machines[index];
               return Stack(

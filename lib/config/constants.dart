@@ -55,6 +55,33 @@ const List<String> castingMachines = [
   'WELD',
 ];
 
+/// The secondary bay's finishing stations, in plant order. Trimming presses
+/// (TRIM01-09) and de-flashing robots (ROBO01-04) are numbered; the rest are
+/// named for what they do. Picked from rather than typed, for the same reason
+/// as [castingMachines].
+///
+/// SHOTB-BT and SHOTB-GR are the full names, not abbreviations of longer ones.
+const List<String> secondaryStations = [
+  'CURING',
+  'FETTLING',
+  'ROBO01',
+  'ROBO02',
+  'ROBO03',
+  'ROBO04',
+  'SHOTB-BT',
+  'SHOTB-GR',
+  'TRIM01',
+  'TRIM02',
+  'TRIM03',
+  'TRIM04',
+  'TRIM05',
+  'TRIM06',
+  'TRIM07',
+  'TRIM08',
+  'TRIM09',
+  'TUMBLING',
+];
+
 /// Shared secret checked by the Apps Script doPost (its SECRET_KEY).
 /// Sent as a top-level "secret" field with every submission.
 // ignore: constant_identifier_names

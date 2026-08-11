@@ -765,4 +765,60 @@ void main() {
       expect(castingMachines.toSet(), hasLength(castingMachines.length));
     });
   });
+
+  group('secondary station picker', () {
+    testWidgets('stations are picked from the list, duplicates blocked', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => promptFromList(
+                  context,
+                  title: 'Add station',
+                  options: secondaryStations,
+                  taken: const {'CURING'},
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CURING'), findsOneWidget);
+      expect(find.text('Already added'), findsOneWidget);
+
+      // The taken one does nothing; a free one closes the dialog.
+      await tester.tap(find.text('CURING'));
+      await tester.pumpAndSettle();
+      expect(find.text('CANCEL'), findsOneWidget);
+
+      await tester.tap(find.text('FETTLING'));
+      await tester.pumpAndSettle();
+      expect(find.text('open'), findsOneWidget);
+      expect(find.text('CANCEL'), findsNothing);
+    });
+
+    test('the station list matches the plant', () {
+      expect(secondaryStations, hasLength(18));
+      expect(secondaryStations.toSet(), hasLength(secondaryStations.length));
+      // Numbered runs are complete and have no gaps, unlike the DCMs.
+      for (var i = 1; i <= 9; i++) {
+        expect(secondaryStations, contains('TRIM0$i'));
+      }
+      for (var i = 1; i <= 4; i++) {
+        expect(secondaryStations, contains('ROBO0$i'));
+      }
+      // Full names, not truncations of longer ones.
+      expect(secondaryStations, containsAll(['SHOTB-BT', 'SHOTB-GR']));
+      expect(secondaryStations, containsAll(['CURING', 'FETTLING', 'TUMBLING']));
+      // The old seeded placeholders are not real stations.
+      expect(secondaryStations, isNot(contains('ST1')));
+    });
+  });
 }

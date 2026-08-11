@@ -100,10 +100,13 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
   }
 
   Future<void> _addStation() async {
-    final name = await promptText(
+    final name = await promptFromList(
       context,
-      title: 'Add Station',
-      label: 'Station',
+      title: 'Add station',
+      options: secondaryStations,
+      // Stations already on the grid stay listed but greyed, so a full list
+      // reads as "all present" rather than "the list is broken".
+      taken: {for (final s in _stations) s.station},
     );
     if (name == null) return;
     await _mutate(
@@ -116,11 +119,12 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
   }
 
   Future<void> _renameStation(StationStatus station) async {
-    final name = await promptText(
+    final name = await promptFromList(
       context,
-      title: 'Rename Station',
-      label: 'Station',
+      title: 'Change station',
+      options: secondaryStations,
       initialValue: station.station,
+      taken: {for (final s in _stations) s.station},
     );
     if (name == null || name == station.station) return;
     await _mutate(
@@ -223,7 +227,7 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
             itemCount: _stations.length + 1,
             itemBuilder: (context, index) {
               if (index == _stations.length) {
-                return AddTile(label: 'Add Station', onTap: _addStation);
+                return AddTile(label: 'Add station', onTap: _addStation);
               }
               final station = _stations[index];
               return Stack(

@@ -341,7 +341,7 @@ class _SlotRow extends StatelessWidget {
       children: [
         Expanded(
           child: AppNumberField(
-            label: 'Output — ${slot.label}',
+            label: 'Actual — ${slot.label}',
             controller: controller,
             required: false,
           ),

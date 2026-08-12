@@ -231,31 +231,21 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     return payload;
   }
 
-  /// The output an hour will hold once pending corrections are saved: pieces
-  /// reclassified out of scrap come back to it.
-  String _projectedOutput(MachiningSlot slot) {
-    final saved = double.tryParse(
-      _outputControllers[slot.outputKey]!.text.trim(),
-    );
-    if (saved == null) return _outputControllers[slot.outputKey]!.text.trim();
-    var total = saved;
-    for (final row in _savedRows[slot.outputKey] ?? const <_SavedRejection>[]) {
-      total += row.returnedPieces;
-    }
-    return _trimNumber(total);
-  }
+  /// What the hour's box currently holds, as a number.
+  double? _actual(MachiningSlot slot) =>
+      double.tryParse(_outputControllers[slot.outputKey]!.text.trim());
 
-  /// Running output over Plan, up to and including [slot] — LOR answers "how
+  /// Running actual over Plan, up to and including [slot] — LOR answers "how
   /// much of the plan is done so far", so it accumulates across the shift.
-  /// Computed live from the projected outputs so a correction shows up before
-  /// it is saved; falls back to the server's cell when there is no Plan.
+  /// Computed live so a freshly typed hour shows its rate before saving;
+  /// falls back to the server's cell when there is no Plan.
   String? _lorLabel(MachiningSlot slot) {
     final plan = double.tryParse(_planController.text.trim());
     if (plan == null || plan <= 0) return _lors[slot.lorKey];
     var running = 0.0;
     var reached = false;
     for (final s in _slots) {
-      final value = double.tryParse(_projectedOutput(s));
+      final value = _actual(s);
       if (value != null) running += value;
       if (s.outputKey == slot.outputKey) {
         reached = value != null;
@@ -266,11 +256,20 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     return formatLor(running / plan * 100);
   }
 
-  /// Every hour's projected output added up — plan-versus-actual at a glance.
-  double get _outputTotal {
+  /// Every hour added up — everything the shift produced, scrap included.
+  double get _actualTotal {
     var total = 0.0;
     for (final slot in _slots) {
-      total += double.tryParse(_projectedOutput(slot)) ?? 0;
+      total += _actual(slot) ?? 0;
+    }
+    return total;
+  }
+
+  /// Every defect logged this shift, at the quantities currently on screen.
+  double get _rejectedTotal {
+    var total = 0.0;
+    for (final entry in _rejectionSummary) {
+      total += double.tryParse(entry.qty) ?? 0;
     }
     return total;
   }
@@ -513,7 +512,6 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           outputController: _outputControllers[slot.outputKey]!,
                           lorLabel: _lorLabel(slot),
                           locked: _lockedOutputs.contains(slot.outputKey),
-                          projectedOutput: _projectedOutput(slot),
                           stamp: _logMeta[slot.slotKey] as Map?,
                           saved:
                               _savedRows[slot.outputKey] ??
@@ -532,12 +530,12 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         ),
                       ],
                       const SizedBox(height: 26),
-                      _ShiftTotals(
-                        outputTotal: _outputTotal,
+                      _OverallSummary(
+                        actualTotal: _actualTotal,
+                        rejectedTotal: _rejectedTotal,
                         plan: double.tryParse(_planController.text.trim()),
+                        entries: _rejectionSummary,
                       ),
-                      const SizedBox(height: 14),
-                      _RejectionSummary(entries: _rejectionSummary),
                       const SizedBox(height: 28),
                       SubmitButton(
                         onPressed: _submit,
@@ -692,13 +690,6 @@ class _SavedRejection {
 
   bool get isCorrected => qty.isNotEmpty && qty != savedQty;
 
-  /// Pieces this correction hands back to the hour's output (negative when
-  /// the count goes up and the output owes pieces back).
-  double get returnedPieces {
-    if (!isCorrected) return 0;
-    return (double.tryParse(savedQty) ?? 0) - (double.tryParse(qty) ?? 0);
-  }
-
   void dispose() => qtyController.dispose();
 }
 
@@ -715,7 +706,6 @@ class _SlotBlock extends StatelessWidget {
     required this.outputController,
     required this.lorLabel,
     required this.locked,
-    required this.projectedOutput,
     required this.stamp,
     required this.saved,
     required this.rows,
@@ -733,7 +723,6 @@ class _SlotBlock extends StatelessWidget {
   final bool locked;
 
   /// What the output becomes once pending rejection corrections are saved.
-  final String projectedOutput;
 
   /// {by, at} for a locked hour — who logged it and when, from LogMeta.
   final Map? stamp;
@@ -907,7 +896,7 @@ class _SlotBlock extends StatelessWidget {
           child: locked
               ? _lockedOutput()
               : AppNumberField(
-                  label: 'Output — ${slot.label}',
+                  label: 'Actual — ${slot.label}',
                   controller: outputController,
                   required: false,
                 ),
@@ -958,15 +947,13 @@ class _SlotBlock extends StatelessWidget {
   }
 
   /// An hour that's already on the sheet: the value is shown, not editable.
-  /// It moves only when a rejection correction hands pieces back, and then the
-  /// box shows where it is heading before the save happens.
+  /// Correcting a defect no longer moves it — actual counts everything the
+  /// hour produced, so a correction only changes the good/scrap split.
   Widget _lockedOutput() {
-    final saved = outputController.text;
-    final corrected = projectedOutput != saved;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        FieldLabel(label: 'Output — ${slot.label}', required: false),
+        FieldLabel(label: 'Actual — ${slot.label}', required: false),
         const SizedBox(height: 6),
         Container(
           height: 58,
@@ -974,36 +961,16 @@ class _SlotBlock extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.surfaceTint,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: corrected ? AppColors.amber : AppColors.borderSubtle,
-            ),
+            border: Border.all(color: AppColors.borderSubtle),
           ),
           child: Row(
             children: [
-              if (corrected) ...[
-                Text(
-                  saved,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                    decoration: TextDecoration.lineThrough,
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_right_alt_rounded,
-                  size: 20,
-                  color: AppColors.textSecondary,
-                ),
-              ],
               Text(
-                projectedOutput,
+                outputController.text,
                 style: TextStyle(
                   fontSize: AppDimens.fieldFontSize,
                   fontWeight: FontWeight.w700,
-                  color: corrected
-                      ? AppColors.amberDark
-                      : AppColors.textPrimary,
+                  color: AppColors.textPrimary,
                 ),
               ),
               const Spacer(),
@@ -1079,21 +1046,36 @@ class _LockedField extends StatelessWidget {
   }
 }
 
-/// Where the shift stands: everything produced so far against the plan, and
-/// how far there is left to go.
-class _ShiftTotals extends StatelessWidget {
-  const _ShiftTotals({required this.outputTotal, required this.plan});
+/// Where the shift stands, in one block.
+///
+/// Actual counts EVERY part the shift produced, so good parts are that figure
+/// less the scrap — the three numbers are meant to be read together, which is
+/// why the plan progress and the defect list live in the same box rather than
+/// two that can drift apart on screen.
+class _OverallSummary extends StatelessWidget {
+  const _OverallSummary({
+    required this.actualTotal,
+    required this.rejectedTotal,
+    required this.plan,
+    required this.entries,
+  });
 
-  final double outputTotal;
+  final double actualTotal;
+  final double rejectedTotal;
   final double? plan;
+  final List<RejectionEntry> entries;
 
   static String _n(double v) =>
       v % 1 == 0 ? v.toInt().toString() : v.toString();
 
   @override
   Widget build(BuildContext context) {
-    final remaining = plan == null ? null : plan! - outputTotal;
-    final ahead = remaining != null && remaining <= 0;
+    final good = actualTotal - rejectedTotal;
+    final sorted = [...entries]
+      ..sort(
+        (a, b) =>
+            (double.tryParse(b.qty) ?? 0).compareTo(double.tryParse(a.qty) ?? 0),
+      );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -1108,64 +1090,60 @@ class _ShiftTotals extends StatelessWidget {
           Row(
             children: [
               Icon(
-                Icons.stacked_bar_chart_rounded,
+                Icons.summarize_outlined,
                 size: 20,
                 color: AppColors.navy,
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Output so far',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
               Text(
-                _n(outputTotal),
+                'Overall summary',
                 style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.navy,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
                 ),
               ),
-              if (plan != null)
-                Text(
-                  ' / ${_n(plan!)}',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
             ],
           ),
-          if (remaining != null) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    ahead ? 'Plan reached' : 'Left to plan',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                Text(
-                  ahead ? '+${_n(-remaining)}' : _n(remaining),
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: ahead ? AppColors.success : AppColors.textPrimary,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          _SummaryLine(
+            label: 'Total output so far',
+            value: plan == null
+                ? _n(actualTotal)
+                : '${_n(actualTotal)} / ${_n(plan!)}',
+          ),
+          _SummaryLine(
+            label: 'Total rejected parts',
+            value: _n(rejectedTotal),
+            color: rejectedTotal > 0 ? AppColors.danger : null,
+          ),
+          _SummaryLine(
+            label: 'Total good parts',
+            value: _n(good),
+            color: AppColors.success,
+            emphasise: true,
+          ),
+          if (sorted.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: AppColors.navy.withValues(alpha: 0.18)),
+            const SizedBox(height: 10),
+            Text(
+              'Rejection summary',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary,
+              ),
             ),
+            const SizedBox(height: 6),
+            for (final entry in sorted)
+              _SummaryLine(
+                label: entry.code.isEmpty
+                    ? entry.type
+                    : '${entry.code} · ${entry.type}',
+                value: entry.qty,
+                dense: true,
+              ),
           ],
         ],
       ),
@@ -1173,122 +1151,50 @@ class _ShiftTotals extends StatelessWidget {
   }
 }
 
-/// The auto-calculated total per defect type for the day — the sum of the
-/// hourly entries above plus whatever was already saved. This is exactly what
-/// is written to the sheet; the hourly split is an entry aid and is not stored.
-///
-/// Deliberately display-only: recorded scrap must not be erasable from the
-/// floor, so there is no remove here. A wrong figure is corrected in the
-/// sheet itself.
-class _RejectionSummary extends StatelessWidget {
-  const _RejectionSummary({required this.entries});
+/// One "label ....... value" row of the summary.
+class _SummaryLine extends StatelessWidget {
+  const _SummaryLine({
+    required this.label,
+    required this.value,
+    this.color,
+    this.emphasise = false,
+    this.dense = false,
+  });
 
-  final List<RejectionEntry> entries;
+  final String label;
+  final String value;
+  final Color? color;
+  final bool emphasise;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
-    final total = entries.fold<double>(
-      0,
-      (sum, e) => sum + (double.tryParse(e.qty) ?? 0),
-    );
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceTint,
-        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: dense ? 2 : 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.summarize_outlined, size: 20, color: AppColors.navy),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Rejection summary',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: dense ? 13 : 14.5,
+                fontWeight: emphasise ? FontWeight.w700 : FontWeight.w600,
+                color: dense ? AppColors.textSecondary : AppColors.textPrimary,
               ),
-              Text(
-                'saved to sheet',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
+            ),
           ),
-          if (entries.isEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'No rejections logged this shift.',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          const SizedBox(width: 12),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: emphasise ? 19 : (dense ? 13 : 16),
+              fontWeight: FontWeight.w800,
+              color: color ?? AppColors.textPrimary,
             ),
-          ] else ...[
-            const SizedBox(height: 6),
-            for (final entry in entries)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      entry.qty,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Total',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    total % 1 == 0
-                        ? total.toInt().toString()
-                        : total.toString(),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.danger,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ],
       ),
     );

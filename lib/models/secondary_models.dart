@@ -1,8 +1,9 @@
 /// Data types for the Secondary module's incremental logging API.
 ///
-/// Mirrors Casting (shift-aware, Day 8AM-6PM / Night 8PM-6AM crossing
+/// Mirrors Casting (shift-aware, Day 10AM-6PM / Night 8PM-6AM crossing
 /// midnight, MO number per part) but with different column names:
-///   DCM → Station, Output_* → Actual_*, Output_LOR* → LOR_*
+///   DCM → Station; the Actual_*/LOR_* column names are now shared by all
+///   three modules.
 library;
 
 /// One of the six checkpoints logged for a given shift.
@@ -18,9 +19,9 @@ class SecondarySlot {
   final String lorKey;
 }
 
-/// Day shift: 8AM-6PM.
+/// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM
+/// checkpoint — Night still opens at 8PM and keeps its six.
 const List<SecondarySlot> secondaryDaySlots = [
-  SecondarySlot('8 AM', 'Actual_8AM', 'LOR_8AM'),
   SecondarySlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
   SecondarySlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
   SecondarySlot('2 PM', 'Actual_2PM', 'LOR_2PM'),

@@ -1,6 +1,6 @@
 /// Data types for the Casting module's incremental logging API.
 ///
-/// Casting is shift-aware (Day 8AM-6PM / Night 8PM-6AM, crossing midnight) —
+/// Casting is shift-aware (Day 10AM-6PM / Night 8PM-6AM, crossing midnight) —
 /// the only module with this schema; Secondary/Machining are unchanged. The
 /// backend exposes (all on the webhook URL):
 ///   GET  ?action=dashboard&shift=Z             -> [DcmStatus]
@@ -15,31 +15,31 @@ class CastingSlot {
 
   final String label;
 
-  /// Column/field name of the user-entered output, e.g. "Output_10AM".
+  /// Column/field name of the user-entered count, e.g. "Actual_10AM".
   final String outputKey;
 
-  /// Column/field name of the backend-computed LOR%, e.g. "Output_LOR10AM".
+  /// Column/field name of the backend-computed LOR%, e.g. "LOR_10AM".
   final String lorKey;
 }
 
-/// Day shift: 8AM-6PM.
+/// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM
+/// checkpoint — Night still opens at 8PM and keeps its six.
 const List<CastingSlot> castingDaySlots = [
-  CastingSlot('8 AM', 'Output_8AM', 'Output_LOR8AM'),
-  CastingSlot('10 AM', 'Output_10AM', 'Output_LOR10AM'),
-  CastingSlot('12 PM', 'Output_12PM', 'Output_LOR12PM'),
-  CastingSlot('2 PM', 'Output_2PM', 'Output_LOR2PM'),
-  CastingSlot('4 PM', 'Output_4PM', 'Output_LOR4PM'),
-  CastingSlot('6 PM', 'Output_6PM', 'Output_LOR6PM'),
+  CastingSlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
+  CastingSlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
+  CastingSlot('2 PM', 'Actual_2PM', 'LOR_2PM'),
+  CastingSlot('4 PM', 'Actual_4PM', 'LOR_4PM'),
+  CastingSlot('6 PM', 'Actual_6PM', 'LOR_6PM'),
 ];
 
 /// Night shift: 8PM-6AM, crossing midnight.
 const List<CastingSlot> castingNightSlots = [
-  CastingSlot('8 PM', 'Output_8PM', 'Output_LOR8PM'),
-  CastingSlot('10 PM', 'Output_10PM', 'Output_LOR10PM'),
-  CastingSlot('12 AM', 'Output_12AM', 'Output_LOR12AM'),
-  CastingSlot('2 AM', 'Output_2AM', 'Output_LOR2AM'),
-  CastingSlot('4 AM', 'Output_4AM', 'Output_LOR4AM'),
-  CastingSlot('6 AM', 'Output_6AM', 'Output_LOR6AM'),
+  CastingSlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
+  CastingSlot('10 PM', 'Actual_10PM', 'LOR_10PM'),
+  CastingSlot('12 AM', 'Actual_12AM', 'LOR_12AM'),
+  CastingSlot('2 AM', 'Actual_2AM', 'LOR_2AM'),
+  CastingSlot('4 AM', 'Actual_4AM', 'LOR_4AM'),
+  CastingSlot('6 AM', 'Actual_6AM', 'LOR_6AM'),
 ];
 
 List<CastingSlot> castingSlotsForShift(String shift) =>

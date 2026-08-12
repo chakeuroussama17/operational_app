@@ -91,8 +91,8 @@ void main() {
             return http.Response(
               '{"status":"success","data":{"Date":"2026-07-17","DCM":1212,'
               '"PartNo":3,"Shift":"Day","MO":"JUL-0451","Plan":300,'
-              '"Output_10AM":30,"Output_LOR10AM":0.1,"Output_12PM":45,'
-              '"Output_LOR12PM":0.15,"Output_2PM":"","Output_LOR2PM":"",'
+              '"Actual_10AM":30,"LOR_10AM":0.1,"Actual_12PM":45,'
+              '"LOR_12PM":0.15,"Actual_2PM":"","LOR_2PM":"",'
               '"LastUpdated":"14:32"}}',
               200,
             );
@@ -113,13 +113,13 @@ void main() {
         });
         expect(row!.value('Plan'), '300');
         expect(row.value('MO'), 'JUL-0451');
-        expect(row.value('Output_10AM'), '30');
+        expect(row.value('Actual_10AM'), '30');
         // Sheets returns LOR as a fraction; the badge shows a percentage.
-        expect(row.lorLabel('Output_LOR10AM'), '10%');
-        expect(row.lorLabel('Output_LOR12PM'), '15%');
-        expect(row.value('Output_12PM'), '45');
-        expect(row.value('Output_2PM'), isNull); // blank cell
-        expect(row.value('Output_4PM'), isNull); // absent cell
+        expect(row.lorLabel('LOR_10AM'), '10%');
+        expect(row.lorLabel('LOR_12PM'), '15%');
+        expect(row.value('Actual_12PM'), '45');
+        expect(row.value('Actual_2PM'), isNull); // blank cell
+        expect(row.value('Actual_4PM'), isNull); // absent cell
       },
     );
 
@@ -128,7 +128,7 @@ void main() {
         client: MockClient(
           (request) async => http.Response(
             '{"status":"success","data":{"DCM":"1212","PartNo":"1",'
-            '"Output_LOR10AM":"33%"}}',
+            '"LOR_10AM":"33%"}}',
             200,
           ),
         ),
@@ -140,7 +140,7 @@ void main() {
         shift: 'Day',
       );
 
-      expect(row!.lorLabel('Output_LOR10AM'), '33%');
+      expect(row!.lorLabel('LOR_10AM'), '33%');
     });
 
     test(
@@ -159,7 +159,7 @@ void main() {
           'PartNo': '1',
           'Shift': 'Night',
           'Plan': '300',
-          'Output_8PM': '30',
+          'Actual_8PM': '30',
         });
 
         expect(sent['secret'], 'hicom2026changeme');
@@ -169,7 +169,7 @@ void main() {
           'PartNo': '1',
           'Shift': 'Night',
           'Plan': '300',
-          'Output_8PM': '30',
+          'Actual_8PM': '30',
         });
       },
     );
@@ -491,8 +491,8 @@ void main() {
               '{"status":"success","data":{"Date":"2026-07-23",'
               '"Customer":"Mazda","PartNo":"1","Operation":"machining","MO":"MACH-77",'
               '"Plan":300,'
-              '"Output_8AM":30,"Output_LOR8AM":0.1,"Rejection_8AM":2,'
-              '"Output_10AM":"","Output_LOR10AM":"","Rejection_10AM":"",'
+              '"Actual_8AM":30,"LOR_8AM":0.1,"Rejection_8AM":2,'
+              '"Actual_10AM":"","LOR_10AM":"","Rejection_10AM":"",'
               '"LastUpdated":"14:32"}}',
               200,
             );
@@ -516,10 +516,10 @@ void main() {
         });
         expect(row!.value('Plan'), '300');
         expect(row.value('MO'), 'MACH-77');
-        expect(row.value('Output_8AM'), '30');
-        expect(row.lorLabel('Output_LOR8AM'), '10%');
+        expect(row.value('Actual_8AM'), '30');
+        expect(row.lorLabel('LOR_8AM'), '10%');
         expect(row.value('Rejection_8AM'), '2');
-        expect(row.value('Output_10AM'), isNull); // blank cell
+        expect(row.value('Actual_10AM'), isNull); // blank cell
         expect(row.value('Rejection_4PM'), isNull); // absent cell
       },
     );
@@ -539,7 +539,7 @@ void main() {
         'Operation': 'machining',
         'Shift': 'Night',
         'Plan': '300',
-        'Output_8PM': '30',
+        'Actual_8PM': '30',
         'Rejection_8PM': '2',
       });
 
@@ -551,7 +551,7 @@ void main() {
         'Operation': 'machining',
         'Shift': 'Night',
         'Plan': '300',
-        'Output_8PM': '30',
+        'Actual_8PM': '30',
         'Rejection_8PM': '2',
       });
     });
@@ -734,7 +734,7 @@ void main() {
         client: MockClient(
           (request) async => http.Response(
             '{"status":"success","data":{"Customer":"Mazda","PartNo":"2244",'
-            '"Operation":"machining","Output_8AM":150,"Output_LOR8AM":0.5,'
+            '"Operation":"machining","Actual_8AM":150,"LOR_8AM":0.5,'
             '"Rejections":[{"code":"064","type":"POROSITY","qty":5},'
             '{"code":"006","type":"BLOW HOLE","qty":2}]}}',
             200,
@@ -749,8 +749,8 @@ void main() {
         shift: 'Day',
       );
 
-      expect(row!.value('Output_8AM'), '150');
-      expect(row.lorLabel('Output_LOR8AM'), '50%');
+      expect(row!.value('Actual_8AM'), '150');
+      expect(row.lorLabel('LOR_8AM'), '50%');
       final rejections = row.rejections;
       expect(rejections, hasLength(2));
       expect(rejections[0].code, '064');

@@ -174,10 +174,11 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day shift runs 8AM-6PM (not the old flat 10AM-8PM list).
-    expect(find.text('Output — 8 AM'), findsOneWidget);
-    expect(find.text('Output — 6 PM'), findsOneWidget);
-    expect(find.text('LOR'), findsNWidgets(6));
+    // Day shift runs 10AM-6PM — five checkpoints, no 8AM.
+    expect(find.text('Actual — 10 AM'), findsOneWidget);
+    expect(find.text('Actual — 6 PM'), findsOneWidget);
+    expect(find.text('Actual — 8 AM'), findsNothing);
+    expect(find.text('LOR'), findsNWidgets(5));
 
     // Submitting with no values entered is a no-op with a hint.
     await tester.dragUntilVisible(
@@ -246,15 +247,17 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day shift slots run 8 AM - 6 PM, each with its own rejection line
-    // beneath it, and one auto-calculated summary at the bottom.
-    expect(find.text('Output — 8 AM'), findsOneWidget);
-    expect(find.text('Output — 6 PM'), findsOneWidget);
-    expect(find.text('LOR'), findsNWidgets(6));
-    expect(find.text('Select type'), findsNWidgets(6));
-    expect(find.text('Another defect this hour'), findsNWidgets(6));
-    expect(find.text('Rejection summary'), findsOneWidget);
-    expect(find.text('No rejections logged this shift.'), findsOneWidget);
+    // Day slots run 10 AM - 6 PM, each with its own rejection line beneath
+    // it, and one overall summary at the bottom.
+    expect(find.text('Actual — 10 AM'), findsOneWidget);
+    expect(find.text('Actual — 6 PM'), findsOneWidget);
+    expect(find.text('LOR'), findsNWidgets(5));
+    expect(find.text('Select type'), findsNWidgets(5));
+    expect(find.text('Another defect this hour'), findsNWidgets(5));
+    expect(find.text('Overall summary'), findsOneWidget);
+    expect(find.text('Total good parts'), findsOneWidget);
+    // Nothing logged yet, so there is no per-defect breakdown to show.
+    expect(find.text('Rejection summary'), findsNothing);
 
     // Submitting with no values entered is a no-op with a hint.
     await tester.dragUntilVisible(
@@ -292,8 +295,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Every hour starts with exactly one rejection line.
-    expect(find.text('Select type'), findsNWidgets(6));
+    // Every hour starts with exactly one rejection line — five on Day.
+    expect(find.text('Select type'), findsNWidgets(5));
 
     await tester.dragUntilVisible(
       find.text('Another defect this hour').first,
@@ -302,7 +305,7 @@ void main() {
     );
     await tester.tap(find.text('Another defect this hour').first);
     await tester.pumpAndSettle();
-    expect(find.text('Select type'), findsNWidgets(7));
+    expect(find.text('Select type'), findsNWidgets(6));
 
     // The extra line can be dropped again (a lone line has no x).
     final remove = find.byIcon(Icons.close);
@@ -314,14 +317,14 @@ void main() {
     await tester.ensureVisible(remove.first);
     await tester.tap(remove.first);
     await tester.pumpAndSettle();
-    expect(find.text('Select type'), findsNWidgets(6));
+    expect(find.text('Select type'), findsNWidgets(5));
 
     // A quantity with no defect type chosen is not a rejection, so it stays
     // out of the summary and there is still nothing to save.
-    // Fields run Plan, Output 8AM, qty 8AM, Output 10AM, qty 10AM, ...
+    // Fields run Plan, Actual 10AM, qty 10AM, Actual 12PM, qty 12PM, ...
     await tester.enterText(find.byType(TextFormField).at(2), '5');
     await tester.pumpAndSettle();
-    expect(find.text('No rejections logged this shift.'), findsOneWidget);
+    expect(find.text('Rejection summary'), findsNothing);
 
     await tester.dragUntilVisible(
       find.byType(SubmitButton),
@@ -343,7 +346,7 @@ void main() {
     // with 5 POROSITY logged against that hour. Posted lines are merged by
     // (hour, type) the way the real reconcile does.
     var storedRejections = <dynamic>[
-      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '8AM'},
+      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '10AM'},
     ];
     final mock = MockClient((request) async {
       if (request.method == 'POST') {
@@ -385,9 +388,9 @@ void main() {
             'PartNo': '2244',
             'Operation': 'machining',
             'Plan': 400,
-            'Output_8AM': 150,
-            'Output_LOR8AM': 0.375,
-            'LogMeta': '{"8AM":{"by":"Ahmad Ali","at":"08:07"}}',
+            'Actual_10AM': 150,
+            'LOR_10AM': 0.375,
+            'LogMeta': '{"10AM":{"by":"Ahmad Ali","at":"08:07"}}',
             'Rejections': storedRejections,
           },
         }),
@@ -413,24 +416,28 @@ void main() {
     // who logged it. The saved defect sits under its own hour.
     expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
     expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
-    // Plan and 8 AM's output are locked boxes, not fields: 5 editable outputs
-    // + 6 new-defect qty boxes + the saved defect's own qty box.
-    expect(find.byType(TextFormField), findsNWidgets(12));
+    // Plan and 10 AM's actual are locked boxes, not fields: 4 editable
+    // actuals + 5 new-defect qty boxes + the saved defect's own qty box.
+    expect(find.byType(TextFormField), findsNWidgets(10));
     // LOR is cumulative over Plan: 150 of 400.
     expect(find.text('37.5%'), findsOneWidget);
-    expect(find.text('250'), findsOneWidget, reason: 'left to plan');
+    // Actual counts everything made, so good = 150 - 5.
+    expect(find.text('150 / 400'), findsOneWidget);
+    expect(find.text('145'), findsOneWidget, reason: 'good parts');
 
-    // Correcting the saved 5 down to 3 hands 2 pieces back to the 8 AM output.
+    // Correcting the saved 5 down to 3 must NOT move the actual figure —
+    // actual is everything the hour made, and a defect correction only
+    // changes how that total splits between good and scrap.
     await tester.enterText(find.byType(TextFormField).at(0), '3');
     await tester.pumpAndSettle();
     expect(
-      find.text('152'),
-      findsNWidgets(2),
-      reason: "the hour's box and the shift total both move",
+      find.text('150 / 400'),
+      findsOneWidget,
+      reason: 'the hour produced 150 either way',
     );
-    expect(find.text('38%'), findsOneWidget, reason: '152 of 400');
-    expect(find.text('248'), findsOneWidget, reason: 'left to plan follows');
-    // The qty box itself, plus the summary's line and total.
+    expect(find.text('37.5%'), findsOneWidget, reason: 'LOR follows actual');
+    expect(find.text('147'), findsOneWidget, reason: 'good parts: 150 - 3');
+    // The qty box, the summary's own line, and the rejected-parts total.
     expect(find.text('3'), findsNWidgets(3));
 
     await tester.dragUntilVisible(
@@ -448,7 +455,7 @@ void main() {
       '3',
       reason: 'the corrected quantity reached the sheet',
     );
-    expect((storedRejections.first as Map)['slot'], '8AM');
+    expect((storedRejections.first as Map)['slot'], '10AM');
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
@@ -481,9 +488,9 @@ void main() {
           'status': 'success',
           'data': {
             'Plan': 400,
-            'Output_8AM': 150,
+            'Actual_10AM': 150,
             'Rejections': [
-              {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '8AM'},
+              {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '10AM'},
             ],
           },
         }),
@@ -505,9 +512,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Log a fresh 10 AM output without touching the saved defect. Plan and the
-    // 8 AM output are locked boxes, so the fields run: 8 AM's saved-defect
-    // qty, 8 AM's new-defect qty, then the 10 AM output.
+    // Log a fresh 12 PM actual without touching the saved defect. Plan and the
+    // 10 AM actual are locked boxes, so the fields run: 10 AM's saved-defect
+    // qty, 10 AM's new-defect qty, then the 12 PM actual.
     await tester.enterText(find.byType(TextFormField).at(2), '120');
     await tester.pumpAndSettle();
 
@@ -519,7 +526,7 @@ void main() {
     await tester.tap(find.byType(SubmitButton));
     await tester.pumpAndSettle();
 
-    expect(posted!['Output_10AM'], '120');
+    expect(posted!['Actual_12PM'], '120');
     expect(
       posted!.containsKey('Rejections'),
       isFalse,

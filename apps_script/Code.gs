@@ -2,7 +2,7 @@
  * HICOM Production Log — Apps Script reference.
  *
  * Unified incremental upsert backend for Casting, Secondary, and Machining.
- * ALL THREE now run the same real 2-shift schedule (Day 8AM-6PM, Night
+ * ALL THREE now run the same real 2-shift schedule (Day 10AM-6PM, Night
  * 8PM-6AM crossing midnight), each split into two per-shift sheet tabs with
  * no Shift column, keyed by their selectors + shift-date (see getShiftDate).
  * Casting/Secondary key on (DCM|Station) + Part; Machining adds a third
@@ -42,19 +42,19 @@
  * the tab a row lives in IS its shift. Run setupCastingShiftSheets() once to
  * create both tabs. Keyed by DCM+PartNo+shift-date within each sheet):
  *
- *   Casting_Day (Day shift, checkpoints 8AM-6PM):
+ *   Casting_Day (Day shift, checkpoints 10AM-6PM — five, not six):
  *     Date | DCM | PartNo | MO | Plan |
- *     Output_8AM  | Output_LOR8AM  | Output_10AM | Output_LOR10AM |
- *     Output_12PM | Output_LOR12PM | Output_2PM  | Output_LOR2PM  |
- *     Output_4PM  | Output_LOR4PM  | Output_6PM  | Output_LOR6PM  | LastUpdated
+ *     Actual_10AM | LOR_10AM | Actual_12PM | LOR_12PM |
+ *     Actual_2PM  | LOR_2PM  | Actual_4PM  | LOR_4PM  |
+ *     Actual_6PM  | LOR_6PM  | LastUpdated
  *
  *   Casting_Night (Night shift, checkpoints 8PM-6AM crossing midnight —
  *   post-midnight checkpoints file under the date the shift STARTED, see
  *   getShiftDate):
  *     Date | DCM | PartNo | MO | Plan |
- *     Output_8PM  | Output_LOR8PM  | Output_10PM | Output_LOR10PM |
- *     Output_12AM | Output_LOR12AM | Output_2AM  | Output_LOR2AM  |
- *     Output_4AM  | Output_LOR4AM  | Output_6AM  | Output_LOR6AM  | LastUpdated
+ *     Actual_8PM  | LOR_8PM  | Actual_10PM | LOR_10PM |
+ *     Actual_12AM | LOR_12AM | Actual_2AM  | LOR_2AM  |
+ *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
  *
  *   - MO = manufacturing order number, snapshotted from the part's Config
  *     MO onto the row once, at creation — never rewritten by later Config
@@ -65,11 +65,11 @@
  * shift-date, Actual_/LOR_ prefixes, MO number per part. Run
  * setupSecondaryShiftSheets() once):
  *
- *   Secondary_Day (Day shift, checkpoints 8AM-6PM):
+ *   Secondary_Day (Day shift, checkpoints 10AM-6PM):
  *     Date | Station | PartNo | MO | Plan |
- *     Actual_8AM  | LOR_8AM  | Actual_10AM | LOR_10AM |
- *     Actual_12PM | LOR_12PM | Actual_2PM  | LOR_2PM  |
- *     Actual_4PM  | LOR_4PM  | Actual_6PM  | LOR_6PM  | LastUpdated
+ *     Actual_10AM | LOR_10AM | Actual_12PM | LOR_12PM |
+ *     Actual_2PM  | LOR_2PM  | Actual_4PM  | LOR_4PM  |
+ *     Actual_6PM  | LOR_6PM  | LastUpdated
  *
  *   Secondary_Night (Night shift, checkpoints 8PM-6AM crossing midnight):
  *     Date | Station | PartNo | MO | Plan |
@@ -80,9 +80,13 @@
  * Machining (shift-split like the others — two tabs, keyed Customer+PartNo+
  * Operation+shift-date, MO per part. Run setupMachiningShiftSheets() once):
  *
- *   Machining_Day (Day shift, checkpoints 8AM-6PM) / Machining_Night (8PM-6AM):
+ *   Machining_Day (Day 10AM-6PM) / Machining_Night (8PM-6AM):
  *     Date | Customer | PartNo | Operation | Barcode | PartName | MO | Plan |
- *     Output_<slot> | Output_LOR<slot> (x6) | LastUpdated
+ *     Actual_<slot> | LOR_<slot> (x5 Day / x6 Night) |
+ *     ActualTotal | RejectionTotal | GoodTotal | RejectionSummary | LastUpdated
+ *
+ *   ActualTotal counts every part the shift produced; GoodTotal is that less
+ *   RejectionTotal. Actual is NOT the good count (it was, up to v15).
  *
  *   Machining_Rejections — rejections are a typed LIST per entry, not one
  *   number per slot, so they live here, one row per defect type:
@@ -145,21 +149,25 @@ function moduleDepartment(module) {
 }
 
 // ALL THREE modules run the same real 2-shift schedule. Day checkpoints run
-// 8AM-6PM; Night checkpoints run 8PM-6AM (crossing midnight).
+// 10AM-6PM; Night checkpoints run 8PM-6AM (crossing midnight).
+//
+// Day has FIVE checkpoints, not six: production starts at 10AM, so the old 8AM
+// slot was always blank and is gone (v16). Night still starts at 8PM and keeps
+// its six.
 //
 // Each shift is its OWN sheet tab (Casting_Day/Casting_Night,
 // Secondary_Day/Secondary_Night, Machining_Day/Machining_Night) so every row
-// holds only its shift's six checkpoints — no half-empty rows, and no Shift
-// column (the tab the row lives in IS the shift). Column prefixes differ per
-// module (Casting and Machining Output_/Output_LOR; Secondary Actual_/LOR_)
-// but the slot TIMES are identical.
+// holds only its shift's checkpoints — no half-empty rows, and no Shift column
+// (the tab the row lives in IS the shift). All three modules use the same
+// column names: Actual_<slot> for what was made, LOR_<slot> for the running
+// rate against plan.
 var CASTING_DAY_SHEET = 'Casting_Day';
 var CASTING_NIGHT_SHEET = 'Casting_Night';
 var SECONDARY_DAY_SHEET = 'Secondary_Day';
 var SECONDARY_NIGHT_SHEET = 'Secondary_Night';
 var MACHINING_DAY_SHEET = 'Machining_Day';
 var MACHINING_NIGHT_SHEET = 'Machining_Night';
-var DAY_SLOTS = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM'];
+var DAY_SLOTS = ['10AM', '12PM', '2PM', '4PM', '6PM'];
 var NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
 // Back-compat aliases (Casting code referred to these names).
 var CASTING_DAY_SLOTS = DAY_SLOTS;
@@ -203,8 +211,8 @@ function getMachiningSheetForShift(shift) {
 function castingHeadersForShift(shift) {
   var headers = ['Date', 'DCM', 'PartNo', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
-    headers.push('Output_' + slot);
-    headers.push('Output_LOR' + slot);
+    headers.push('Actual_' + slot);
+    headers.push('LOR_' + slot);
   });
   // Who logged which hour — derived on save, never typed (see applyLogAttribution).
   headers.push('LoggedBy', 'LogMeta', 'LastUpdated');
@@ -217,11 +225,11 @@ function castingHeadersForShift(shift) {
 function machiningHeadersForShift(shift) {
   var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
-    headers.push('Output_' + slot);
-    headers.push('Output_LOR' + slot);
+    headers.push('Actual_' + slot);
+    headers.push('LOR_' + slot);
   });
   // Derived on every save — read these, never type them.
-  headers.push('OutputTotal', 'RejectionTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
+  headers.push('ActualTotal', 'RejectionTotal', 'GoodTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -263,7 +271,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'MACHINING-OPERATION-v15';
+var BACKEND_VERSION = 'ACTUAL-GOOD-v16';
 
 function doGet(e) {
   try {
@@ -357,7 +365,7 @@ function doPost(e) {
 //
 // Mirror of the Casting reads: keyed by Station + PartNo + shift-date within
 // a per-shift sheet (Secondary_Day/Secondary_Night). Column prefixes are
-// Actual_/LOR_ instead of Casting's Output_/Output_LOR.
+// the same Actual_/LOR_ column names every module uses.
 
 function getSecondaryDashboard(shift) {
   shift = shift === 'Night' ? 'Night' : 'Day';
@@ -526,7 +534,7 @@ function getCastingParts(dcm, shift) {
     var filled = 0;
     if (match) {
       slots.forEach(function (slot) {
-        var v = match['Output_' + slot];
+        var v = match['Actual_' + slot];
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
@@ -579,7 +587,7 @@ function upsertCastingRow(data) {
       formatDateOnly(r.Date) === shiftDate;
   });
 
-  var lockedEdits = findLockedEdits(existing, data, 'Output_', slots);
+  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
   if (lockedEdits.length) {
     return {
       status: 'error',
@@ -605,14 +613,14 @@ function upsertCastingRow(data) {
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
   slots.forEach(function (slot) {
-    var outKey = 'Output_' + slot;
+    var outKey = 'Actual_' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
     }
   });
-  deriveCumulativeLor(merged, slots, 'Output_', 'Output_LOR');
+  deriveCumulativeLor(merged, slots, 'Actual_', 'LOR_');
 
-  applyLogAttribution(merged, data, writer, 'Output_', slots);
+  applyLogAttribution(merged, data, writer, 'Actual_', slots);
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -886,7 +894,7 @@ function getMachiningParts(customer, shift, operation) {
     var filled = 0;
     if (match) {
       slots.forEach(function (slot) {
-        var v = match['Output_' + slot];
+        var v = match['Actual_' + slot];
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
@@ -950,7 +958,7 @@ function upsertMachiningRow(data) {
       formatDateOnly(r.Date) === shiftDate;
   });
 
-  var lockedEdits = findLockedEdits(existing, data, 'Output_', slots);
+  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
   if (lockedEdits.length) {
     return {
       status: 'error',
@@ -987,46 +995,33 @@ function upsertMachiningRow(data) {
   if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
 
   slots.forEach(function (slot) {
-    var outKey = 'Output_' + slot;
+    var outKey = 'Actual_' + slot;
     if (data[outKey] !== undefined && data[outKey] !== '') {
       merged[outKey] = data[outKey];
     }
   });
 
-  // Reconcile the defect list BEFORE deriving anything: a qty correction
-  // hands pieces back to (or takes them from) its hour's output, and the
-  // totals/LOR below must see the adjusted numbers.
+  // Actual counts EVERYTHING the hour produced, good and scrap together, so a
+  // rejection qty no longer moves the actual figure — it only changes how that
+  // hour's total splits between good and scrap. (Until v16 actual meant good
+  // parts only, and correcting a defect handed pieces back to it.)
   var rejections = parseRejectionList(data);
   var finalRejections = null;
   if (rejections !== null) {
     var storedRejections = getMachiningRejections(data.Customer, data.PartNo, data.Operation, shift);
-    var reconciled = reconcileRejections(rejections, storedRejections);
-    finalRejections = reconciled.list;
-
-    var slotNames = Object.keys(reconciled.deltas);
-    for (var i = 0; i < slotNames.length; i++) {
-      var dSlot = slotNames[i];
-      var outCell = parseFloat(merged['Output_' + dSlot]);
-      if (isNaN(outCell)) continue;   // no output logged for that hour yet
-      var adjusted = outCell + reconciled.deltas[dSlot];
-      if (adjusted < 0) {
-        return {
-          status: 'error',
-          message: 'That correction would make the ' + dSlot + ' output negative.',
-        };
-      }
-      merged['Output_' + dSlot] = adjusted;
-    }
+    finalRejections = reconcileRejections(rejections, storedRejections);
 
     var totals = summariseRejections(finalRejections);
     merged.RejectionTotal = totals.total;
     merged.RejectionSummary = totals.summary;
   }
 
-  // Derived cells, always from the (possibly adjusted) outputs.
-  merged.OutputTotal = deriveCumulativeLor(merged, slots, 'Output_', 'Output_LOR');
+  // Derived cells. ActualTotal is everything made; GoodTotal is what survived.
+  merged.ActualTotal = deriveCumulativeLor(merged, slots, 'Actual_', 'LOR_');
+  var rejected = parseFloat(merged.RejectionTotal);
+  merged.GoodTotal = merged.ActualTotal - (isNaN(rejected) ? 0 : rejected);
 
-  applyLogAttribution(merged, data, writer, 'Output_', slots);
+  applyLogAttribution(merged, data, writer, 'Actual_', slots);
   merged.LastUpdated = new Date();
   var rowArray = headers.map(function (h) {
     return merged.hasOwnProperty(h) ? merged[h] : '';
@@ -1380,17 +1375,15 @@ function summariseRejections(list) {
   return { total: total, summary: parts.join(', ') };
 }
 
-// The correction rule: output counts GOOD parts, so output + rejections =
-// what the hour actually produced, and that total is history. Editing a saved
-// rejection's qty only RECLASSIFIES pieces between scrap and good — lowering
-// 20 to 18 hands 2 pieces back to that hour's output. Nothing else about a
-// saved defect row can change, and saved rows are never deleted from here
+// Actual counts EVERY part the hour produced, so scrap is already inside it.
+// Correcting a defect qty therefore changes only the good/scrap SPLIT of a
+// total that stays put — the actual cell is never touched. Nothing else about
+// a saved defect row can change, and saved rows are never deleted from here
 // (that is the admin's job, in the sheet).
 //
 // Reconciles the incoming hour-tagged entries against what the sheet holds:
-//   - same (hour, code, type) with a new qty  -> update + output delta
-//   - a brand-new (hour, code, type)          -> append, NO delta (its output
-//     was typed as the good count alongside it)
+//   - same (hour, code, type) with a new qty  -> update the qty
+//   - a brand-new (hour, code, type)          -> append
 //   - stored rows the payload doesn't mention -> kept untouched, so a partial
 //     post can never silently destroy recorded scrap
 // Old-format payloads (entries without an hour) keep the original
@@ -1399,9 +1392,8 @@ function reconcileRejections(incoming, stored) {
   var slotless = incoming.some(function (e) {
     return !e.slot || String(e.slot).trim() === '';
   });
-  if (slotless) return { list: incoming, deltas: {} };
+  if (slotless) return incoming;
 
-  var deltas = {};
   var finalList = stored.map(function (r) {
     return { code: r.code, type: r.type, qty: r.qty, slot: r.slot };
   });
@@ -1416,14 +1408,9 @@ function reconcileRejections(incoming, stored) {
       finalList.push({ code: entry.code, type: entry.type, qty: entry.qty, slot: slot });
       return;
     }
-    var oldQty = parseFloat(match.qty) || 0;
-    var newQty = parseFloat(entry.qty) || 0;
-    if (newQty !== oldQty) {
-      deltas[slot] = (deltas[slot] || 0) + (oldQty - newQty);
-      match.qty = entry.qty;
-    }
+    match.qty = entry.qty;
   });
-  return { list: finalList, deltas: deltas };
+  return finalList;
 }
 
 function writeMachiningRejections(list, data, shift, shiftDate, row) {
@@ -1639,8 +1626,10 @@ function getAnalytics(module, days) {
     dateKeys.push(Utilities.formatDate(d, tz, 'yyyy-MM-dd'));
   }
 
-  var outputPrefix = (module === 'secondary') ? 'Actual_' : 'Output_';
-  var lorPrefix = (module === 'secondary') ? 'LOR_' : 'Output_LOR';
+  // Every module uses the same column names now (v16), so no per-module
+  // prefix switch: Actual_<slot> for what was made, LOR_<slot> for the rate.
+  var outputPrefix = 'Actual_';
+  var lorPrefix = 'LOR_';
   // The top-level selector each module's dashboard cards are keyed by — what
   // the "which machine/station/customer is behind" bar chart groups on.
   var groupField = (module === 'secondary') ? 'Station' :
@@ -2107,6 +2096,30 @@ function setupMachiningShiftSheets() {
 // while the titles above them moved. So every row is re-mapped BY HEADER NAME.
 // Columns not in the target frame are kept at the end rather than dropped.
 // Safe to re-run: a tab already in the right order is left alone.
+// Every slot name that has ever been a Day or Night checkpoint, so the v16
+// rename below reaches the retired 8AM columns too and doesn't leave them
+// behind under their old Output_ titles.
+var ALL_SLOTS_EVER = ['8AM', '10AM', '12PM', '2PM', '4PM', '6PM',
+  '8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
+
+// v16 renamed Casting's and Machining's per-slot columns onto the names
+// Secondary already used: Output_10AM -> Actual_10AM, Output_LOR10AM ->
+// LOR_10AM. Retitling leaves every value exactly where it is; letting
+// reorderSheet meet the new names cold would instead blank them and park the
+// old data off to the right.
+function migrateActualColumnNames(sheetName) {
+  var out = [];
+  ALL_SLOTS_EVER.forEach(function (slot) {
+    // LOR first: 'Output_LOR8AM' also starts with 'Output_', and renaming the
+    // actual column first would make the two indistinguishable.
+    out.push(renameHeader(sheetName, 'Output_LOR' + slot, 'LOR_' + slot));
+    out.push(renameHeader(sheetName, 'Output_' + slot, 'Actual_' + slot));
+  });
+  out.push(renameHeader(sheetName, 'OutputTotal', 'ActualTotal'));
+  var done = out.filter(function (line) { return line.indexOf('renamed') === 0; });
+  return sheetName + ': ' + (done.length ? done.length + ' columns renamed' : 'nothing to rename');
+}
+
 function migrateColumnOrder() {
   var log = [
     // MUST run before the reorders below. reorderSheet maps rows BY HEADER
@@ -2117,6 +2130,12 @@ function migrateColumnOrder() {
     renameHeader(MACHINING_DAY_SHEET, 'Line', 'Operation'),
     renameHeader(MACHINING_NIGHT_SHEET, 'Line', 'Operation'),
     renameHeader(MACHINING_REJECTIONS_SHEET, 'Line', 'Operation'),
+    // Same rule, same reason: retitle Output_* to Actual_*/LOR_* before the
+    // reorders meet the new names.
+    migrateActualColumnNames(CASTING_DAY_SHEET),
+    migrateActualColumnNames(CASTING_NIGHT_SHEET),
+    migrateActualColumnNames(MACHINING_DAY_SHEET),
+    migrateActualColumnNames(MACHINING_NIGHT_SHEET),
     reorderSheet(CASTING_DAY_SHEET, castingHeadersForShift('Day')),
     reorderSheet(CASTING_NIGHT_SHEET, castingHeadersForShift('Night')),
     reorderSheet(SECONDARY_DAY_SHEET, secondaryHeadersForShift('Day')),
@@ -2133,6 +2152,30 @@ function migrateColumnOrder() {
     // once the columns have finished moving.
     setupUsersValidation(),
   ];
+  Logger.log(log.join('\n'));
+}
+
+// The 8AM checkpoint is retired (production starts at 10AM). migrateColumnOrder
+// does NOT delete its columns: reorderSheet keeps any column it doesn't
+// recognise, so Actual_8AM/LOR_8AM survive parked at the far right of the Day
+// tabs with whatever history they hold.
+//
+// Run this ONCE, by hand, only after checking those columns hold nothing you
+// want. It deletes them for good — there is no undo beyond the sheet's own
+// version history.
+function dropRetired8amColumns() {
+  var log = [];
+  [CASTING_DAY_SHEET, SECONDARY_DAY_SHEET, MACHINING_DAY_SHEET].forEach(function (name) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+    if (!sheet) { log.push('SKIP (no such tab): ' + name); return; }
+    ['Actual_8AM', 'LOR_8AM'].forEach(function (header) {
+      var col = getHeaders(sheet).indexOf(header);
+      if (col === -1) { log.push('SKIP (no ' + header + '): ' + name); return; }
+      sheet.deleteColumn(col + 1);
+      log.push('deleted ' + header + ' from ' + name);
+    });
+  });
+  invalidateCaches();
   Logger.log(log.join('\n'));
 }
 

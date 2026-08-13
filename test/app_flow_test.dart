@@ -416,9 +416,10 @@ void main() {
     // who logged it. The saved defect sits under its own hour.
     expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
     expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
-    // Plan and 10 AM's actual are locked boxes, not fields: 4 editable
-    // actuals + 5 new-defect qty boxes + the saved defect's own qty box.
-    expect(find.byType(TextFormField), findsNWidgets(10));
+    // Plan and 10 AM's actual are locked boxes, not fields. Each hour now
+    // contributes a downtime box too: 4 editable actuals + 5 new-defect qty
+    // boxes + 5 downtime boxes + the saved defect's own qty box.
+    expect(find.byType(TextFormField), findsNWidgets(15));
     // LOR is cumulative over Plan: 150 of 400.
     expect(find.text('37.5%'), findsOneWidget);
     // Actual counts everything made, so good = 150 - 5.
@@ -514,8 +515,8 @@ void main() {
 
     // Log a fresh 12 PM actual without touching the saved defect. Plan and the
     // 10 AM actual are locked boxes, so the fields run: 10 AM's saved-defect
-    // qty, 10 AM's new-defect qty, then the 12 PM actual.
-    await tester.enterText(find.byType(TextFormField).at(2), '120');
+    // qty, its new-defect qty, its downtime, then the 12 PM actual.
+    await tester.enterText(find.byType(TextFormField).at(3), '120');
     await tester.pumpAndSettle();
 
     await tester.dragUntilVisible(
@@ -827,5 +828,70 @@ void main() {
       // The old seeded placeholders are not real stations.
       expect(secondaryStations, isNot(contains('ST1')));
     });
+  });
+
+  testWidgets('machining entry: downtime posts per hour and totals up', (
+    tester,
+  ) async {
+    Map<String, dynamic>? posted;
+    final mock = MockClient((request) async {
+      if (request.method == 'POST') {
+        posted =
+            (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                as Map<String, dynamic>;
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        return http.Response('{"status":"success","data":[]}', 200);
+      }
+      return http.Response('{"status":"success","data":null}', 200);
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Every hour carries its own downtime box, under that hour's defects.
+    expect(find.text('Downtime this hour'), findsNWidgets(5));
+
+    // Nothing saved yet, so fields run: Plan, then per hour
+    // actual / defect qty / downtime.
+    await tester.enterText(find.byType(TextFormField).at(1), '40'); // 10AM
+    await tester.enterText(find.byType(TextFormField).at(3), '20'); // 10AM min
+    await tester.enterText(find.byType(TextFormField).at(6), '10'); // 12PM min
+    await tester.pumpAndSettle();
+
+    // The summary adds the minutes up across the shift.
+    expect(find.text('30 min'), findsOneWidget);
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    expect(posted!['Actual_10AM'], '40');
+    expect(posted!['Downtime_10AM'], '20');
+    expect(posted!['Downtime_12PM'], '10');
+    expect(
+      posted!.containsKey('Downtime_2PM'),
+      isFalse,
+      reason: 'an hour nobody typed into is not claimed as zero downtime',
+    );
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
   });
 }

@@ -29,6 +29,11 @@ class MachiningSlot {
   /// The bare hour ("10AM") — how the sheet tags a rejection and a LogMeta
   /// entry to its slot.
   String get slotKey => outputKey.replaceFirst('Actual_', '');
+
+  /// Column/field name of the hour's downtime in minutes, e.g.
+  /// "Downtime_10AM". Derived from [slotKey] rather than stored, so a slot
+  /// can never be declared with the two out of step.
+  String get downtimeKey => 'Downtime_$slotKey';
 }
 
 /// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM

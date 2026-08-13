@@ -57,6 +57,13 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final slot in _slots) slot.outputKey: TextEditingController(),
   };
 
+  /// Minutes lost in each hour. Unlike the actual, this stays editable after
+  /// the hour is saved — a stoppage often runs on past the checkpoint, and the
+  /// figure is only final once the machine is running again.
+  late final Map<String, TextEditingController> _downtimeControllers = {
+    for (final slot in _slots) slot.downtimeKey: TextEditingController(),
+  };
+
   /// Backend-computed LOR% labels, keyed by lorKey. Only a fallback: with a
   /// Plan on the row the badge shows a live cumulative figure instead, so a
   /// pending correction is visible before it is saved.
@@ -121,6 +128,9 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   void dispose() {
     _planController.dispose();
     for (final controller in _outputControllers.values) {
+      controller.dispose();
+    }
+    for (final controller in _downtimeControllers.values) {
       controller.dispose();
     }
     _disposeRejectionRows();
@@ -265,6 +275,19 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     return total;
   }
 
+  /// Minutes lost across the whole shift, as currently typed.
+  double get _downtimeTotal {
+    var total = 0.0;
+    for (final slot in _slots) {
+      total +=
+          double.tryParse(
+            _downtimeControllers[slot.downtimeKey]!.text.trim(),
+          ) ??
+          0;
+    }
+    return total;
+  }
+
   /// Every defect logged this shift, at the quantities currently on screen.
   double get _rejectedTotal {
     var total = 0.0;
@@ -302,6 +325,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           if (saved != null && saved.isNotEmpty) {
             _lockedOutputs.add(slot.outputKey);
           }
+          _downtimeControllers[slot.downtimeKey]!.text =
+              row?.value(slot.downtimeKey) ?? '';
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
         _logMeta = _parseLogMeta(row?.raw['LogMeta']);
@@ -354,8 +379,10 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
 
   Map<String, String> _currentValues() => {
     'Plan': _planController.text.trim(),
-    for (final slot in _slots)
+    for (final slot in _slots) ...{
       slot.outputKey: _outputControllers[slot.outputKey]!.text.trim(),
+      slot.downtimeKey: _downtimeControllers[slot.downtimeKey]!.text.trim(),
+    },
   };
 
   /// Non-empty fields whose value differs from what the server had.
@@ -510,6 +537,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         _SlotBlock(
                           slot: slot,
                           outputController: _outputControllers[slot.outputKey]!,
+                          downtimeController:
+                              _downtimeControllers[slot.downtimeKey]!,
                           lorLabel: _lorLabel(slot),
                           locked: _lockedOutputs.contains(slot.outputKey),
                           stamp: _logMeta[slot.slotKey] as Map?,
@@ -519,6 +548,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           rows: _slotRows[slot.outputKey]!,
                           onPickType: _pickType,
                           onQtyChanged: () => setState(() {}),
+                          onDowntimeChanged: () => setState(() {}),
                           onAddRow: () => setState(
                             () =>
                                 _slotRows[slot.outputKey]!.add(_RejectionRow()),
@@ -533,6 +563,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                       _OverallSummary(
                         actualTotal: _actualTotal,
                         rejectedTotal: _rejectedTotal,
+                        downtimeTotal: _downtimeTotal,
                         plan: double.tryParse(_planController.text.trim()),
                         entries: _rejectionSummary,
                       ),
@@ -704,6 +735,7 @@ class _SlotBlock extends StatelessWidget {
   const _SlotBlock({
     required this.slot,
     required this.outputController,
+    required this.downtimeController,
     required this.lorLabel,
     required this.locked,
     required this.stamp,
@@ -713,10 +745,12 @@ class _SlotBlock extends StatelessWidget {
     required this.onQtyChanged,
     required this.onAddRow,
     required this.onRemoveRow,
+    required this.onDowntimeChanged,
   });
 
   final MachiningSlot slot;
   final TextEditingController outputController;
+  final TextEditingController downtimeController;
   final String? lorLabel;
 
   /// True when this hour's output is already saved to the sheet.
@@ -734,6 +768,7 @@ class _SlotBlock extends StatelessWidget {
   final VoidCallback onQtyChanged;
   final VoidCallback onAddRow;
   final void Function(_RejectionRow row) onRemoveRow;
+  final VoidCallback onDowntimeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -756,6 +791,7 @@ class _SlotBlock extends StatelessWidget {
             ),
           ),
         ),
+        _downtimeRow(),
       ],
     );
   }
@@ -882,6 +918,59 @@ class _SlotBlock extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                   )
                 : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Minutes the machine was stopped in this hour. Sits under the hour's
+  /// defects because it belongs to the same hour, and stays editable even once
+  /// the actual is locked — a stoppage can outlast the checkpoint that
+  /// recorded it.
+  Widget _downtimeRow() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: Row(
+        children: [
+          Icon(
+            Icons.timer_off_outlined,
+            size: 18,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Downtime this hour',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 110,
+            child: TextFormField(
+              controller: downtimeController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              textAlign: TextAlign.end,
+              onChanged: (_) => onDowntimeChanged(),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '0',
+                // Named in the box, so the sheet's "20min" needs no explaining.
+                suffixText: 'min',
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -1056,12 +1145,14 @@ class _OverallSummary extends StatelessWidget {
   const _OverallSummary({
     required this.actualTotal,
     required this.rejectedTotal,
+    required this.downtimeTotal,
     required this.plan,
     required this.entries,
   });
 
   final double actualTotal;
   final double rejectedTotal;
+  final double downtimeTotal;
   final double? plan;
   final List<RejectionEntry> entries;
 
@@ -1123,6 +1214,12 @@ class _OverallSummary extends StatelessWidget {
             color: AppColors.success,
             emphasise: true,
           ),
+          if (downtimeTotal > 0)
+            _SummaryLine(
+              label: 'Total downtime',
+              value: '${_n(downtimeTotal)} min',
+              color: AppColors.amberDark,
+            ),
           if (sorted.isNotEmpty) ...[
             const SizedBox(height: 12),
             Divider(height: 1, color: AppColors.navy.withValues(alpha: 0.18)),

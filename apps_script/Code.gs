@@ -82,11 +82,15 @@
  *
  *   Machining_Day (Day 10AM-6PM) / Machining_Night (8PM-6AM):
  *     Date | Customer | PartNo | Operation | Barcode | PartName | MO | Plan |
- *     Actual_<slot> | LOR_<slot> (x5 Day / x6 Night) |
- *     ActualTotal | RejectionTotal | GoodTotal | RejectionSummary | LastUpdated
+ *     Actual_<slot> | LOR_<slot> | Downtime_<slot> (x5 Day / x6 Night) |
+ *     ActualTotal | RejectionTotal | GoodTotal | RejectionSummary |
+ *     DowntimeTotal | DowntimeSummary | LastUpdated
  *
  *   ActualTotal counts every part the shift produced; GoodTotal is that less
  *   RejectionTotal. Actual is NOT the good count (it was, up to v15).
+ *   Downtime_<slot> is minutes lost in that hour, typed by the operator;
+ *   DowntimeSummary reads "10AM 20min, 12PM 10min" and names only the hours
+ *   actually recorded.
  *
  *   Machining_Rejections — rejections are a typed LIST per entry, not one
  *   number per slot, so they live here, one row per defect type:
@@ -220,16 +224,19 @@ function castingHeadersForShift(shift) {
 }
 
 // Header frame for a Machining shift sheet — like Casting but one level
-// deeper (Operation). Rejections used to be one count per time slot; they are
-// now a typed list in MACHINING_REJECTIONS_SHEET, so this frame is output-only.
+// deeper (Operation). Rejections are a typed list in
+// MACHINING_REJECTIONS_SHEET; downtime is a plain minutes box per hour, so it
+// sits on the row beside the actual it belongs to.
 function machiningHeadersForShift(shift) {
   var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
+    headers.push('Downtime_' + slot);
   });
   // Derived on every save — read these, never type them.
-  headers.push('ActualTotal', 'RejectionTotal', 'GoodTotal', 'RejectionSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
+  headers.push('ActualTotal', 'RejectionTotal', 'GoodTotal', 'RejectionSummary',
+    'DowntimeTotal', 'DowntimeSummary', 'LoggedBy', 'LogMeta', 'LastUpdated');
   return headers;
 }
 
@@ -271,7 +278,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'ACTUAL-GOOD-v16';
+var BACKEND_VERSION = 'DOWNTIME-v17';
 
 function doGet(e) {
   try {
@@ -1016,10 +1023,23 @@ function upsertMachiningRow(data) {
     merged.RejectionSummary = totals.summary;
   }
 
+  // Downtime is typed straight into the row, one box per hour, so it needs no
+  // reconciliation — just copy through whatever the app sent.
+  slots.forEach(function (slot) {
+    var dtKey = 'Downtime_' + slot;
+    if (data[dtKey] !== undefined && data[dtKey] !== '') {
+      merged[dtKey] = data[dtKey];
+    }
+  });
+
   // Derived cells. ActualTotal is everything made; GoodTotal is what survived.
   merged.ActualTotal = deriveCumulativeLor(merged, slots, 'Actual_', 'LOR_');
   var rejected = parseFloat(merged.RejectionTotal);
   merged.GoodTotal = merged.ActualTotal - (isNaN(rejected) ? 0 : rejected);
+
+  var downtime = summariseDowntime(merged, slots);
+  merged.DowntimeTotal = downtime.total;
+  merged.DowntimeSummary = downtime.summary;
 
   applyLogAttribution(merged, data, writer, 'Actual_', slots);
   merged.LastUpdated = new Date();
@@ -1371,6 +1391,25 @@ function summariseRejections(list) {
   var parts = [];
   order.forEach(function (type) {
     if (byType[type] > 0) parts.push(byType[type] + ' ' + type);
+  });
+  return { total: total, summary: parts.join(', ') };
+}
+
+// Rolls the per-hour downtime boxes into the pair that reads at a glance:
+// a total in minutes, and "10AM 20min, 12PM 10min" naming the hours it came
+// from. An hour nobody typed into is left OUT of the summary — a blank box
+// means "not recorded", which is not the same claim as a typed 0, and a
+// string listing every quiet hour as 0min would bury the ones that matter.
+function summariseDowntime(row, slots) {
+  var total = 0;
+  var parts = [];
+  slots.forEach(function (slot) {
+    var raw = row['Downtime_' + slot];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return;
+    var minutes = parseFloat(raw);
+    if (isNaN(minutes)) return;
+    total += minutes;
+    parts.push(slot + ' ' + minutes + 'min');
   });
   return { total: total, summary: parts.join(', ') };
 }

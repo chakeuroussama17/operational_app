@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbzyxj8mN7GR_j5UPNIWvRP7-DbvMC_m2TyaCK9X9jx5ZLDBl8o_jTUHt6zKKNG1CboG/exec';
+    'https://script.google.com/macros/s/AKfycbyiaGhmHgbObzzF6siT_JFlIm5ZXcFDUyWhNjuiYppQp0oepIoASPXJUQWNfkixVdeVMw/exec';
 
 /// Company email domains allowed to sign in / register. Anything else is
 /// refused before Firebase is even called.

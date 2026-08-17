@@ -278,7 +278,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'TELEGRAM-NOTIFY-v19';
+var BACKEND_VERSION = 'TELEGRAM-NOTIFY-v19b';
 
 function doGet(e) {
   try {
@@ -1251,14 +1251,18 @@ function registerUser(payload) {
     return row.hasOwnProperty(h) ? row[h] : '';
   }));
 
-  // Outside the try/catch of nothing — sendTelegram swallows its own errors,
-  // so a notification failure cannot cost someone their registration.
-  notifyNewRegistration({
+  // sendTelegram swallows its own errors, so a notification failure cannot
+  // cost someone their registration. That silence hides WHY it failed
+  // though — most often the script has not been granted the external-request
+  // permission yet — so the outcome rides back on the response where it can
+  // be read without digging through execution logs. The app ignores it.
+  var notify = notifyNewRegistration({
     name: name, employeeId: employeeId, email: email, department: department,
   });
 
   return {
     status: 'success',
+    notify: notify,
     data: {
       email: email, name: name, employeeId: employeeId,
       department: department, status: 'inactive', isAdmin: isAdminEmail(email),
@@ -1318,7 +1322,15 @@ function sendTelegram(text) {
     return 'telegram ' + response.getResponseCode();
   } catch (err) {
     Logger.log('Telegram send failed: ' + err);
-    return 'telegram failed: ' + err;
+    var message = String(err);
+    // The first external request a script ever makes needs a scope the
+    // project does not have yet. Say so plainly — the fix is to run
+    // testTelegram() once from the editor and accept the prompt.
+    if (message.indexOf('permission') !== -1 || message.indexOf('Authorization') !== -1) {
+      return 'telegram blocked: run testTelegram() once from the editor and ' +
+        'grant the external-request permission';
+    }
+    return 'telegram failed: ' + message;
   }
 }
 

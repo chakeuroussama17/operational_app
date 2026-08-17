@@ -53,3 +53,7 @@ app.*.map.json
 # Flutter web build output (deployed to Firebase Hosting, not committed)
 /build/
 /.firebase/
+# Standalone dashboard project — reads the spreadsheet, not the app backend.
+# Kept out of the app's history like the landing pages; give it its own repo
+# when it's ready to ship.
+/operational dashboard/

@@ -278,7 +278,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'OPEN-SIGNUP-v18';
+var BACKEND_VERSION = 'TELEGRAM-NOTIFY-v19';
 
 function doGet(e) {
   try {
@@ -1250,6 +1250,13 @@ function registerUser(payload) {
   sheet.appendRow(headers.map(function (h) {
     return row.hasOwnProperty(h) ? row[h] : '';
   }));
+
+  // Outside the try/catch of nothing — sendTelegram swallows its own errors,
+  // so a notification failure cannot cost someone their registration.
+  notifyNewRegistration({
+    name: name, employeeId: employeeId, email: email, department: department,
+  });
+
   return {
     status: 'success',
     data: {
@@ -1257,6 +1264,91 @@ function registerUser(payload) {
       department: department, status: 'inactive', isAdmin: isAdminEmail(email),
     },
   };
+}
+
+// ---------- Telegram: tell the admin someone new registered ----------
+//
+// Any email can register now, and a new row lands inactive, so somebody has
+// to look at it. This pushes the four things needed to judge that — name,
+// employee ID, email, department — into the admin's Telegram, with a link
+// straight to the Users tab.
+//
+// SETUP (once, and NOT in this file — the repo is public):
+//   Apps Script editor -> Project Settings -> Script Properties -> add
+//     TELEGRAM_BOT_TOKEN   the token BotFather gave you
+//     TELEGRAM_CHAT_ID     the chat to notify
+//   Missing either one just turns notifications off; nothing else breaks.
+// If the token ever lands in a commit, revoke it in BotFather and put the
+// replacement here — a leaked bot token lets anyone post as the bot.
+function telegramConfig() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    token: String(props.getProperty('TELEGRAM_BOT_TOKEN') || '').trim(),
+    chatId: String(props.getProperty('TELEGRAM_CHAT_ID') || '').trim(),
+  };
+}
+
+function escapeHtmlForTelegram(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Fire-and-forget: a registration must never fail because Telegram did.
+// Every error is swallowed and logged, so the operator still gets in.
+function sendTelegram(text) {
+  var config = telegramConfig();
+  if (!config.token || !config.chatId) return 'skipped (no Telegram config)';
+  try {
+    var response = UrlFetchApp.fetch(
+      'https://api.telegram.org/bot' + config.token + '/sendMessage',
+      {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          chat_id: config.chatId,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          text: text,
+        }),
+        muteHttpExceptions: true,
+      }
+    );
+    return 'telegram ' + response.getResponseCode();
+  } catch (err) {
+    Logger.log('Telegram send failed: ' + err);
+    return 'telegram failed: ' + err;
+  }
+}
+
+function notifyNewRegistration(user) {
+  var sheetLink = '';
+  try {
+    var sheet = getUsersSheet();
+    sheetLink = '\n\n<a href="' + SpreadsheetApp.getActiveSpreadsheet().getUrl() +
+      '#gid=' + sheet.getSheetId() + '">Open the Users tab</a>';
+  } catch (err) {
+    // A missing link is not a reason to withhold the whole notification.
+  }
+
+  var text = '<b>New registration — needs approval</b>\n\n' +
+    '<b>Name:</b> ' + escapeHtmlForTelegram(user.name) + '\n' +
+    '<b>Employee ID:</b> ' + escapeHtmlForTelegram(user.employeeId) + '\n' +
+    '<b>Email:</b> ' + escapeHtmlForTelegram(user.email) + '\n' +
+    '<b>Department:</b> ' + escapeHtmlForTelegram(user.department) + '\n\n' +
+    'They cannot log anything until you set <b>Status</b> to ' +
+    '<b>active</b> on their row.' + sheetLink;
+
+  return sendTelegram(text);
+}
+
+// Run once from the editor after adding the Script Properties, to prove the
+// bot and chat ID are right before a real registration depends on them.
+function testTelegram() {
+  Logger.log(sendTelegram(
+    '<b>HICOM Ops</b> — test message. New registrations will appear here.'
+  ));
 }
 
 // Who is making this write. Returns null when no UserEmail was sent — a

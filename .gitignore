@@ -52,3 +52,4 @@ app.*.map.json
 
 # Flutter web build output (deployed to Firebase Hosting, not committed)
 /build/
+/.firebase/

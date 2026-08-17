@@ -49,3 +49,6 @@ app.*.map.json
 # here would commit broken submodule pointers with no content.
 /landing_page_operational_app/
 /landing_page_dreaming_ball/
+
+# Flutter web build output (deployed to Firebase Hosting, not committed)
+/build/

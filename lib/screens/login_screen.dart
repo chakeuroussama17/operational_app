@@ -48,11 +48,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _passwordError = null;
     });
     var ok = true;
-    if (!allowedEmailDomains.any(_email.endsWith)) {
-      setState(
-        () => _emailError =
-            'Use your company email (${allowedEmailDomains.join(' or ')})',
-      );
+    if (!looksLikeEmail(_email)) {
+      setState(() => _emailError = 'Enter a valid email address');
       ok = false;
     }
     if (_passwordController.text.isEmpty) {
@@ -88,8 +85,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _forgotPassword() async {
-    if (!allowedEmailDomains.any(_email.endsWith)) {
-      setState(() => _emailError = 'Enter your company email first');
+    if (!looksLikeEmail(_email)) {
+      setState(() => _emailError = 'Enter your email address first');
       return;
     }
     try {

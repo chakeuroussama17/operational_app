@@ -1,1 +1,41 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"hicom-ops","appId":"1:878600121764:android:945678bada04583f996531","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"hicom-ops","configurations":{"android":"1:878600121764:android:945678bada04583f996531","ios":"1:878600121764:ios:8677dd04d84d128e996531","web":"1:878600121764:web:565bec2207ddcc6c996531"}}}}}}
+{
+  "hosting": {
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      {
+        "//": "Flutter's bootstrap and service worker are NOT content-hashed, so a cached copy keeps serving the previous build forever. Never cache them; everything they pull in is hashed and safe to cache hard.",
+        "source": "/@(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      },
+      {
+        "source": "**/*.@(js|css|wasm|png|jpg|jpeg|svg|woff2|ttf|json)",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+      }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "hicom-ops",
+          "appId": "1:878600121764:android:945678bada04583f996531",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "hicom-ops",
+          "configurations": {
+            "android": "1:878600121764:android:945678bada04583f996531",
+            "ios": "1:878600121764:ios:8677dd04d84d128e996531",
+            "web": "1:878600121764:web:565bec2207ddcc6c996531"
+          }
+        }
+      }
+    }
+  }
+}

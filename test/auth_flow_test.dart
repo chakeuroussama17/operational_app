@@ -78,7 +78,7 @@ Future<void> _pickDropdown(WidgetTester tester, String option) async {
 void main() {
   tearDown(() => SheetsService.currentUserEmail = null);
 
-  testWidgets('login: a non-company email never reaches Firebase', (
+  testWidgets('login: any real email is accepted, not just the company one', (
     tester,
   ) async {
     final backend = FakeAuthBackend();
@@ -93,14 +93,40 @@ void main() {
       ),
     );
 
+    // A gmail address used to be refused before Firebase was called; the
+    // Users tab decides who gets in now, not the domain.
     await tester.enterText(find.byType(TextField).first, 'ahmad@gmail.com');
+    await tester.enterText(find.byType(TextField).at(1), 'secret123');
+    await tester.tap(find.text('LOG IN'));
+    // Plain pumps: on success the screen keeps its busy spinner.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(backend.signInCalls, 1);
+    expect(signedIn, 'ahmad@gmail.com');
+  });
+
+  testWidgets('login: a malformed address still never reaches Firebase', (
+    tester,
+  ) async {
+    final backend = FakeAuthBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          backend: backend,
+          service: userService(null),
+          onSignedIn: (_) {},
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'ahmad@plant');
     await tester.enterText(find.byType(TextField).at(1), 'secret123');
     await tester.tap(find.text('LOG IN'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Use your company email'), findsOneWidget);
+    expect(find.text('Enter a valid email address'), findsOneWidget);
     expect(backend.signInCalls, 0);
-    expect(signedIn, isNull);
   });
 
   testWidgets('login: a company email signs in and hands back the email', (
@@ -406,7 +432,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Account deactivated'), findsOneWidget);
+    expect(find.text('Account not active'), findsOneWidget);
     expect(find.text('Select production area'), findsNothing);
     expect(SheetsService.currentUserEmail, isNull);
 

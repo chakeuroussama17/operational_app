@@ -78,11 +78,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       setState(() => _nameError = 'Enter your full name');
       ok = false;
     }
-    if (!allowedEmailDomains.any(_email.endsWith)) {
-      setState(
-        () => _emailError =
-            'Use your company email (${allowedEmailDomains.join(' or ')})',
-      );
+    if (!looksLikeEmail(_email)) {
+      setState(() => _emailError = 'Enter a valid email address');
       ok = false;
     }
     if (_passwordController.text.length < 6) {

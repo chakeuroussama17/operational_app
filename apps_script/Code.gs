@@ -278,7 +278,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'DOWNTIME-v17';
+var BACKEND_VERSION = 'OPEN-SIGNUP-v18';
 
 function doGet(e) {
   try {
@@ -1235,12 +1235,16 @@ function registerUser(payload) {
     };
   }
 
+  // A brand-new registration starts INACTIVE. Any email may sign up now (the
+  // company-domain restriction is gone), so the address proves nothing — the
+  // admin flipping Status to 'active' in the Users tab is what admits someone.
+  // Rows that already exist keep whatever status they hold.
   var row = {
     Email: email,
     Name: name,
     EmployeeID: employeeId,
     Department: department,
-    Status: 'active',
+    Status: 'inactive',
     RegisteredAt: new Date(),
   };
   sheet.appendRow(headers.map(function (h) {
@@ -1250,7 +1254,7 @@ function registerUser(payload) {
     status: 'success',
     data: {
       email: email, name: name, employeeId: employeeId,
-      department: department, status: 'active', isAdmin: isAdminEmail(email),
+      department: department, status: 'inactive', isAdmin: isAdminEmail(email),
     },
   };
 }

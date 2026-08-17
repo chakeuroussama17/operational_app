@@ -7,12 +7,23 @@ import 'package:flutter/material.dart';
 const String CASTING_WEBHOOK_URL =
     'https://script.google.com/macros/s/AKfycbyiaGhmHgbObzzF6siT_JFlIm5ZXcFDUyWhNjuiYppQp0oepIoASPXJUQWNfkixVdeVMw/exec';
 
-/// Company email domains allowed to sign in / register. Anything else is
-/// refused before Firebase is even called.
-const List<String> allowedEmailDomains = [
-  '@hidsb.com',
-  '@hicom-engineering.com',
-];
+/// Any email may sign in — the company-domain restriction was removed so
+/// contractors and people without an @hidsb.com mailbox can log from the
+/// floor. What gates access instead is the Users tab: a new registration
+/// lands INACTIVE and an admin switches it on, so the address someone signs
+/// up with proves nothing on its own.
+///
+/// Only the shape is checked here, to catch a typo before Firebase is called.
+bool looksLikeEmail(String email) {
+  final trimmed = email.trim();
+  final at = trimmed.indexOf('@');
+  if (at <= 0 || at != trimmed.lastIndexOf('@')) return false;
+  final domain = trimmed.substring(at + 1);
+  return domain.contains('.') &&
+      !domain.startsWith('.') &&
+      !domain.endsWith('.') &&
+      !trimmed.contains(' ');
+}
 
 /// Sees every department and every dashboard. Everyone else is confined to
 /// the one department on their Users row. The backend enforces this too —

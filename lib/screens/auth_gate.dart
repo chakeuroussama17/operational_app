@@ -46,6 +46,9 @@ enum _GateState {
   loggedOut,
   checking,
   register,
+  /// Just registered, and the Users row came back inactive — every new sign-up
+  /// does, since any email may register now and the admin decides who is real.
+  pendingApproval,
   blocked,
   checkFailed,
   ready,
@@ -157,6 +160,11 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   void _enter(AppUser user) {
+    if (!user.isActive) {
+      // Registration succeeded, but the row starts inactive by design.
+      setState(() => _state = _GateState.pendingApproval);
+      return;
+    }
     SheetsService.currentUserEmail = user.email;
     setState(() {
       _user = user;
@@ -204,13 +212,27 @@ class _AuthGateState extends State<AuthGate> {
           onRegistered: _enter,
           onSignOut: _signOut,
         );
+      case _GateState.pendingApproval:
+        return _MessageScreen(
+          icon: Icons.hourglass_top_rounded,
+          title: 'Waiting for approval',
+          message:
+              "You're registered. An admin switches your account on in the "
+              'Users sheet before you can log production — ask them to set '
+              'your row to active, then sign in again.',
+          actionLabel: 'SIGN OUT',
+          onAction: _signOut,
+        );
       case _GateState.blocked:
         return _MessageScreen(
+          // Covers both a brand-new row awaiting approval and one that was
+          // switched off, so the wording claims neither.
           icon: Icons.no_accounts_outlined,
-          title: 'Account deactivated',
+          title: 'Account not active',
           message:
-              'This account is no longer active. '
-              'Contact the admin if you think this is a mistake.',
+              'This account is registered but not active. An admin activates '
+              'it in the Users sheet — contact them if you think this is a '
+              'mistake.',
           actionLabel: 'SIGN OUT',
           onAction: _signOut,
         );

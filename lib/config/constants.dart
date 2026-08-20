@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// by a `module` field ("casting" | "secondary" | "machining").
 // ignore: constant_identifier_names
 const String CASTING_WEBHOOK_URL =
-    'https://script.google.com/macros/s/AKfycbwLwOydrgkSuIsUt3329z2CrFV8jAooqC7bzoEgj7vnDtebzi4uH3YnWK_1yT2z8DD3Dw/exec';
+    'https://script.google.com/macros/s/AKfycbxZ4ZWqFP7K91ifMIG3M47mmFVsMakAD2xlYktWtpJsqLD154ClHIIxFsxGhSOnygTU_A/exec';
 
 /// Any email may sign in — the company-domain restriction was removed so
 /// contractors and people without an @hidsb.com mailbox can log from the

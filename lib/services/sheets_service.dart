@@ -11,6 +11,7 @@ import '../models/casting_models.dart';
 import '../models/config_models.dart';
 import '../models/machining_models.dart';
 import '../models/part_code.dart';
+import '../models/raw_table.dart';
 import '../models/rejection.dart';
 import '../models/secondary_models.dart';
 
@@ -443,6 +444,24 @@ class SheetsService {
   /// The distinct part codes available for [module], from the Parts master
   /// sheet filtered by Department. Feeds the add-part dropdown; picking a code
   /// tells the backend which barcode + name to snapshot onto the row.
+  /// One production sheet tab, verbatim — the Tables screen's whole source.
+  ///
+  /// Not cached: the point of the screen is to show what the sheet holds
+  /// right now, and a stale table is worse than a slow one.
+  Future<RawTable> fetchRawTab(String tab, {int limit = 300}) async {
+    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+      'action': 'rawtab',
+      'name': tab,
+      'limit': '$limit',
+    });
+    if (decoded is Map<String, dynamic>) {
+      final inner = decoded['data'];
+      if (inner is Map<String, dynamic>) return RawTable.fromJson(inner);
+      return RawTable.fromJson(decoded);
+    }
+    throw const SheetsSubmissionException('Unexpected server response.');
+  }
+
   Future<List<PartCode>> fetchPartCodes(String module) async {
     final cached = _partCodeCache[module];
     if (cached != null) return cached;

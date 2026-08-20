@@ -10,6 +10,7 @@ import '../widgets/home_widgets.dart';
 import 'auth_gate.dart';
 import 'casting_home_screen.dart';
 import 'dashboard_screen.dart';
+import 'tables_screen.dart';
 import 'machining_operations_screen.dart';
 import 'secondary_home_screen.dart';
 
@@ -30,14 +31,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
 
-  /// The Dashboard tab is not built until it is first opened. Both tabs live
-  /// in an IndexedStack (so their state survives switching), but that also
-  /// means both would fetch on launch — doubling the requests before the
-  /// first screen has even painted, on a backend where each one costs
-  /// seconds. It stays mounted once visited.
+  /// Neither the Dashboard nor the Tables tab is built until first opened.
+  /// All three live in an IndexedStack (so their state survives switching),
+  /// but that also means all three would fetch on launch — tripling the
+  /// requests before the first screen has even painted, on a backend where
+  /// each one costs seconds. Each stays mounted once visited.
   bool _dashboardOpened = false;
+  bool _tablesOpened = false;
 
-  static const _titles = ['Production Shift Log', 'Dashboard — Analytics'];
+  static const _titles = [
+    'Production Shift Log',
+    'Dashboard — Analytics',
+    'Sheet tables',
+  ];
 
   /// The modules this person may work in. Without a signed-in user (widget
   /// tests) that's all of them; the backend refuses anything out of scope
@@ -130,6 +136,10 @@ class _HomeScreenState extends State<HomeScreen> {
               DashboardScreen(modules: _visibleModules)
             else
               const SizedBox.shrink(),
+            if (_tablesOpened)
+              TablesScreen(modules: _visibleModules, service: widget.service)
+            else
+              const SizedBox.shrink(),
           ],
         ),
       ),
@@ -140,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onDestinationSelected: (index) => setState(() {
           _tabIndex = index;
           if (index == 1) _dashboardOpened = true;
+          if (index == 2) _tablesOpened = true;
         }),
         backgroundColor: AppColors.surface,
         indicatorColor: AppColors.authViolet.withValues(alpha: 0.22),
@@ -168,6 +179,14 @@ class _HomeScreenState extends State<HomeScreen> {
               color: AppColors.authViolet,
             ),
             label: 'Dashboard',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.table_chart_rounded, color: AppColors.textSecondary),
+            selectedIcon: Icon(
+              Icons.table_chart_rounded,
+              color: AppColors.authViolet,
+            ),
+            label: 'Tables',
           ),
         ],
       ),

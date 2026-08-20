@@ -1,0 +1,473 @@
+/* ─────────────────────────────────────────────────────────────
+   HICOM Operational Dashboard
+   Reads the production spreadsheet directly; no app backend.
+
+   Colour: chrome is HICOM brand (indigo-purple), DATA is the
+   validated 8-hue categorical palette — brand colours never encode
+   a series. Both modes validated against the surfaces below:
+     light #ffffff  · dark #16141f
+   Light mode puts aqua/yellow/magenta under 3:1, so every chart
+   ships a table twin and direct labels (the relief rule).
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces & ink */
+  --page:            #f4f3f8;
+  --surface:         #ffffff;
+  --surface-2:       #faf9fd;
+  --text-primary:    #14121f;
+  --text-secondary:  #55506b;
+  --text-muted:      #857f9c;
+  --gridline:        #e7e5f0;
+  --axis:            #cfcbdd;
+  --border:          rgba(20, 18, 31, 0.10);
+  --shadow:          0 1px 2px rgba(20,18,31,.04), 0 8px 24px rgba(20,18,31,.06);
+
+  /* Brand chrome — never used to encode data */
+  --brand:           #383287;
+  --brand-ink:       #ffffff;
+  --brand-soft:      #ece9f8;
+  --accent-from:     #e91e63;
+  --accent-to:       #7c3aed;
+
+  /* Categorical data palette (validated, fixed order, never cycled) */
+  --series-1: #2a78d6;  /* blue    */
+  --series-2: #eb6834;  /* orange  */
+  --series-3: #1baf7a;  /* aqua    */
+  --series-4: #eda100;  /* yellow  */
+  --series-5: #e87ba4;  /* magenta */
+  --series-6: #008300;  /* green   */
+  --series-7: #4a3aa7;  /* violet  */
+  --series-8: #e34948;  /* red     */
+  --series-other: #a9a4bb;
+
+  /* Status — reserved, never a series, always with an icon or label */
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+}
+
+/* Dark values live under BOTH scopes: the media query follows the OS,
+   the data-theme scope follows the toggle and must win either way. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page:           #0d0c12;
+    --surface:        #16141f;
+    --surface-2:      #1c1a28;
+    --text-primary:   #f4f2fb;
+    --text-secondary: #b9b3cf;
+    --text-muted:     #8a84a3;
+    --gridline:       #262336;
+    --axis:           #383350;
+    --border:         rgba(255, 255, 255, 0.10);
+    --shadow:         0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.35);
+    --brand:          #7c74c9;
+    --brand-soft:     #221e3d;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-other: #6f6a85;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:           #0d0c12;
+  --surface:        #16141f;
+  --surface-2:      #1c1a28;
+  --text-primary:   #f4f2fb;
+  --text-secondary: #b9b3cf;
+  --text-muted:     #8a84a3;
+  --gridline:       #262336;
+  --axis:           #383350;
+  --border:         rgba(255, 255, 255, 0.10);
+  --shadow:         0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.35);
+  --brand:          #7c74c9;
+  --brand-soft:     #221e3d;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #6f6a85;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers line up in columns wherever they're compared. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ── Header ─────────────────────────────────────────────────── */
+.appbar {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.appbar-inner {
+  max-width: 1500px; margin: 0 auto;
+  padding: 12px 22px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+/* The logo is a single-colour purple mark on transparency. On the dark
+   surface it would all but disappear, so it sits on a light chip in both
+   modes rather than being recoloured — a brand mark is not a token. */
+.brand-mark {
+  height: 40px; border-radius: 9px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  display: grid; place-items: center;
+  padding: 5px 10px;
+  flex: none;
+}
+/* Bound BOTH axes. The source file is 523x421, and `height:100%` alone
+   resolves against a track the intrinsic width has already stretched — the
+   chip grew to 523px and covered the header. max-* on the image caps it
+   whatever the file's dimensions turn out to be. */
+.brand-mark img {
+  max-height: 30px;
+  max-width: 104px;
+  height: auto; width: auto;
+  object-fit: contain;
+  display: block;
+}
+.brand-name { font-weight: 800; font-size: 16px; letter-spacing: -.2px; }
+.brand-sub  { font-size: 11.5px; color: var(--text-muted); }
+.appbar-spacer { flex: 1 1 auto; }
+
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-secondary);
+  display: grid; place-items: center; cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.icon-btn:hover { background: var(--brand-soft); color: var(--brand); }
+
+/* ── Tabs: the three modules ────────────────────────────────── */
+.tabs {
+  display: flex; gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 11px; padding: 4px;
+}
+.tab {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-weight: 650; font-size: 13.5px;
+  color: var(--text-secondary);
+  padding: 7px 16px; border-radius: 8px;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text-primary); }
+.tab[aria-selected="true"] {
+  background: var(--brand); color: #fff;
+}
+
+/* ── Filter row: one row, above the charts ──────────────────── */
+.filters {
+  max-width: 1500px; margin: 0 auto;
+  padding: 18px 22px 4px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.filter-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--text-muted);
+  margin-right: 2px;
+}
+.seg {
+  display: inline-flex; gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px; padding: 3px;
+}
+.seg button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 650;
+  color: var(--text-secondary);
+  padding: 5px 12px; border-radius: 7px;
+  transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--text-primary); }
+.seg button[aria-pressed="true"] {
+  background: var(--surface); color: var(--text-primary);
+  box-shadow: var(--shadow);
+}
+.chip-scroll { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px; }
+.chip {
+  appearance: none; cursor: pointer; font: inherit;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 13px; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.chip:hover { color: var(--text-primary); }
+.chip[aria-pressed="true"] {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+main { max-width: 1500px; margin: 0 auto; padding: 14px 22px 60px; }
+
+.kpis {
+  display: grid; gap: 14px; margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+.col-4  { grid-column: span 4; }
+.col-6  { grid-column: span 6; }
+.col-8  { grid-column: span 8; }
+.col-12 { grid-column: span 12; }
+
+@media (max-width: 1100px) {
+  .col-4, .col-6, .col-8 { grid-column: span 12; }
+}
+
+/* ── Cards ──────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 16px 18px 14px;
+  min-width: 0;                 /* lets a grid child actually shrink */
+}
+.card-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 2px;
+}
+.card-title {
+  font-size: 14.5px; font-weight: 700; letter-spacing: -.1px;
+  color: var(--text-primary);
+}
+.card-sub { font-size: 12px; color: var(--text-muted); }
+.card-actions { margin-left: auto; display: flex; gap: 6px; }
+
+.mini-toggle {
+  appearance: none; cursor: pointer; font: inherit;
+  font-size: 11px; font-weight: 700; letter-spacing: .4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 7px; padding: 3px 9px;
+  transition: color .15s, border-color .15s;
+}
+.mini-toggle:hover { color: var(--brand); border-color: var(--brand); }
+
+/* KPI tile — a hero number, no plot, so no hover layer needed. */
+.kpi { display: flex; flex-direction: column; gap: 2px; }
+.kpi-label {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.kpi-value {
+  font-size: 30px; font-weight: 800; letter-spacing: -1px; line-height: 1.15;
+}
+.kpi-unit { font-size: 14px; font-weight: 600; color: var(--text-muted); }
+.kpi-note { font-size: 12px; color: var(--text-secondary); }
+.kpi-note.good     { color: var(--good); }
+.kpi-note.critical { color: var(--critical); }
+
+/* ── Charts ─────────────────────────────────────────────────── */
+.chart-wrap { position: relative; margin-top: 10px; }
+.chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.legend {
+  display: flex; flex-wrap: wrap; gap: 4px 16px;
+  margin-top: 10px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch {
+  width: 10px; height: 10px; border-radius: 3px; flex: none;
+}
+
+/* Tooltip: follows the pointer, never swallows its own hit test. */
+.tip {
+  position: absolute; pointer-events: none; z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 9px 11px;
+  font-size: 12.5px; min-width: 130px;
+  opacity: 0; transition: opacity .12s;
+}
+.tip[data-show="true"] { opacity: 1; }
+.tip-title {
+  font-weight: 700; font-size: 12px; color: var(--text-primary);
+  margin-bottom: 5px;
+}
+.tip-row {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-secondary); white-space: nowrap;
+}
+.tip-row b { margin-left: auto; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.tip-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+/* ── Table twin (the relief for sub-3:1 hues, and the numbers) ── */
+.table-wrap { margin-top: 12px; max-height: 320px; overflow: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface);
+  text-align: right; font-weight: 700; color: var(--text-secondary);
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data td {
+  padding: 6px 10px; border-bottom: 1px solid var(--gridline);
+  text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--text-primary); white-space: nowrap;
+}
+table.data tbody tr:nth-child(even) { background: var(--surface-2); }
+table.data td .swatch {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  margin-right: 7px; vertical-align: middle;
+}
+
+.hidden { display: none !important; }
+
+/* `display:flex` on .filters beats the [hidden] attribute's own
+   `display:none`, so hiding a filter row needs saying explicitly. */
+[hidden] { display: none !important; }
+
+.empty {
+  padding: 34px 16px; text-align: center;
+  color: var(--text-muted); font-size: 13px;
+}
+
+/* ── Status / loading ───────────────────────────────────────── */
+.banner {
+  max-width: 1500px; margin: 0 auto 4px;
+  padding: 10px 22px;
+}
+.banner-inner {
+  border-radius: 11px; padding: 11px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.banner-inner.warn { border-color: var(--warning); }
+.banner-inner.err  { border-color: var(--critical); }
+.banner-inner b { color: var(--text-primary); }
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--gridline) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+  * { transition: none !important; }
+}
+
+/* Print / forced colours: marks fall back to outline + label. */
+@media (forced-colors: active) {
+  .card { border: 1px solid CanvasText; }
+  .legend-swatch, .tip-dot { forced-color-adjust: none; }
+}
+
+/* ── "Running today" ────────────────────────────────────────────
+   The live band: only rows dated today, so it answers "what is on the
+   floor right now" rather than "what happened this month". Given its own
+   accent so it reads as current at a glance. */
+.live-card {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--good); flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+.live-head { display: flex; align-items: center; gap: 9px; }
+.live-count {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .4px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 999px; padding: 2px 10px;
+}
+/* A running row that has already met its plan gets the status colour and
+   a tick — never colour alone. */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 700;
+  border-radius: 999px; padding: 2px 9px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.pill.done   { color: var(--good);     border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.pill.behind { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 45%, transparent); }
+.pill.idle   { color: var(--text-muted); border-color: var(--border); }
+
+/* ── Tables view ────────────────────────────────────────────────
+   The sheet, verbatim: every column in the sheet's own order. Wide by
+   nature, so it scrolls inside its card and never pushes the page. */
+.search {
+  font: inherit; font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px; padding: 6px 12px; min-width: 190px;
+}
+.search::placeholder { color: var(--text-muted); }
+.search:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+.raw-wrap { margin-top: 12px; overflow: auto; max-height: 70vh; }
+table.raw { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+table.raw th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface);
+  border-bottom: 1px solid var(--axis);
+  padding: 8px 11px; text-align: left;
+  font-weight: 700; color: var(--text-secondary);
+}
+table.raw td {
+  padding: 6px 11px;
+  border-bottom: 1px solid var(--gridline);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* The first column is the row's identity; keep it in view while the rest
+   scrolls sideways. */
+table.raw th:first-child, table.raw td:first-child {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+table.raw th:first-child { z-index: 3; }
+table.raw tbody tr:nth-child(even) td { background: var(--surface-2); }
+table.raw tbody tr:nth-child(even) td:first-child { background: var(--surface-2); }
+table.raw tbody tr:hover td { background: var(--brand-soft); }
+table.raw td.num { text-align: right; }
+table.raw td.blank { color: var(--text-muted); }

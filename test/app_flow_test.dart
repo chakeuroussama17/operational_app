@@ -14,6 +14,8 @@ import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
+import 'package:hicom_ops/models/raw_table.dart';
+import 'package:hicom_ops/screens/tables_screen.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_operations_screen.dart';
 import 'package:hicom_ops/screens/secondary_home_screen.dart';
@@ -893,5 +895,80 @@ void main() {
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
+  });
+
+  group('sheet tables', () {
+    test('a department only sees its own tabs', () {
+      expect(
+        rawTabsFor(['casting']).map((t) => t.name),
+        ['Casting_Day', 'Casting_Night'],
+      );
+      expect(
+        rawTabsFor(['machining']).map((t) => t.name),
+        ['Machining_Day', 'Machining_Night', 'Machining_Rejections'],
+      );
+      // Admin (every department) and widget tests (empty) get all of them.
+      expect(rawTabsFor(const []).length, 7);
+      expect(rawTabsFor(['casting', 'secondary', 'machining']).length, 7);
+    });
+
+    test('a capped table says so, an uncapped one does not', () {
+      const short = RawTable(tab: 'Casting_Day', cols: ['Date'],
+          rows: [['2026-08-17']], total: 1);
+      expect(short.isCapped, isFalse);
+      const capped = RawTable(tab: 'Machining_Day', cols: ['Date'],
+          rows: [['2026-08-17']], total: 4812);
+      expect(capped.isCapped, isTrue);
+    });
+
+    testWidgets('renders the sheet verbatim and searches every column', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(900, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      late Uri requested;
+      final mock = MockClient((request) async {
+        requested = request.url;
+        return http.Response(
+          '{"status":"success","data":{"tab":"Casting_Day",'
+          '"cols":["Date","DCM","PartNo","Plan"],'
+          '"rows":[["2026-08-17","DCM21","2244","300"],'
+          '["2026-08-16","DCM24","2215",""]],'
+          '"total":2}}',
+          200,
+        );
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TablesScreen(service: SheetsService(client: mock)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(requested.queryParameters['action'], 'rawtab');
+      expect(requested.queryParameters['name'], 'Casting_Day');
+
+      // Header and both rows, exactly as the sheet gave them.
+      expect(find.text('DCM'), findsOneWidget);
+      expect(find.text('DCM21'), findsOneWidget);
+      expect(find.text('2244'), findsOneWidget);
+      expect(find.text('2 rows · 4 columns'), findsOneWidget);
+      // A blank cell reads as an em dash rather than as nothing at all.
+      expect(find.text('—'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'DCM24');
+      await tester.pumpAndSettle();
+      expect(find.text('DCM21'), findsNothing);
+      // The search field holds the typed text too, so the surviving row's
+      // cell is one of two matches rather than the only one.
+      expect(find.text('DCM24'), findsWidgets);
+      expect(find.text('1 of 2 rows match'), findsOneWidget);
+    });
   });
 }

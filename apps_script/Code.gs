@@ -278,7 +278,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'TELEGRAM-NOTIFY-v19b';
+var BACKEND_VERSION = 'RAWTAB-v20';
 
 function doGet(e) {
   try {
@@ -290,6 +290,9 @@ function doGet(e) {
     if (action === 'partcodes') return jsonResponse(getPartMaster(module));
     if (action === 'rejectiontypes') return jsonResponse(getRejectionTypes());
     if (action === 'user') return jsonResponse(getUserProfile(e.parameter.email));
+    if (action === 'rawtab') {
+      return jsonResponse(getRawTab(e.parameter.name, e.parameter.limit));
+    }
 
     if (module === 'machining') {
       // Machining is shift-aware (Machining_Day/Machining_Night) and one level
@@ -1267,6 +1270,71 @@ function registerUser(payload) {
       email: email, name: name, employeeId: employeeId,
       department: department, status: 'inactive', isAdmin: isAdminEmail(email),
     },
+  };
+}
+
+// ---------- Raw tab read: a production sheet exactly as it is ----------
+//
+// Backs the app's Tables screen. Returns the header row and the data rows
+// of ONE tab, in the sheet's own column order, so the screen can show what
+// the sheet holds rather than an aggregate of it.
+//
+// ALLOWLISTED on purpose. Reads on this backend are unauthenticated (they
+// always have been), so the name parameter is the whole attack surface —
+// without this list `?action=rawtab&name=Users` would hand out every
+// registered person's email, and `Config` would expose the plant's whole
+// setup. Only the production tabs are readable, and nothing else ever
+// becomes readable by accident.
+var RAW_READABLE_TABS = [
+  CASTING_DAY_SHEET, CASTING_NIGHT_SHEET,
+  SECONDARY_DAY_SHEET, SECONDARY_NIGHT_SHEET,
+  MACHINING_DAY_SHEET, MACHINING_NIGHT_SHEET,
+  MACHINING_REJECTIONS_SHEET,
+];
+
+function getRawTab(name, limit) {
+  name = String(name || '').trim();
+  if (RAW_READABLE_TABS.indexOf(name) === -1) {
+    return {
+      status: 'error',
+      message: 'Not a readable tab. Allowed: ' + RAW_READABLE_TABS.join(', '),
+    };
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sheet) return { status: 'error', message: name + ' tab not found' };
+
+  var headers = getHeaders(sheet);
+  if (!headers.length) {
+    return { status: 'success', data: { tab: name, cols: [], rows: [], total: 0 } };
+  }
+
+  // Newest first, and capped: these tabs grow without bound, and shipping
+  // every row of a year-old sheet over a 2-4s connection would make the
+  // screen unusable long before anyone scrolled that far.
+  var max = parseInt(limit, 10);
+  if (!max || max < 1) max = 300;
+  if (max > 2000) max = 2000;
+
+  var lastRow = sheet.getLastRow();
+  var dataRows = Math.max(0, lastRow - 1);
+  var take = Math.min(dataRows, max);
+  var startRow = 1 + dataRows - take + 1;   // header is row 1
+
+  var values = take > 0
+    ? sheet.getRange(startRow, 1, take, headers.length).getDisplayValues()
+    : [];
+
+  // Display values, NOT raw ones: this screen shows the sheet as it reads,
+  // and a formatted cell is what the operator sees when they open it.
+  // (The dashboard's charts do the opposite, deliberately — they need the
+  // number the cell means, not the text it shows.)
+  var rows = [];
+  for (var i = values.length - 1; i >= 0; i--) rows.push(values[i]);
+
+  return {
+    status: 'success',
+    data: { tab: name, cols: headers, rows: rows, total: dataRows, shown: take },
   };
 }
 

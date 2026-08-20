@@ -15,6 +15,7 @@ import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
 import 'package:hicom_ops/models/raw_table.dart';
+import 'package:hicom_ops/models/sheet_export.dart';
 import 'package:hicom_ops/screens/tables_screen.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_operations_screen.dart';
@@ -969,6 +970,101 @@ void main() {
       // cell is one of two matches rather than the only one.
       expect(find.text('DCM24'), findsWidgets);
       expect(find.text('1 of 2 rows match'), findsOneWidget);
+    });
+  });
+
+  group('sheet download', () {
+    test('today is one day; month runs 1st to last, February included', () {
+      final t = DateWindow.forRange(
+          ExportRange.today, DateTime(2026, 8, 17, 14, 30));
+      expect(t.isSingleDay, isTrue);
+      expect(t.label, '2026-08-17');
+
+      final m = DateWindow.forRange(ExportRange.month, DateTime(2026, 8, 17));
+      expect(m.from, DateTime(2026, 8, 1));
+      expect(m.to, DateTime(2026, 8, 31));
+
+      // Day 0 of the next month is the trap: a naive +30 lands in March.
+      final feb = DateWindow.forRange(ExportRange.month, DateTime(2026, 2, 9));
+      expect(feb.to, DateTime(2026, 2, 28));
+      final leap = DateWindow.forRange(ExportRange.month, DateTime(2028, 2, 9));
+      expect(leap.to, DateTime(2028, 2, 29));
+
+      // A December window must not roll the year.
+      final dec = DateWindow.forRange(ExportRange.month, DateTime(2026, 12, 5));
+      expect(dec.to, DateTime(2026, 12, 31));
+    });
+
+    test('both ends of the window are inclusive', () {
+      final w = DateWindow(DateTime(2026, 8, 10), DateTime(2026, 8, 12));
+      expect(w.contains(DateTime(2026, 8, 10)), isTrue);
+      expect(w.contains(DateTime(2026, 8, 12, 23, 59)), isTrue);
+      expect(w.contains(DateTime(2026, 8, 9)), isFalse);
+      expect(w.contains(DateTime(2026, 8, 13)), isFalse);
+    });
+
+    test('sheet dates parse in either format the tabs use', () {
+      expect(parseSheetDate('2026-08-17'), DateTime(2026, 8, 17));
+      expect(parseSheetDate('2026-08-17 14:38:48'), DateTime(2026, 8, 17));
+      // Day-first, as the plant writes them.
+      expect(parseSheetDate('17/08/2026'), DateTime(2026, 8, 17));
+      expect(parseSheetDate(''), isNull);
+      expect(parseSheetDate('not a date'), isNull);
+    });
+
+    test('rows outside the window, and undated rows, are left out', () {
+      const table = RawTable(
+        tab: 'Machining_Day',
+        cols: ['Date', 'Customer', 'PartNo'],
+        rows: [
+          ['2026-08-17', 'Mazda', '2244'],
+          ['2026-08-11', 'Proton', '2215'],
+          ['', 'Toyota', '2214'],
+        ],
+        total: 3,
+      );
+      final w = DateWindow(DateTime(2026, 8, 15), DateTime(2026, 8, 18));
+      final rows = rowsInWindow(table, w);
+      expect(rows.length, 1);
+      expect(rows.first[1], 'Mazda');
+
+      // A download labelled for a month must not smuggle an undated row in.
+      final wide = DateWindow(DateTime(2020, 1, 1), DateTime(2030, 1, 1));
+      expect(rowsInWindow(table, wide).length, 2);
+    });
+
+    test('a value containing a comma survives the round trip', () {
+      final csv = toCsv(
+        ['PartName', 'Qty'],
+        [
+          ['BRKT, ENGINE LH', '5'],
+          ['SAYS "NG"', '3'],
+        ],
+      );
+      final lines = csv.trim().split('\n');
+      expect(lines[0], 'PartName,Qty');
+      // Quoted, so it stays ONE column rather than becoming two.
+      expect(lines[1], '"BRKT, ENGINE LH",5');
+      // Embedded quotes are doubled, per RFC 4180.
+      expect(lines[2], '"SAYS ""NG""",3');
+    });
+
+    test('a short row is padded, never truncating the header', () {
+      final csv = toCsv(['A', 'B', 'C'], [['1']]);
+      expect(csv.trim().split('\n')[1], '1,,');
+    });
+
+    test('the file is named for the tab and the window', () {
+      expect(
+        exportFileName('Machining_Day',
+            DateWindow(DateTime(2026, 8, 17), DateTime(2026, 8, 17))),
+        'Machining_Day_2026-08-17.csv',
+      );
+      expect(
+        exportFileName('Casting_Night',
+            DateWindow(DateTime(2026, 8, 1), DateTime(2026, 8, 31))),
+        'Casting_Night_2026-08-01_to_2026-08-31.csv',
+      );
     });
   });
 }

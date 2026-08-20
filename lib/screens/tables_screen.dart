@@ -1,7 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../config/constants.dart';
 import '../models/raw_table.dart';
+import '../models/sheet_export.dart';
 import '../services/sheets_service.dart';
 import '../widgets/error_retry.dart';
 
@@ -37,6 +42,7 @@ class _TablesScreenState extends State<TablesScreen> {
   bool _loading = true;
   String? _error;
   String _query = '';
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -81,6 +87,134 @@ class _TablesScreenState extends State<TablesScreen> {
     _load();
   }
 
+  /// Download: pick the window first, because a month of a busy tab is a
+  /// different fetch from what the screen is already showing.
+  Future<void> _chooseRange() async {
+    final choice = await showModalBottomSheet<ExportRange>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+              child: Row(
+                children: [
+                  Icon(Icons.download_rounded, color: AppColors.navy, size: 20),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Download ${_selected.title}',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _RangeTile(
+              icon: Icons.today_rounded,
+              title: 'Today',
+              subtitle: 'Just this shift-day',
+              onTap: () => Navigator.of(sheetContext).pop(ExportRange.today),
+            ),
+            _RangeTile(
+              icon: Icons.calendar_month_rounded,
+              title: 'This month',
+              subtitle: 'The 1st to today',
+              onTap: () => Navigator.of(sheetContext).pop(ExportRange.month),
+            ),
+            _RangeTile(
+              icon: Icons.date_range_rounded,
+              title: 'Custom range',
+              subtitle: 'Pick the two dates',
+              onTap: () => Navigator.of(sheetContext).pop(ExportRange.custom),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    var window = DateWindow.forRange(choice, DateTime.now());
+    if (choice == ExportRange.custom) {
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2024),
+        lastDate: DateTime.now().add(const Duration(days: 1)),
+        initialDateRange: DateTimeRange(
+          start: DateTime.now().subtract(const Duration(days: 7)),
+          end: DateTime.now(),
+        ),
+      );
+      if (picked == null || !mounted) return;
+      window = DateWindow(picked.start, picked.end);
+    }
+    await _export(window);
+  }
+
+  Future<void> _export(DateWindow window) async {
+    setState(() => _exporting = true);
+    try {
+      // Refetch rather than export what is on screen: the browse view holds
+      // the newest 300, and a month of a busy tab runs past that. The
+      // backend's own ceiling is what caps this.
+      final full = await _sheetsService.fetchRawTab(_selected.name, limit: 2000);
+      final rows = rowsInWindow(full, window);
+      if (!mounted) return;
+
+      if (rows.isEmpty) {
+        setState(() => _exporting = false);
+        _snack('No rows in ${_selected.title} for that range.');
+        return;
+      }
+
+      final csv = toCsv(full.cols, rows);
+      final name = exportFileName(_selected.name, window);
+      // UTF-8 with a BOM: without it Excel opens the file in the local
+      // codepage and mangles any non-ASCII part name.
+      final bytes = Uint8List.fromList(
+        [0xEF, 0xBB, 0xBF, ...utf8.encode(csv)],
+      );
+
+      // Bytes rather than a file on disk, deliberately: share_plus writes
+      // its own temp file on Android and hands the browser a download on
+      // web, so this one path works for the APK and the web build alike.
+      // Touching dart:io here would compile but break the web build at the
+      // moment someone pressed Download.
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'text/csv', name: name)],
+          fileNameOverrides: [name],
+          subject: name,
+          text: '${_selected.title} — ${rows.length} rows (${window.label})',
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _exporting = false);
+    } on SheetsSubmissionException catch (error) {
+      if (!mounted) return;
+      setState(() => _exporting = false);
+      _snack(error.message);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _exporting = false);
+      _snack('Could not build the file: $error');
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   /// Rows matching the search, across every column — the whole point is to
   /// find one row without knowing which column holds the thing you typed.
   List<List<String>> get _rows {
@@ -106,19 +240,30 @@ class _TablesScreenState extends State<TablesScreen> {
             AppDimens.screenPadding,
             8,
           ),
-          child: TextField(
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search this tab',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () => setState(() => _query = ''),
-                    ),
-            ),
-            onChanged: (v) => setState(() => _query = v),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search this tab',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () => setState(() => _query = ''),
+                          ),
+                  ),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              _DownloadButton(
+                busy: _exporting,
+                onPressed: _exporting ? null : _chooseRange,
+              ),
+            ],
           ),
         ),
         Expanded(child: _body()),
@@ -334,6 +479,68 @@ class _DataGrid extends StatelessWidget {
           ),
         const SizedBox(height: 24),
       ],
+    );
+  }
+}
+
+/// Deliberately a labelled button rather than a bare icon: downloading is
+/// the one destructive-feeling action here (it leaves the app), and it
+/// should be obvious what it does before it is pressed.
+class _DownloadButton extends StatelessWidget {
+  const _DownloadButton({required this.busy, required this.onPressed});
+
+  final bool busy;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: onPressed,
+      icon: busy
+          ? const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : const Icon(Icons.download_rounded, size: 18),
+      label: Text(busy ? 'Preparing' : 'Download'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.navy,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      ),
+    );
+  }
+}
+
+class _RangeTile extends StatelessWidget {
+  const _RangeTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: AppColors.steelBlue),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+      ),
+      onTap: onTap,
     );
   }
 }

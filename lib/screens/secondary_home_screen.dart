@@ -3,10 +3,9 @@ import 'package:flutter/material.dart';
 import '../config/constants.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
-import '../widgets/add_tile.dart';
+import '../widgets/module_shell.dart';
 import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
-import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'secondary_parts_screen.dart';
 
@@ -156,51 +155,17 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const HicomAppBar(subtitle: 'Secondary — Stations'),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimens.screenPadding,
-                AppDimens.screenPadding,
-                AppDimens.screenPadding,
-                8,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _ShiftToggle(shift: _shift, onChanged: _setShift),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Select station',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Tap to log · ⋮ to rename or delete',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(child: _body()),
-          ],
-        ),
-      ),
+Widget build(BuildContext context) {
+    return ModuleScaffold(
+      subtitle: 'Secondary — Stations',
+      leading: _ShiftToggle(shift: _shift, onChanged: _setShift),
+      headline: 'Select station',
+      hint: 'Tap to log · ⋮ to rename or delete',
+      child: _body(),
     );
   }
 
-  Widget _body() {
+Widget _body() {
     if (_loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.steelBlue),
@@ -212,103 +177,40 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
     return RefreshIndicator(
       color: AppColors.steelBlue,
       onRefresh: _load,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = constraints.maxWidth >= 640 ? 3 : 2;
-          return GridView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppDimens.screenPadding),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisSpacing: AppDimens.fieldSpacing,
-              crossAxisSpacing: AppDimens.fieldSpacing,
-              childAspectRatio: 1.35,
+      // A list, not a grid: the card is a horizontal row (icon, text,
+      // progress) and squeezing that into a 2-up grid is what made these
+      // screens look unrelated to the home page they open from.
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppDimens.screenPadding,
+          4,
+          AppDimens.screenPadding,
+          28,
+        ),
+        itemCount: _stations.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (index == _stations.length) {
+            return SizedBox(
+              height: 88,
+              child: AddCard(label: 'Add station', onTap: _addStation),
+            );
+          }
+          final station = _stations[index];
+          return SelectorCard(
+            title: station.station,
+            subtitle: station.lastUpdated != null
+                ? 'Last updated ${station.lastUpdated}'
+                : 'No entries yet this shift',
+            icon: Icons.handyman_rounded,
+            onTap: () => _openStation(station),
+            trailing: CardMenuButton(
+              onEdit: () => _renameStation(station),
+              onDelete: () => _deleteStation(station),
             ),
-            itemCount: _stations.length + 1,
-            itemBuilder: (context, index) {
-              if (index == _stations.length) {
-                return AddTile(label: 'Add station', onTap: _addStation);
-              }
-              final station = _stations[index];
-              return Stack(
-                children: [
-                  Positioned.fill(
-                    child: _StationCard(
-                      station: station,
-                      onTap: () => _openStation(station),
-                    ),
-                  ),
-                  Positioned(
-                    top: 2,
-                    right: 2,
-                    child: CardMenuButton(
-                      onEdit: () => _renameStation(station),
-                      onDelete: () => _deleteStation(station),
-                    ),
-                  ),
-                ],
-              );
-            },
           );
         },
-      ),
-    );
-  }
-}
-
-class _StationCard extends StatelessWidget {
-  const _StationCard({required this.station, required this.onTap});
-
-  final StationStatus station;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      elevation: 2,
-      shadowColor: Colors.black26,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
-        side: BorderSide(color: AppColors.borderSubtle),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.handyman_rounded,
-                color: AppColors.amber,
-                size: 26,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                station.station,
-                style: TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                station.lastUpdated != null
-                    ? 'Last updated: ${station.lastUpdated}'
-                    : 'No entries yet today',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

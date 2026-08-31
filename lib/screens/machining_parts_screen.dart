@@ -4,11 +4,9 @@ import '../config/constants.dart';
 import '../models/machining_models.dart';
 import '../models/part_code.dart';
 import '../services/sheets_service.dart';
-import '../widgets/add_tile.dart';
+import '../widgets/module_shell.dart';
 import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
-import '../widgets/fill_tank_card.dart';
-import '../widgets/hicom_app_bar.dart';
 import '../widgets/manage_dialogs.dart';
 import 'machining_entry_screen.dart';
 
@@ -205,56 +203,18 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: HicomAppBar(
-        subtitle:
-            'Machining — ${widget.operation.label} · ${widget.customer} · '
-            '${widget.shift} shift',
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimens.screenPadding,
-                AppDimens.screenPadding,
-                AppDimens.screenPadding,
-                8,
-              ),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Select part',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Tap to log · ⋮ to rename or delete',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Expanded(child: _body()),
-          ],
-        ),
-      ),
+Widget build(BuildContext context) {
+    return ModuleScaffold(
+      subtitle:
+          'Machining — ${widget.operation.label} · ${widget.customer} · '
+          '${widget.shift} shift',
+      headline: 'Select part',
+      hint: 'Tap to log · ⋮ to rename or delete',
+      child: _body(),
     );
   }
 
-  Widget _body() {
+Widget _body() {
     if (_loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.steelBlue),
@@ -266,45 +226,37 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     return RefreshIndicator(
       color: AppColors.steelBlue,
       onRefresh: _load,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = constraints.maxWidth >= 640 ? 3 : 2;
-          return GridView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppDimens.screenPadding),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisSpacing: AppDimens.fieldSpacing,
-              crossAxisSpacing: AppDimens.fieldSpacing,
-              childAspectRatio: 1.0,
+      // A list, not a grid: the card is a horizontal row (icon, text,
+      // progress) and squeezing that into a 2-up grid is what made these
+      // screens look unrelated to the home page they open from.
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppDimens.screenPadding,
+          4,
+          AppDimens.screenPadding,
+          28,
+        ),
+        itemCount: _parts.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (index == _parts.length) {
+            return SizedBox(
+              height: 88,
+              child: AddCard(label: 'Add part', onTap: _addPart),
+            );
+          }
+          final part = _parts[index];
+          return SelectorCard(
+            title: part.part,
+            subtitle: _partSubtitle(part),
+            icon: Icons.tag_rounded,
+            onTap: () => _openPart(part),
+            fillPercent: part.fillPercent,
+            trailing: CardMenuButton(
+              onEdit: () => _editPart(part),
+              onDelete: () => _deletePart(part),
             ),
-            itemCount: _parts.length + 1,
-            itemBuilder: (context, index) {
-              if (index == _parts.length) {
-                return AddTile(label: 'Add Part', onTap: _addPart);
-              }
-              final part = _parts[index];
-              return Stack(
-                children: [
-                  Positioned.fill(
-                    child: FillTankCard(
-                      title: part.part,
-                      subtitle: _partSubtitle(part),
-                      fillPercent: part.fillPercent,
-                      onTap: () => _openPart(part),
-                    ),
-                  ),
-                  Positioned(
-                    top: 2,
-                    right: 2,
-                    child: CardMenuButton(
-                      onEdit: () => _editPart(part),
-                      onDelete: () => _deletePart(part),
-                    ),
-                  ),
-                ],
-              );
-            },
           );
         },
       ),

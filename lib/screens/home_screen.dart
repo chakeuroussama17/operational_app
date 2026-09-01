@@ -128,19 +128,23 @@ class _HomeScreenState extends State<HomeScreen> {
         // Deliberately NOT const: these must rebuild (and re-read AppColors)
         // on a theme toggle, which flows down from the root App rebuilding
         // this whole tree. A const child would be canonicalised and skipped.
-        child: IndexedStack(
-          index: _tabIndex,
-          children: [
-            _LogTab(modules: _visibleModules, service: widget.service),
-            if (_dashboardOpened)
-              DashboardScreen(modules: _visibleModules)
-            else
-              const SizedBox.shrink(),
-            if (_tablesOpened)
-              TablesScreen(modules: _visibleModules, service: widget.service)
-            else
-              const SizedBox.shrink(),
-          ],
+        // One wash behind all three tabs, so Dashboard and Tables sit on the
+        // same ground as the Log tab instead of on bare theme grey.
+        child: HomeBackdrop(
+          child: IndexedStack(
+            index: _tabIndex,
+            children: [
+              _LogTab(modules: _visibleModules, service: widget.service),
+              if (_dashboardOpened)
+                DashboardScreen(modules: _visibleModules)
+              else
+                const SizedBox.shrink(),
+              if (_tablesOpened)
+                TablesScreen(modules: _visibleModules, service: widget.service)
+              else
+                const SizedBox.shrink(),
+            ],
+          ),
         ),
       ),
       // Follows the app's light/dark setting like every other surface; the
@@ -181,7 +185,10 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.table_chart_rounded, color: AppColors.textSecondary),
+            icon: Icon(
+              Icons.table_chart_rounded,
+              color: AppColors.textSecondary,
+            ),
             selectedIcon: Icon(
               Icons.table_chart_rounded,
               color: AppColors.authViolet,
@@ -351,114 +358,111 @@ class _LogTabState extends State<_LogTab> {
     final hasData = _series.isNotEmpty;
     final lor = _todayLor;
 
-    return HomeBackdrop(
-      child: RefreshIndicator(
-        color: AppColors.authPink,
-        backgroundColor: AppColors.surface,
-        onRefresh: _loadKpis,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-          children: [
-            Center(
-              child: HomeHeroBadge(
-                icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
-                // Everyone gets the artwork — it's the company's own plant,
-                // not a per-department badge, and a machining supervisor
-                // landing on a plain icon while casting gets a render reads
-                // as a half-finished app rather than as scoping.
-                imageAsset: 'assets/hero_casting.png',
-              ),
+    // The wash is painted once, behind the whole IndexedStack.
+    return RefreshIndicator(
+      color: AppColors.authPink,
+      backgroundColor: AppColors.surface,
+      onRefresh: _loadKpis,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        children: [
+          Center(
+            child: HomeHeroBadge(
+              icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
+              // Everyone gets the artwork — it's the company's own plant,
+              // not a per-department badge, and a machining supervisor
+              // landing on a plain icon while casting gets a render reads
+              // as a half-finished app rather than as scoping.
+              imageAsset: 'assets/hero_casting.png',
             ),
-            const SizedBox(height: 6),
-            Center(
-              child: Text(
-                widget.modules.length == 1
-                    ? _titleFor(widget.modules.first)
-                    : 'HICOM Diecastings',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Center(
-              child: Text(
-                'TODAY · ${_formatToday()}'.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 22),
-            Row(
-              children: [
-                Expanded(
-                  child: HomeKpiTile(
-                    label: 'Output',
-                    value: _loading || !hasData ? '—' : _fmt(_todayOutput),
-                    unit: _loading || !hasData ? null : 'pcs',
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: HomeKpiTile(
-                    label: 'Avg LOR',
-                    value: lor == null ? '—' : lor.toStringAsFixed(1),
-                    unit: lor == null ? null : '%',
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: showRejections
-                      ? HomeKpiTile(
-                          label: 'Rejects',
-                          value: _loading || !hasData
-                              ? '—'
-                              : _fmt(_todayRejections),
-                          unit: _loading || !hasData ? null : 'pcs',
-                        )
-                      : HomeKpiTile(
-                          label: 'Reporting',
-                          value: _loading || !hasData
-                              ? '—'
-                              : '$_reportingCount',
-                        ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 26),
-            Text(
-              'Select production area',
+          ),
+          const SizedBox(height: 6),
+          Center(
+            child: Text(
+              widget.modules.length == 1
+                  ? _titleFor(widget.modules.first)
+                  : 'HICOM Diecastings',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 22,
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary,
-                letterSpacing: 0.2,
               ),
             ),
-            const SizedBox(height: 3),
-            Text(
-              widget.modules.length == 1
-                  ? 'Tap to view machines and log output'
-                  : 'Tap a module to view machines and log output',
+          ),
+          const SizedBox(height: 4),
+          Center(
+            child: Text(
+              'TODAY · ${_formatToday()}'.toUpperCase(),
               style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
                 color: AppColors.textSecondary,
               ),
             ),
-            const SizedBox(height: 14),
-            for (final module in widget.modules) ...[
-              _tileFor(context, module),
-              const SizedBox(height: 12),
+          ),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(
+                child: HomeKpiTile(
+                  label: 'Output',
+                  value: _loading || !hasData ? '—' : _fmt(_todayOutput),
+                  unit: _loading || !hasData ? null : 'pcs',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: HomeKpiTile(
+                  label: 'Avg LOR',
+                  value: lor == null ? '—' : lor.toStringAsFixed(1),
+                  unit: lor == null ? null : '%',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: showRejections
+                    ? HomeKpiTile(
+                        label: 'Rejects',
+                        value: _loading || !hasData
+                            ? '—'
+                            : _fmt(_todayRejections),
+                        unit: _loading || !hasData ? null : 'pcs',
+                      )
+                    : HomeKpiTile(
+                        label: 'Reporting',
+                        value: _loading || !hasData ? '—' : '$_reportingCount',
+                      ),
+              ),
             ],
+          ),
+          const SizedBox(height: 26),
+          Text(
+            'Select production area',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            widget.modules.length == 1
+                ? 'Tap to view machines and log output'
+                : 'Tap a module to view machines and log output',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (final module in widget.modules) ...[
+            _tileFor(context, module),
+            const SizedBox(height: 12),
           ],
-        ),
+        ],
       ),
     );
   }

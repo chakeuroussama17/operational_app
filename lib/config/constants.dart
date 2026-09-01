@@ -227,5 +227,8 @@ abstract class AppDimens {
   static const double buttonHeight = 60;
   static const double fieldSpacing = 18;
   static const double screenPadding = 20;
-  static const double cardRadius = 14;
+  // 18, matching the home screen's tiles. Every card in the app reads this
+  // — stat tiles, charts, tables, dialogs — so the whole surface family
+  // rounds the same amount from one line.
+  static const double cardRadius = 18;
 }

@@ -314,11 +314,27 @@ class _TablesScreenState extends State<TablesScreen> {
             // Two scroll axes: the tab is far wider than a phone, and the
             // vertical one has to stay a ListView-style scrollable for
             // pull-to-refresh to have something to attach to.
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
+            // The grid needs its own surface now that the tab sits on the
+            // gradient wash — bare rows on a gradient read as floating text.
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(
+                AppDimens.screenPadding,
+                0,
+                AppDimens.screenPadding,
+                AppDimens.screenPadding,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+                border: Border.all(color: AppColors.borderSubtle),
+              ),
+              clipBehavior: Clip.antiAlias,
               child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: _DataGrid(cols: table.cols, rows: rows),
+                scrollDirection: Axis.horizontal,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: _DataGrid(cols: table.cols, rows: rows),
+                ),
               ),
             ),
           ),
@@ -377,10 +393,10 @@ class _TabStrip extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: isSelected ? Colors.white : AppColors.textSecondary,
             ),
-            selectedColor: AppColors.navy,
+            selectedColor: AppColors.authViolet,
             backgroundColor: AppColors.surface,
             side: BorderSide(
-              color: isSelected ? AppColors.navy : AppColors.borderSubtle,
+              color: isSelected ? AppColors.authViolet : AppColors.borderSubtle,
             ),
           );
         },
@@ -506,6 +522,12 @@ class _DownloadButton extends StatelessWidget {
       label: Text(busy ? 'Preparing' : 'Download'),
       style: FilledButton.styleFrom(
         backgroundColor: AppColors.navy,
+        // Set the foreground explicitly. With only a background given,
+        // FilledButton derives its label colour from the scheme and lands on
+        // a dark violet that is all but invisible on this navy.
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: AppColors.navy.withValues(alpha: 0.5),
+        disabledForegroundColor: Colors.white70,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
     );

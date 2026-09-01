@@ -8,7 +8,7 @@ import '../models/machining_models.dart';
 import '../models/rejection.dart';
 import '../services/sheets_service.dart';
 import '../widgets/app_text_field.dart';
-import '../widgets/hicom_app_bar.dart';
+import '../widgets/module_shell.dart';
 import '../widgets/rejection_type_picker.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
@@ -493,14 +493,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: HicomAppBar(
-        subtitle:
-            'Machining — ${widget.operation.label} · ${widget.customer} · '
-            'Part ${widget.part} · ${widget.shift} shift',
-      ),
-      body: SafeArea(
-        child: _loading
+    return BackdropScaffold(
+      subtitle:
+          'Machining — ${widget.operation.label} · ${widget.customer} · '
+          'Part ${widget.part} · ${widget.shift} shift',
+      child: _loading
             ? const Center(
                 child: CircularProgressIndicator(color: AppColors.steelBlue),
               )
@@ -578,7 +575,6 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                   ),
                 ),
               ),
-      ),
     );
   }
 }

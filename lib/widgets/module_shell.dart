@@ -99,6 +99,31 @@ class ModuleScaffold extends StatelessWidget {
   }
 }
 
+/// Scaffold + app bar + the wash, with no section header — for screens that
+/// lead with their own context (the entry forms open with chips naming the
+/// machine, part and shift, which would read as a second heading under one).
+class BackdropScaffold extends StatelessWidget {
+  const BackdropScaffold({
+    super.key,
+    required this.subtitle,
+    required this.child,
+    this.actions,
+  });
+
+  final String subtitle;
+  final List<Widget>? actions;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: HicomAppBar(subtitle: subtitle, actions: actions),
+      body: HomeBackdrop(child: SafeArea(child: child)),
+    );
+  }
+}
+
 /// The home module tile, generalised: gradient icon chip, title, subtitle,
 /// and an optional progress bar for the levels that track completion.
 ///

@@ -4,7 +4,7 @@ import '../config/constants.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/app_text_field.dart';
-import '../widgets/hicom_app_bar.dart';
+import '../widgets/module_shell.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
 
@@ -163,14 +163,11 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: HicomAppBar(
-        subtitle:
-            'Secondary — ${widget.station} · Part ${widget.part} · '
-            '${widget.shift} shift',
-      ),
-      body: SafeArea(
-        child: _loading
+    return BackdropScaffold(
+      subtitle:
+          'Secondary — ${widget.station} · Part ${widget.part} · '
+          '${widget.shift} shift',
+      child: _loading
             ? const Center(
                 child: CircularProgressIndicator(color: AppColors.steelBlue),
               )
@@ -216,7 +213,6 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
                   ),
                 ),
               ),
-      ),
     );
   }
 }

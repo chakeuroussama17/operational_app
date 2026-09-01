@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import '../config/constants.dart';
 import '../screens/auth_gate.dart';
 
-/// Branded app bar, shown on every screen: the HICOM logo, a deep-purple
-/// header and the magenta→violet rule that ties it to the login screen and
-/// the home hero. [subtitle] names the current screen ("Casting — Machines");
-/// [actions] adds trailing icon buttons before the sign-out one.
+/// Branded app bar, shown on every screen: the HICOM logo on the magenta→
+/// violet band that carries the login screen and the home hero, curved off
+/// at the bottom so it reads as a card laid over the page rather than as a
+/// slab bolted to the top. [subtitle] names the current screen
+/// ("Casting — Machines"); [actions] adds trailing icon buttons.
 ///
 /// Everything is laid out on one baseline grid — a fixed 52px content row
 /// with the logo, the wordmark block and the actions all vertically centred
@@ -33,7 +34,11 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
     final canPop = Navigator.of(context).canPop();
 
     return Material(
-      color: const Color(0xFF241C52),
+      color: AppColors.authViolet,
+      // The curve belongs to the whole bar, so the gradient, the rule and
+      // anything that scrolls under it are all clipped by the same shape.
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(22)),
+      clipBehavior: Clip.antiAlias,
       child: SafeArea(
         bottom: false,
         child: Column(
@@ -42,7 +47,7 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
             Container(
               height: _contentHeight + _verticalPadding * 2,
               decoration: const BoxDecoration(
-                gradient: AppColors.headerGradient,
+                gradient: AppColors.authGradient,
               ),
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Row(
@@ -100,19 +105,20 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
                               ),
                             ),
                             const SizedBox(width: 7),
-                            ShaderMask(
-                              blendMode: BlendMode.srcIn,
-                              shaderCallback: (bounds) =>
-                                  AppColors.authGradient.createShader(bounds),
-                              child: const Text(
-                                'DIECASTINGS',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 2.2,
-                                  height: 1.0,
-                                ),
+                            // Plain white, NOT the magenta→violet shader it
+                            // used to wear. The bar itself is that gradient
+                            // now, so shading the word in the same colours
+                            // painted it onto its own background and made it
+                            // disappear. White is the only thing that reads
+                            // across the whole sweep from pink to violet.
+                            Text(
+                              'DIECASTINGS',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 2.2,
+                                height: 1.0,
                               ),
                             ),
                           ],

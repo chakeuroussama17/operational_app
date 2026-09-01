@@ -149,53 +149,86 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       // Follows the app's light/dark setting like every other surface; the
       // brand accent rides the selection indicator rather than the whole bar.
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabIndex,
-        onDestinationSelected: (index) => setState(() {
-          _tabIndex = index;
-          if (index == 1) _dashboardOpened = true;
-          if (index == 2) _tablesOpened = true;
-        }),
-        backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.authViolet.withValues(alpha: 0.22),
-        labelTextStyle: WidgetStateProperty.resolveWith(
-          (states) => TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: states.contains(WidgetState.selected)
-                ? AppColors.authViolet
-                : AppColors.textSecondary,
+      // A floating pill rather than a full-width slab: it sits ON the
+      // gradient wash instead of cutting it off, which is what makes the
+      // page read as one surface with a control laid over it.
+      extendBody: true,
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: AppColors.authViolet.withValues(alpha: 0.30),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.authViolet.withValues(alpha: 0.22),
+                  blurRadius: 22,
+                  spreadRadius: -6,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: NavigationBar(
+              height: 62,
+              selectedIndex: _tabIndex,
+              onDestinationSelected: (index) => setState(() {
+                _tabIndex = index;
+                if (index == 1) _dashboardOpened = true;
+                if (index == 2) _tablesOpened = true;
+              }),
+              backgroundColor: AppColors.surface,
+              indicatorColor: AppColors.authViolet.withValues(alpha: 0.28),
+              labelTextStyle: WidgetStateProperty.resolveWith(
+                (states) => TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: states.contains(WidgetState.selected)
+                      ? AppColors.authViolet
+                      : AppColors.textSecondary,
+                ),
+              ),
+              destinations: [
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.edit_note_rounded,
+                    color: AppColors.textSecondary,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.edit_note_rounded,
+                    color: AppColors.authViolet,
+                  ),
+                  label: 'Log',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.insights_rounded,
+                    color: AppColors.textSecondary,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.insights_rounded,
+                    color: AppColors.authViolet,
+                  ),
+                  label: 'Dashboard',
+                ),
+                NavigationDestination(
+                  icon: Icon(
+                    Icons.table_chart_rounded,
+                    color: AppColors.textSecondary,
+                  ),
+                  selectedIcon: Icon(
+                    Icons.table_chart_rounded,
+                    color: AppColors.authViolet,
+                  ),
+                  label: 'Tables',
+                ),
+              ],
+            ),
           ),
         ),
-        destinations: [
-          NavigationDestination(
-            icon: Icon(Icons.edit_note_rounded, color: AppColors.textSecondary),
-            selectedIcon: Icon(
-              Icons.edit_note_rounded,
-              color: AppColors.authViolet,
-            ),
-            label: 'Log',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.insights_rounded, color: AppColors.textSecondary),
-            selectedIcon: Icon(
-              Icons.insights_rounded,
-              color: AppColors.authViolet,
-            ),
-            label: 'Dashboard',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.table_chart_rounded,
-              color: AppColors.textSecondary,
-            ),
-            selectedIcon: Icon(
-              Icons.table_chart_rounded,
-              color: AppColors.authViolet,
-            ),
-            label: 'Tables',
-          ),
-        ],
       ),
     );
   }
@@ -409,6 +442,7 @@ class _LogTabState extends State<_LogTab> {
                   label: 'Output',
                   value: _loading || !hasData ? '—' : _fmt(_todayOutput),
                   unit: _loading || !hasData ? null : 'pcs',
+                  accent: AppColors.success,
                 ),
               ),
               const SizedBox(width: 10),
@@ -417,6 +451,7 @@ class _LogTabState extends State<_LogTab> {
                   label: 'Avg LOR',
                   value: lor == null ? '—' : lor.toStringAsFixed(1),
                   unit: lor == null ? null : '%',
+                  accent: AppColors.steelBlue,
                 ),
               ),
               const SizedBox(width: 10),
@@ -424,6 +459,7 @@ class _LogTabState extends State<_LogTab> {
                 child: showRejections
                     ? HomeKpiTile(
                         label: 'Rejects',
+                        accent: AppColors.amber,
                         value: _loading || !hasData
                             ? '—'
                             : _fmt(_todayRejections),
@@ -431,6 +467,7 @@ class _LogTabState extends State<_LogTab> {
                       )
                     : HomeKpiTile(
                         label: 'Reporting',
+                        accent: AppColors.amber,
                         value: _loading || !hasData ? '—' : '$_reportingCount',
                       ),
               ),

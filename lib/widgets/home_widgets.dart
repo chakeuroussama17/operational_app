@@ -153,6 +153,7 @@ class HomeKpiTile extends StatelessWidget {
     required this.label,
     required this.value,
     this.unit,
+    this.accent,
   });
 
   final String label;
@@ -161,14 +162,39 @@ class HomeKpiTile extends StatelessWidget {
   final String value;
   final String? unit;
 
+  /// Tints the tile's border and lays a faint glow under it, so the three
+  /// read as three different measures at a glance rather than as one number
+  /// repeated. Null keeps the plain treatment.
+  ///
+  /// The colour is decoration, not meaning — it never changes with the
+  /// value, so a red tile is not a warning. The label under the number is
+  /// what says which measure it is.
+  final Color? accent;
+
   @override
   Widget build(BuildContext context) {
+    final tint = accent;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(
+          color: tint == null
+              ? AppColors.borderSubtle
+              : tint.withValues(alpha: 0.55),
+          width: tint == null ? 1 : 1.4,
+        ),
+        boxShadow: tint == null
+            ? null
+            : [
+                BoxShadow(
+                  color: tint.withValues(alpha: 0.18),
+                  blurRadius: 16,
+                  spreadRadius: -4,
+                  offset: const Offset(0, 4),
+                ),
+              ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -231,7 +257,12 @@ class HomeModuleTile extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.onTap,
+    this.actionLabel = 'View Area',
   });
+
+  /// The pill on the right. Names what the tap does, so the tile reads as a
+  /// door rather than as a status card you might be able to edit in place.
+  final String actionLabel;
 
   final String title;
   final String subtitle;
@@ -251,7 +282,18 @@ class HomeModuleTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.borderSubtle),
+            border: Border.all(
+              color: AppColors.authViolet.withValues(alpha: 0.45),
+              width: 1.4,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.authViolet.withValues(alpha: 0.20),
+                blurRadius: 18,
+                spreadRadius: -6,
+                offset: const Offset(0, 5),
+              ),
+            ],
           ),
           child: Row(
             children: [
@@ -299,7 +341,24 @@ class HomeModuleTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceTint,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.borderSubtle),
+                ),
+                child: Text(
+                  actionLabel,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 2),
               Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
             ],
           ),

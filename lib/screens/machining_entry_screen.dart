@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/constants.dart';
+import '../models/downtime_reason.dart';
 import '../models/machining_models.dart';
 import '../models/rejection.dart';
 import '../services/sheets_service.dart';
@@ -64,12 +65,18 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final slot in _slots) slot.downtimeKey: TextEditingController(),
   };
 
-  /// Why the machine stopped, in the operator's own words. Free text and
-  /// never locked, for the same reason the minutes aren't: a stoppage is
-  /// often still being understood when the checkpoint passes.
+  /// Why the machine stopped. Holds exactly what goes in the cell: a coded
+  /// reason's full label, or free text when "Other" was chosen. Never locked,
+  /// for the same reason the minutes aren't — a stoppage is often still being
+  /// understood when the checkpoint passes.
   late final Map<String, TextEditingController> _reasonControllers = {
     for (final slot in _slots) slot.downtimeReasonKey: TextEditingController(),
   };
+
+  /// Slots whose reason is being typed rather than picked. Needed because an
+  /// empty controller can't tell "Other, nothing typed yet" apart from
+  /// "nothing chosen at all", and those show different fields.
+  final Set<String> _reasonIsOther = {};
 
   /// Backend-computed LOR% labels, keyed by lorKey. Only a fallback: with a
   /// Plan on the row the badge shows a live cumulative figure instead, so a
@@ -337,8 +344,16 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           }
           _downtimeControllers[slot.downtimeKey]!.text =
               row?.value(slot.downtimeKey) ?? '';
-          _reasonControllers[slot.downtimeReasonKey]!.text =
-              row?.value(slot.downtimeReasonKey) ?? '';
+          final reason = row?.value(slot.downtimeReasonKey) ?? '';
+          _reasonControllers[slot.downtimeReasonKey]!.text = reason;
+          // A stored reason that isn't one of the codes was typed by hand —
+          // including anything logged before the codes existed. Reopen it on
+          // "Other" so it stays editable instead of being silently dropped.
+          if (reason.isNotEmpty && downtimeReasonFromCell(reason) == null) {
+            _reasonIsOther.add(slot.downtimeReasonKey);
+          } else {
+            _reasonIsOther.remove(slot.downtimeReasonKey);
+          }
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
         _logMeta = _parseLogMeta(row?.raw['LogMeta']);
@@ -461,6 +476,31 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
 
   /// Opens the defect-type picker for one rejection row. The master list
   /// (~230 types) is fetched once per session by the service.
+  /// Records the reason chosen for a slot. The controller always holds what
+  /// the cell will hold, so picking a code writes its full label straight in;
+  /// choosing Other empties it and hands the slot over to the text field.
+  void _pickReason(String reasonKey, String? code) {
+    setState(() {
+      final controller = _reasonControllers[reasonKey]!;
+      if (code == null) {
+        _reasonIsOther.remove(reasonKey);
+        controller.text = '';
+        return;
+      }
+      if (code == otherDowntimeReasonCode) {
+        _reasonIsOther.add(reasonKey);
+        // A code's label is the app's text, not the operator's — carrying it
+        // into the box they're about to type in would only be in the way.
+        controller.text = '';
+        return;
+      }
+      _reasonIsOther.remove(reasonKey);
+      controller.text = downtimeReasons
+          .firstWhere((reason) => reason.code == code)
+          .label;
+    });
+  }
+
   Future<void> _pickType(_RejectionRow row) async {
     List<RejectionType> types;
     try {
@@ -552,6 +592,11 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                             _downtimeControllers[slot.downtimeKey]!,
                         reasonController:
                             _reasonControllers[slot.downtimeReasonKey]!,
+                        reasonIsOther: _reasonIsOther.contains(
+                          slot.downtimeReasonKey,
+                        ),
+                        onReasonPicked: (code) =>
+                            _pickReason(slot.downtimeReasonKey, code),
                         lorLabel: _lorLabel(slot),
                         locked: _lockedOutputs.contains(slot.outputKey),
                         stamp: _logMeta[slot.slotKey] as Map?,
@@ -748,6 +793,8 @@ class _SlotBlock extends StatelessWidget {
     required this.outputController,
     required this.downtimeController,
     required this.reasonController,
+    required this.reasonIsOther,
+    required this.onReasonPicked,
     required this.lorLabel,
     required this.locked,
     required this.stamp,
@@ -764,6 +811,12 @@ class _SlotBlock extends StatelessWidget {
   final TextEditingController outputController;
   final TextEditingController downtimeController;
   final TextEditingController reasonController;
+
+  /// True when the reason is being typed instead of picked from the codes.
+  final bool reasonIsOther;
+
+  /// Called with a reason code, [otherDowntimeReasonCode], or null to clear.
+  final void Function(String? code) onReasonPicked;
   final String? lorLabel;
 
   /// True when this hour's output is already saved to the sheet.
@@ -1043,6 +1096,46 @@ class _SlotBlock extends StatelessWidget {
     );
   }
 
+  /// Which dropdown entry is showing, derived from the cell's own contents so
+  /// the picker and the value that will be saved can never disagree.
+  String? get _reasonCode {
+    if (reasonIsOther) return otherDowntimeReasonCode;
+    return downtimeReasonFromCell(reasonController.text)?.code;
+  }
+
+  /// One dropdown line: the code in a fixed-width column so fifteen of them
+  /// read as a list rather than ragged text. "Other" has no code, and the gap
+  /// is what marks it out as the odd one.
+  Widget _reasonItem(String? code, String name) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 30,
+          child: Text(
+            code ?? '',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Minutes the machine was stopped in this hour. Sits under the hour's
   /// defects because it belongs to the same hour, and stays editable even once
   /// the actual is locked — a stoppage can outlast the checkpoint that
@@ -1094,26 +1187,65 @@ class _SlotBlock extends StatelessWidget {
           // "why did it stop?" beside a blank box is noise on the hours
           // nothing went wrong, and there are three of these on the form.
           if (downtimeController.text.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              // The whole point of the codes is that a month of stoppages can
+              // be added up by cause, so picking is the default path and
+              // typing is the exception.
+              initialValue: _reasonCode,
+              isExpanded: true,
+              onChanged: onReasonPicked,
+              decoration: InputDecoration(
+                isDense: true,
+                labelText: 'Reason for the stop',
+                prefixIcon: Icon(
+                  Icons.edit_note_rounded,
+                  size: 20,
+                  color: AppColors.textSecondary,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              items: [
+                for (final reason in downtimeReasons)
+                  DropdownMenuItem(
+                    value: reason.code,
+                    child: _reasonItem(reason.code, reason.name),
+                  ),
+                DropdownMenuItem(
+                  value: otherDowntimeReasonCode,
+                  child: _reasonItem(null, otherDowntimeReason.name),
+                ),
+              ],
+            ),
+          ],
+          if (downtimeController.text.trim().isNotEmpty && reasonIsOther) ...[
             const SizedBox(height: 8),
             TextFormField(
               controller: reasonController,
               textCapitalization: TextCapitalization.sentences,
-              // Free text, and as long as they like: a stoppage explanation
-              // is the one field nobody can give a dropdown for.
+              // As long as they like: a cause the code list doesn't cover is
+              // exactly the one that needs explaining.
               maxLines: null,
               minLines: 1,
               keyboardType: TextInputType.multiline,
+              autofocus: true,
               onChanged: (_) => onDowntimeChanged(),
               decoration: InputDecoration(
                 isDense: true,
-                labelText: 'Reason for the stop',
+                labelText: 'What happened?',
                 hintText: 'e.g. mould change, no operator, tool broken',
                 hintStyle: TextStyle(
                   fontSize: 12.5,
                   color: AppColors.textSecondary,
                 ),
                 prefixIcon: Icon(
-                  Icons.edit_note_rounded,
+                  Icons.drive_file_rename_outline,
                   size: 20,
                   color: AppColors.textSecondary,
                 ),

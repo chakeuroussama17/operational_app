@@ -13,6 +13,7 @@ import 'package:hicom_ops/widgets/card_menu_button.dart';
 import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/casting_models.dart';
+import 'package:hicom_ops/models/downtime_reason.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/secondary_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
@@ -1070,6 +1071,51 @@ void main() {
     });
   });
 
+  group('downtime reason codes', () {
+    test('the plant list ships whole, in the plant order', () {
+      expect(downtimeReasons.length, 15);
+      expect(downtimeReasons.first.code, '001');
+      expect(downtimeReasons.first.name, 'TOOL ROOM DOWNTIME');
+      expect(downtimeReasons.last.code, '015');
+      expect(downtimeReasons.last.name, 'COMPANY EVENT');
+      // Codes are zero-padded and unique — they are the identity.
+      final codes = downtimeReasons.map((r) => r.code).toList();
+      expect(codes.toSet().length, codes.length);
+      expect(codes.every((c) => c.length == 3), isTrue);
+    });
+
+    test('the label leads with the code so a sheet can split it back out', () {
+      final reason = downtimeReasons[7];
+      expect(reason.label, '008 · MACHINING MAINTENANCE DOWNTIME');
+      expect(reason.label.substring(0, 3), '008');
+    });
+
+    test('a stored cell resolves back to the code it was saved from', () {
+      for (final reason in downtimeReasons) {
+        expect(downtimeReasonFromCell(reason.label)?.code, reason.code);
+      }
+      // Hand-typed in the sheet as just the code.
+      expect(downtimeReasonFromCell('012')?.name, 'TEA BREAK');
+    });
+
+    test('free text stays free text rather than snapping to a code', () {
+      // An Other reason, and anything logged before the codes existed, has
+      // to come back as null so the form reopens it on Other.
+      expect(downtimeReasonFromCell('waiting on the crane'), isNull);
+      expect(downtimeReasonFromCell('TOOL ROOM DOWNTIME extended'), isNull);
+      expect(downtimeReasonFromCell(''), isNull);
+      expect(downtimeReasonFromCell(null), isNull);
+    });
+
+    test('the Other sentinel cannot collide with a real code', () {
+      expect(otherDowntimeReasonCode.length, isNot(3));
+      expect(
+        downtimeReasons.any((r) => r.code == otherDowntimeReasonCode),
+        isFalse,
+      );
+    });
+  });
+
   group('four-hour checkpoints', () {
     test('each shift logs three times, at the agreed clock times', () {
       expect(machiningDaySlots.map((s) => s.label), ['12 PM', '4 PM', '7:30 PM']);
@@ -1146,12 +1192,21 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(3), '25'); // 12PM min
     await tester.pumpAndSettle();
 
-    // Only the checkpoint that lost time asks for a reason.
+    // Only the checkpoint that lost time asks for a reason, and it asks with
+    // the code list rather than an empty box.
     expect(find.text('Reason for the stop'), findsOneWidget);
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Reason for the stop'),
-      'Mould change, waiting on the crane',
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    // Nothing is typed until "Other" is chosen.
+    expect(find.text('What happened?'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
     );
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MACHINING MAINTENANCE DOWNTIME').last);
     await tester.pumpAndSettle();
 
     await tester.dragUntilVisible(
@@ -1163,9 +1218,86 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(posted!['Downtime_12PM'], '25');
+    // The code leads, so LEFT(cell, 3) pulls it back out in the sheet.
     expect(
       posted!['DowntimeReason_12PM'],
-      'Mould change, waiting on the crane',
+      '008 · MACHINING MAINTENANCE DOWNTIME',
+    );
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: Other opens a box and saves what is typed', (
+    tester,
+  ) async {
+    // Other is the sixteenth entry, and the open menu is only as tall as the
+    // screen — on the default 600px surface it isn't laid out to be tapped.
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    Map<String, dynamic>? posted;
+    final mock = MockClient((request) async {
+      if (request.method == 'POST') {
+        posted =
+            (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                as Map<String, dynamic>;
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        return http.Response('{"status":"success","data":[]}', 200);
+      }
+      return http.Response('{"status":"success","data":null}', 200);
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).at(3), '40'); // 12PM min
+    await tester.pumpAndSettle();
+
+    await tester.dragUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Other — type it in').last);
+    await tester.pumpAndSettle();
+
+    // Picking Other is what reveals the box; a code never does.
+    expect(find.text('What happened?'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'What happened?'),
+      'Crane operator off sick, waited for a replacement',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    // Stored verbatim — no code invented for it.
+    expect(
+      posted!['DowntimeReason_12PM'],
+      'Crane operator off sick, waited for a replacement',
     );
 
     await tester.pump(const Duration(seconds: 7));

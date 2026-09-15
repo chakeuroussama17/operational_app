@@ -5,15 +5,15 @@
     "rewrites": [{ "source": "**", "destination": "/index.html" }],
     "headers": [
       {
-        "//": "Flutter's bootstrap and service worker are NOT content-hashed, so a cached copy keeps serving the previous build forever. Never cache them; everything they pull in is hashed and safe to cache hard.",
+        "source": "**/*.@(js|css|wasm|png|jpg|jpeg|svg|woff2|ttf|json)",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
+      },
+      {
+        "//": "Flutter's bootstrap and service worker are NOT content-hashed, so a cached copy keeps serving the previous build forever. Never cache them; everything they pull in is hashed and safe to cache hard. MUST be the last entry: when two header rules match the same file, Firebase applies them in array order and a later rule overwrites an earlier one's value for the same key — this rule matches *.js too, so if it came first the broad rule below would win instead, which is exactly the bug that shipped (service worker cached 7 days, site stuck on a week-old build).",
         "source": "/@(index.html|flutter_bootstrap.js|flutter_service_worker.js)",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
         ]
-      },
-      {
-        "source": "**/*.@(js|css|wasm|png|jpg|jpeg|svg|woff2|ttf|json)",
-        "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
       }
     ]
   },

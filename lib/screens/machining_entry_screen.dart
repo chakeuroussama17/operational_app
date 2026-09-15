@@ -783,29 +783,137 @@ class _SlotBlock extends StatelessWidget {
   final void Function(_RejectionRow row) onRemoveRow;
   final VoidCallback onDowntimeChanged;
 
+  /// Below this the defect picker and its quantity cannot share a line
+  /// without the defect name truncating to nothing, so they stack. A phone
+  /// card is around 290dp wide inside its padding and lands under it.
+  static const double _narrowRow = 300;
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _outputRow(),
-        for (final entry in saved) _savedRow(entry),
-        for (final row in rows) _rejectionRow(row),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: onAddRow,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Another defect this hour'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.steelBlue,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              visualDensity: VisualDensity.compact,
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+        border: Border.all(color: AppColors.borderSubtle),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.steelBlue.withValues(alpha: 0.16),
+            blurRadius: 16,
+            spreadRadius: -4,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _header(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _outputRow(),
+                const _SectionLabel(
+                  icon: Icons.report_gmailerrorred_outlined,
+                  label: 'Rejections',
+                ),
+                for (final entry in saved) _savedRow(entry),
+                for (final row in rows) _rejectionRow(row),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onAddRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Another defect'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.steelBlue,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
+                const _SectionLabel(
+                  icon: Icons.timer_off_outlined,
+                  label: 'Downtime',
+                ),
+                _downtimeRow(),
+              ],
             ),
           ),
-        ),
-        _downtimeRow(),
-      ],
+        ],
+      ),
+    );
+  }
+
+  /// The card's title strip: which checkpoint this is, and its LOR. The badge
+  /// lives up here rather than beside the Actual field so the field itself
+  /// gets the card's full width — on a phone those 88dp were the difference
+  /// between a readable number and a cramped one.
+  Widget _header() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceTint,
+        border: Border(bottom: BorderSide(color: AppColors.borderSubtle)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule_rounded, size: 18, color: AppColors.steelBlue),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              slot.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 15.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          if (locked) ...[
+            Icon(Icons.lock_outline, size: 15, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+          ],
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.steelBlue.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: AppColors.steelBlue.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'LOR',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  lorLabel ?? '—',
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.steelBlue,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -813,126 +921,124 @@ class _SlotBlock extends StatelessWidget {
   /// quantity stays editable because a miscount is corrected here, and the
   /// pieces it releases go back into the hour's output.
   Widget _savedRow(_SavedRejection entry) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, left: 12),
+    final label = Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceTint,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
       child: Row(
         children: [
-          Icon(
-            Icons.subdirectory_arrow_right,
-            size: 18,
-            color: AppColors.textSecondary,
-          ),
-          const SizedBox(width: 6),
           Expanded(
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceTint,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.borderSubtle),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      entry.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    Icons.lock_outline,
-                    size: 15,
-                    color: AppColors.textSecondary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 76,
-            child: TextFormField(
-              controller: entry.qtyController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              textAlign: TextAlign.center,
-              onChanged: (_) => onQtyChanged(),
+            child: Text(
+              entry.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: entry.isCorrected ? AppColors.amberDark : null,
-              ),
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 14,
-                ),
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
               ),
             ),
           ),
-          // Keeps the saved line aligned with the editable rows' ✕ column.
-          const SizedBox(width: 36),
+          Icon(Icons.lock_outline, size: 15, color: AppColors.textSecondary),
         ],
+      ),
+    );
+    final qty = _qtyField(
+      entry.qtyController,
+      color: entry.isCorrected ? AppColors.amberDark : null,
+    );
+    return _defectLine(label: label, qty: qty, remove: null);
+  }
+
+  Widget _rejectionRow(_RejectionRow row) {
+    return _defectLine(
+      label: _TypeField(entry: row.entry, onTap: () => onPickType(row)),
+      qty: _qtyField(row.qtyController, hint: 'Qty'),
+      remove: rows.length > 1
+          ? IconButton(
+              onPressed: () => onRemoveRow(row),
+              icon: const Icon(Icons.close, size: 18),
+              color: AppColors.textSecondary,
+              tooltip: 'Remove',
+              visualDensity: VisualDensity.compact,
+            )
+          : null,
+    );
+  }
+
+  /// One defect line, laid out to fit the space it actually has.
+  ///
+  /// Wide enough and the picker, the quantity and the ✕ share a line. On a
+  /// phone they don't fit — the picker collapses to a few characters and the
+  /// defect name it exists to show is the part that gets cut — so the picker
+  /// takes the full width and the quantity drops beneath it.
+  Widget _defectLine({
+    required Widget label,
+    required Widget qty,
+    required Widget? remove,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < _narrowRow) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                label,
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    SizedBox(width: 104, child: qty),
+                    const Spacer(),
+                    ?remove,
+                  ],
+                ),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: label),
+              const SizedBox(width: 8),
+              SizedBox(width: 84, child: qty),
+              // Held open even with no ✕ so every line's quantity box sits in
+              // the same column.
+              SizedBox(width: 40, child: remove),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _rejectionRow(_RejectionRow row) {
-    final canRemove = rows.length > 1;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, left: 12),
-      child: Row(
-        children: [
-          Icon(
-            Icons.subdirectory_arrow_right,
-            size: 18,
-            color: AppColors.textSecondary,
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: _TypeField(entry: row.entry, onTap: () => onPickType(row)),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 76,
-            child: TextFormField(
-              controller: row.qtyController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              textAlign: TextAlign.center,
-              onChanged: (_) => onQtyChanged(),
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              decoration: const InputDecoration(
-                hintText: 'Qty',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 14,
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 36,
-            child: canRemove
-                ? IconButton(
-                    onPressed: () => onRemoveRow(row),
-                    icon: const Icon(Icons.close, size: 18),
-                    color: AppColors.textSecondary,
-                    tooltip: 'Remove',
-                    visualDensity: VisualDensity.compact,
-                  )
-                : null,
-          ),
-        ],
+  Widget _qtyField(
+    TextEditingController controller, {
+    String? hint,
+    Color? color,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      textAlign: TextAlign.center,
+      onChanged: (_) => onQtyChanged(),
+      style: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+        color: color,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 8,
+          vertical: 14,
+        ),
       ),
     );
   }
@@ -942,32 +1048,25 @@ class _SlotBlock extends StatelessWidget {
   /// the actual is locked — a stoppage can outlast the checkpoint that
   /// recorded it.
   Widget _downtimeRow() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.timer_off_outlined,
-                size: 18,
-                color: AppColors.textSecondary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Downtime this hour',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Minutes stopped',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
                 ),
               ),
-              SizedBox(
-                width: 110,
-                child: TextFormField(
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 112,
+              child: TextFormField(
                   controller: downtimeController,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -1028,67 +1127,20 @@ class _SlotBlock extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
+      ],
     );
   }
 
+  /// The hour's count, across the card's full width — the LOR badge that used
+  /// to sit beside it now lives in the card header.
   Widget _outputRow() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: locked
-              ? _lockedOutput()
-              : AppNumberField(
-                  label: 'Actual — ${slot.label}',
-                  controller: outputController,
-                  required: false,
-                ),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          children: [
-            // Spacer matching the field label height keeps the badge
-            // aligned with the input box.
-            const SizedBox(height: 27),
-            Container(
-              width: 88,
-              height: 58,
-              decoration: BoxDecoration(
-                color: AppColors.steelBlue.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.steelBlue.withValues(alpha: 0.25),
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'LOR',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  Text(
-                    lorLabel ?? '—',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.steelBlue,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+    return locked
+        ? _lockedOutput()
+        : AppNumberField(
+            label: 'Actual',
+            controller: outputController,
+            required: false,
+          );
   }
 
   /// An hour that's already on the sheet: the value is shown, not editable.
@@ -1098,7 +1150,7 @@ class _SlotBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        FieldLabel(label: 'Actual — ${slot.label}', required: false),
+        FieldLabel(label: 'Actual', required: false),
         const SizedBox(height: 6),
         Container(
           height: 58,
@@ -1141,6 +1193,40 @@ class _SlotBlock extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Divides a checkpoint card into its three parts — what was made, what was
+/// scrapped, and time lost. Without them the card is one undifferentiated
+/// stack of boxes and the eye has nothing to anchor on.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: AppColors.textSecondary),
+          const SizedBox(width: 6),
+          Text(
+            label.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.9,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Divider(height: 1, color: AppColors.borderSubtle)),
+        ],
+      ),
     );
   }
 }

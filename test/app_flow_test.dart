@@ -254,11 +254,12 @@ void main() {
     expect(find.text('Plan'), findsOneWidget);
     // Day slots run 12 PM - 7:30 PM, each with its own rejection line beneath
     // it, and one overall summary at the bottom.
-    expect(find.text('Actual — 12 PM'), findsOneWidget);
-    expect(find.text('Actual — 7:30 PM'), findsOneWidget);
+    expect(find.text('12 PM'), findsOneWidget);
+    expect(find.text('7:30 PM'), findsOneWidget);
+    expect(find.text('Actual'), findsNWidgets(3));
     expect(find.text('LOR'), findsNWidgets(3));
     expect(find.text('Select type'), findsNWidgets(3));
-    expect(find.text('Another defect this hour'), findsNWidgets(3));
+    expect(find.text('Another defect'), findsNWidgets(3));
     expect(find.text('Overall summary'), findsOneWidget);
     expect(find.text('Total good parts'), findsOneWidget);
     // Nothing logged yet, so there is no per-defect breakdown to show.
@@ -304,11 +305,11 @@ void main() {
     expect(find.text('Select type'), findsNWidgets(3));
 
     await tester.dragUntilVisible(
-      find.text('Another defect this hour').first,
+      find.text('Another defect').first,
       find.byType(SingleChildScrollView),
       const Offset(0, -200),
     );
-    await tester.tap(find.text('Another defect this hour').first);
+    await tester.tap(find.text('Another defect').first);
     await tester.pumpAndSettle();
     expect(find.text('Select type'), findsNWidgets(4));
 
@@ -866,7 +867,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Every hour carries its own downtime box, under that hour's defects.
-    expect(find.text('Downtime this hour'), findsNWidgets(3));
+    expect(find.text('Minutes stopped'), findsNWidgets(3));
 
     // Nothing saved yet, so fields run: Plan, then per hour
     // actual / defect qty / downtime.
@@ -1138,7 +1139,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Nothing is down yet, so nothing asks why.
-    expect(find.text('Downtime this hour'), findsNWidgets(3));
+    expect(find.text('Minutes stopped'), findsNWidgets(3));
     expect(find.text('Reason for the stop'), findsNothing);
 
     // Fields run Plan, then per checkpoint actual / defect qty / downtime.
@@ -1169,5 +1170,42 @@ void main() {
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: a phone-width card lays out without overflow', (
+    tester,
+  ) async {
+    // A 360x740 phone — the width the defect picker, its quantity and the
+    // remove button could not share, which is why the line stacks below
+    // _SlotBlock._narrowRow.
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // A RenderFlex overflow is reported as an exception, so this is the
+    // assertion: at phone width nothing is squeezed off its line.
+    expect(tester.takeException(), isNull);
+
+    // Each checkpoint is its own card, with the three areas labelled inside.
+    expect(find.text('REJECTIONS'), findsNWidgets(3));
+    expect(find.text('DOWNTIME'), findsNWidgets(3));
+    expect(find.text('Actual'), findsNWidgets(3));
+
+    // The defect picker still gets a readable width instead of collapsing.
+    final picker = tester.getSize(find.byType(InputDecorator).first);
+    expect(picker.width, greaterThan(220));
   });
 }

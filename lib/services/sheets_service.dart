@@ -517,11 +517,16 @@ class SheetsService {
 
   /// The full set of groups (DCM/Station/Customer), their parts, and (for
   /// Machining) the global operation list — used by the manage/settings screens.
-  Future<ConfigSnapshot> fetchConfig(String module) async {
+  ///
+  /// [operation] scopes the part lists for Machining, whose parts belong to
+  /// one operation or the other. Left off, the two lists come back merged —
+  /// which means every part twice, since each now has a row per operation.
+  Future<ConfigSnapshot> fetchConfig(String module, {String? operation}) async {
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'config',
       'UserEmail': ?currentUserEmail,
       'module': module,
+      'operation': ?operation,
     });
     if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
       return ConfigSnapshot.fromJson(

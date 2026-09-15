@@ -282,14 +282,14 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'SHIFT-4H-v22';
+var BACKEND_VERSION = 'SHIFT-4H-v23';
 
 function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : null;
     var module = e && e.parameter ? e.parameter.module : null;
 
-    if (action === 'config') return jsonResponse(getConfigSnapshot(module));
+    if (action === 'config') return jsonResponse(getConfigSnapshot(module, e.parameter.operation));
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
     if (action === 'partcodes') return jsonResponse(getPartMaster(module));
     if (action === 'rejectiontypes') return jsonResponse(getRejectionTypes());
@@ -1840,12 +1840,16 @@ function getConfigOperations() {
   return operations.length ? operations : MACHINING_OPERATIONS.slice();
 }
 
-function getConfigSnapshot(module) {
+function getConfigSnapshot(module, operation) {
   module = String(module || 'casting').toLowerCase();
   var groups = getConfigGroups(module);
   var partsByGroup = {};
+  // Machining keeps one part row per operation, so without scoping this every
+  // part comes back twice. Absent an operation the caller wants both lists
+  // merged, which is what a blank operation means to partRowMatchesOperation.
+  operation = module === 'machining' ? String(operation || '').trim() : '';
   groups.forEach(function (g) {
-    partsByGroup[g] = getConfigParts(module, g);
+    partsByGroup[g] = getConfigParts(module, g, operation);
   });
   var result = { groups: groups, partsByGroup: partsByGroup };
   if (module === 'machining') result.operations = getConfigOperations();
@@ -2168,7 +2172,12 @@ function configMutate(payload) {
         String(r.Group || '') === group && String(r.Value || '') === value;
     });
     if (dup) return { status: 'error', message: 'Already exists' };
-    sheet.appendRow([module, kind, group, value]);
+    // By header name, not position: a positional append stops at column D and
+    // leaves Operation blank, which puts a machining part in both lists.
+    writeConfigRow(sheet, {
+      Module: module, Kind: kind, Group: group, Value: value,
+      Operation: kind === 'part' ? operation : '',
+    });
     return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
   }
 
@@ -2234,7 +2243,8 @@ function configMutate(payload) {
     }
     var partRow = rows.find(function (r) {
       return String(r.Module).toLowerCase() === module && r.Kind === kind &&
-        String(r.Group || '') === group && String(r.Value || '') === value;
+        String(r.Group || '') === group && String(r.Value || '') === value &&
+        (kind !== 'part' || partRowMatchesOperation(r, operation));
     });
     if (!partRow) return { status: 'error', message: 'Not found' };
     sheet.getRange(partRow._rowNum, valueCol).setValue(newValue);

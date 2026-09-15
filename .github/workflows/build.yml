@@ -1,15 +1,20 @@
-name: Build Android APK
+name: Build
 
-# Builds a release-signed (debug key) APK on every push to main, and on
-# demand from the Actions tab. The finished APK is uploaded as a downloadable
-# artifact — grab it from the run's "Artifacts" section to sideload and test.
+# Builds both things people actually install from: a release-signed (debug key)
+# APK, and the web bundle behind hicom-ops.web.app. Runs on every push to main
+# and on demand from the Actions tab.
+#
+# The web build used to be missing here entirely, which is how the hosted site
+# came to be several releases behind the APK without anything going red. It is
+# built on every run now, so a web-only break fails the run, and deployed
+# straight to Hosting once a service-account secret exists.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,3 +51,41 @@ jobs:
           name: hicom-ops-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+
+      - name: Build web
+        run: flutter build web --release
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hicom-ops-web
+          path: build/web
+          if-no-files-found: error
+
+      # Read through an env var rather than interpolated into the script, and
+      # only its emptiness is ever echoed.
+      - name: Check for a Hosting deploy key
+        id: deploykey
+        env:
+          KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No FIREBASE_SERVICE_ACCOUNT secret set — skipping the Hosting deploy. The web bundle is still attached to this run as an artifact."
+          fi
+
+      # Skipped, not failed, while the secret is missing: a green run that says
+      # "not deployed" is honest, whereas a red one on every push trains people
+      # to ignore it.
+      - name: Deploy to Firebase Hosting
+        if: >
+          steps.deploykey.outputs.configured == 'true' &&
+          github.ref == 'refs/heads/main'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: hicom-ops

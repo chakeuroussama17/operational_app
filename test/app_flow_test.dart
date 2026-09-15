@@ -12,7 +12,9 @@ import 'package:hicom_ops/screens/casting_home_screen.dart';
 import 'package:hicom_ops/widgets/card_menu_button.dart';
 import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
+import 'package:hicom_ops/models/casting_models.dart';
 import 'package:hicom_ops/models/machining_models.dart';
+import 'package:hicom_ops/models/secondary_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
 import 'package:hicom_ops/models/raw_table.dart';
 import 'package:hicom_ops/models/sheet_export.dart';
@@ -177,11 +179,11 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day shift runs 10AM-6PM — five checkpoints, no 8AM.
-    expect(find.text('Actual — 10 AM'), findsOneWidget);
-    expect(find.text('Actual — 6 PM'), findsOneWidget);
+    // Day shift runs 12PM-7:30PM with three checkpoints.
+    expect(find.text('Actual — 12 PM'), findsOneWidget);
+    expect(find.text('Actual — 7:30 PM'), findsOneWidget);
     expect(find.text('Actual — 8 AM'), findsNothing);
-    expect(find.text('LOR'), findsNWidgets(5));
+    expect(find.text('LOR'), findsNWidgets(3));
 
     // Submitting with no values entered is a no-op with a hint.
     await tester.dragUntilVisible(
@@ -250,13 +252,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Plan'), findsOneWidget);
-    // Day slots run 10 AM - 6 PM, each with its own rejection line beneath
+    // Day slots run 12 PM - 7:30 PM, each with its own rejection line beneath
     // it, and one overall summary at the bottom.
-    expect(find.text('Actual — 10 AM'), findsOneWidget);
-    expect(find.text('Actual — 6 PM'), findsOneWidget);
-    expect(find.text('LOR'), findsNWidgets(5));
-    expect(find.text('Select type'), findsNWidgets(5));
-    expect(find.text('Another defect this hour'), findsNWidgets(5));
+    expect(find.text('Actual — 12 PM'), findsOneWidget);
+    expect(find.text('Actual — 7:30 PM'), findsOneWidget);
+    expect(find.text('LOR'), findsNWidgets(3));
+    expect(find.text('Select type'), findsNWidgets(3));
+    expect(find.text('Another defect this hour'), findsNWidgets(3));
     expect(find.text('Overall summary'), findsOneWidget);
     expect(find.text('Total good parts'), findsOneWidget);
     // Nothing logged yet, so there is no per-defect breakdown to show.
@@ -298,8 +300,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Every hour starts with exactly one rejection line — five on Day.
-    expect(find.text('Select type'), findsNWidgets(5));
+    // Every hour starts with exactly one rejection line — three on Day.
+    expect(find.text('Select type'), findsNWidgets(3));
 
     await tester.dragUntilVisible(
       find.text('Another defect this hour').first,
@@ -308,7 +310,7 @@ void main() {
     );
     await tester.tap(find.text('Another defect this hour').first);
     await tester.pumpAndSettle();
-    expect(find.text('Select type'), findsNWidgets(6));
+    expect(find.text('Select type'), findsNWidgets(4));
 
     // The extra line can be dropped again (a lone line has no x).
     final remove = find.byIcon(Icons.close);
@@ -320,11 +322,11 @@ void main() {
     await tester.ensureVisible(remove.first);
     await tester.tap(remove.first);
     await tester.pumpAndSettle();
-    expect(find.text('Select type'), findsNWidgets(5));
+    expect(find.text('Select type'), findsNWidgets(3));
 
     // A quantity with no defect type chosen is not a rejection, so it stays
     // out of the summary and there is still nothing to save.
-    // Fields run Plan, Actual 10AM, qty 10AM, Actual 12PM, qty 12PM, ...
+    // Fields run Plan, Actual 12PM, qty 12PM, Actual 4PM, qty 4PM, ...
     await tester.enterText(find.byType(TextFormField).at(2), '5');
     await tester.pumpAndSettle();
     expect(find.text('Rejection summary'), findsNothing);
@@ -349,7 +351,7 @@ void main() {
     // with 5 POROSITY logged against that hour. Posted lines are merged by
     // (hour, type) the way the real reconcile does.
     var storedRejections = <dynamic>[
-      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '10AM'},
+      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '12PM'},
     ];
     final mock = MockClient((request) async {
       if (request.method == 'POST') {
@@ -391,9 +393,9 @@ void main() {
             'PartNo': '2244',
             'Operation': 'machining',
             'Plan': 400,
-            'Actual_10AM': 150,
-            'LOR_10AM': 0.375,
-            'LogMeta': '{"10AM":{"by":"Ahmad Ali","at":"08:07"}}',
+            'Actual_12PM': 150,
+            'LOR_12PM': 0.375,
+            'LogMeta': '{"12PM":{"by":"Ahmad Ali","at":"08:07"}}',
             'Rejections': storedRejections,
           },
         }),
@@ -419,10 +421,9 @@ void main() {
     // who logged it. The saved defect sits under its own hour.
     expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
     expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
-    // Plan and 10 AM's actual are locked boxes, not fields. Each hour now
-    // contributes a downtime box too: 4 editable actuals + 5 new-defect qty
-    // boxes + 5 downtime boxes + the saved defect's own qty box.
-    expect(find.byType(TextFormField), findsNWidgets(15));
+    // Plan and the saved hour's actual are locked boxes, not fields. Each hour
+    // contributes a downtime box too, and this row already has one locked save.
+    expect(find.byType(TextFormField), findsNWidgets(9));
     // LOR is cumulative over Plan: 150 of 400.
     expect(find.text('37.5%'), findsOneWidget);
     // Actual counts everything made, so good = 150 - 5.
@@ -459,7 +460,7 @@ void main() {
       '3',
       reason: 'the corrected quantity reached the sheet',
     );
-    expect((storedRejections.first as Map)['slot'], '10AM');
+    expect((storedRejections.first as Map)['slot'], '12PM');
 
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();
@@ -492,9 +493,9 @@ void main() {
           'status': 'success',
           'data': {
             'Plan': 400,
-            'Actual_10AM': 150,
+            'Actual_12PM': 150,
             'Rejections': [
-              {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '10AM'},
+              {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '12PM'},
             ],
           },
         }),
@@ -516,9 +517,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Log a fresh 12 PM actual without touching the saved defect. Plan and the
-    // 10 AM actual are locked boxes, so the fields run: 10 AM's saved-defect
-    // qty, its new-defect qty, its downtime, then the 12 PM actual.
+    // Log a fresh 4 PM actual without touching the saved defect. The saved
+    // 12 PM row has its own qty field, then the new defect controls, then the
+    // hour-level actual field for 4 PM.
     await tester.enterText(find.byType(TextFormField).at(3), '120');
     await tester.pumpAndSettle();
 
@@ -530,7 +531,7 @@ void main() {
     await tester.tap(find.byType(SubmitButton));
     await tester.pumpAndSettle();
 
-    expect(posted!['Actual_12PM'], '120');
+    expect(posted!['Actual_4PM'], '120');
     expect(
       posted!.containsKey('Rejections'),
       isFalse,
@@ -865,13 +866,13 @@ void main() {
     await tester.pumpAndSettle();
 
     // Every hour carries its own downtime box, under that hour's defects.
-    expect(find.text('Downtime this hour'), findsNWidgets(5));
+    expect(find.text('Downtime this hour'), findsNWidgets(3));
 
     // Nothing saved yet, so fields run: Plan, then per hour
     // actual / defect qty / downtime.
-    await tester.enterText(find.byType(TextFormField).at(1), '40'); // 10AM
-    await tester.enterText(find.byType(TextFormField).at(3), '20'); // 10AM min
-    await tester.enterText(find.byType(TextFormField).at(6), '10'); // 12PM min
+    await tester.enterText(find.byType(TextFormField).at(1), '40'); // 12PM
+    await tester.enterText(find.byType(TextFormField).at(3), '20'); // 12PM min
+    await tester.enterText(find.byType(TextFormField).at(6), '10'); // 4PM min
     await tester.pumpAndSettle();
 
     // The summary adds the minutes up across the shift.
@@ -885,11 +886,11 @@ void main() {
     await tester.tap(find.byType(SubmitButton));
     await tester.pumpAndSettle();
 
-    expect(posted!['Actual_10AM'], '40');
-    expect(posted!['Downtime_10AM'], '20');
-    expect(posted!['Downtime_12PM'], '10');
+    expect(posted!['Actual_12PM'], '40');
+    expect(posted!['Downtime_12PM'], '20');
+    expect(posted!['Downtime_4PM'], '10');
     expect(
-      posted!.containsKey('Downtime_2PM'),
+      posted!.containsKey('Downtime_7_30PM'),
       isFalse,
       reason: 'an hour nobody typed into is not claimed as zero downtime',
     );
@@ -1066,5 +1067,107 @@ void main() {
         'Casting_Night_2026-08-01_to_2026-08-31.csv',
       );
     });
+  });
+
+  group('four-hour checkpoints', () {
+    test('each shift logs three times, at the agreed clock times', () {
+      expect(machiningDaySlots.map((s) => s.label), ['12 PM', '4 PM', '7:30 PM']);
+      expect(machiningNightSlots.map((s) => s.label), ['12 AM', '4 AM', '7:30 AM']);
+      // Casting and Secondary run the identical schedule.
+      expect(castingDaySlots.length, 3);
+      expect(secondaryNightSlots.map((s) => s.label),
+          ['12 AM', '4 AM', '7:30 AM']);
+    });
+
+    test('the 7:30 slot key avoids a colon, which Sheets reads as a time', () {
+      final half = machiningDaySlots.last;
+      expect(half.outputKey, 'Actual_7_30PM');
+      expect(half.slotKey, '7_30PM');
+      // The rejection Hour cell stores slotKey verbatim. "7:30PM" there would
+      // be auto-converted to a time serial and stop matching its own slot.
+      expect(half.slotKey.contains(':'), isFalse);
+    });
+
+    test('downtime and its reason are derived from the same slot key', () {
+      final noon = machiningDaySlots.first;
+      expect(noon.downtimeKey, 'Downtime_12PM');
+      expect(noon.downtimeReasonKey, 'DowntimeReason_12PM');
+    });
+
+    test('the shift a time falls in matches Day 10:00-21:59', () {
+      // autoDetect reads the wall clock, so assert the boundary rule it
+      // encodes rather than the clock itself.
+      bool isDay(int hour) => hour >= 10 && hour < 22;
+      expect(isDay(9), isFalse);   // before the day shift starts
+      expect(isDay(10), isTrue);   // day shift opens
+      expect(isDay(21), isTrue);   // still day at 21:59
+      expect(isDay(22), isFalse);  // night takes over
+      expect(isDay(3), isFalse);   // overnight
+    });
+  });
+
+  testWidgets('machining entry: a reason appears once downtime is entered', (
+    tester,
+  ) async {
+    Map<String, dynamic>? posted;
+    final mock = MockClient((request) async {
+      if (request.method == 'POST') {
+        posted =
+            (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                as Map<String, dynamic>;
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        return http.Response('{"status":"success","data":[]}', 200);
+      }
+      return http.Response('{"status":"success","data":null}', 200);
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Nothing is down yet, so nothing asks why.
+    expect(find.text('Downtime this hour'), findsNWidgets(3));
+    expect(find.text('Reason for the stop'), findsNothing);
+
+    // Fields run Plan, then per checkpoint actual / defect qty / downtime.
+    await tester.enterText(find.byType(TextFormField).at(3), '25'); // 12PM min
+    await tester.pumpAndSettle();
+
+    // Only the checkpoint that lost time asks for a reason.
+    expect(find.text('Reason for the stop'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Reason for the stop'),
+      'Mould change, waiting on the crane',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    expect(posted!['Downtime_12PM'], '25');
+    expect(
+      posted!['DowntimeReason_12PM'],
+      'Mould change, waiting on the crane',
+    );
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
   });
 }

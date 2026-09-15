@@ -568,6 +568,7 @@ void main() {
       await service.addMachiningPart(
         customer: 'Mazda',
         part: '9',
+        operation: 'assembly',
         mo: 'MACH-09',
       );
 
@@ -576,6 +577,8 @@ void main() {
       expect(sent['group'], 'Mazda');
       expect(sent['part'], '9');
       expect(sent['mo'], 'MACH-09');
+      // Without this the part lands in both operations' lists.
+      expect(sent['operation'], 'assembly');
     });
 
     test('editMachiningPart: omits mo when left unset', () async {
@@ -591,10 +594,12 @@ void main() {
         customer: 'Mazda',
         part: '1',
         newPart: '1',
+        operation: 'machining',
       );
 
       expect(sent['op'], 'machiningEditPart');
       expect(sent['newPart'], '1');
+      expect(sent['operation'], 'machining');
       expect(sent.containsKey('mo'), isFalse);
     });
 
@@ -950,7 +955,11 @@ void main() {
       );
 
       SheetsService.currentUserEmail = 'ahmad@hidsb.com';
-      await service.addMachiningPart(customer: 'Mazda', part: '9');
+      await service.addMachiningPart(
+        customer: 'Mazda',
+        part: '9',
+        operation: 'machining',
+      );
 
       expect(
         sent['UserEmail'],

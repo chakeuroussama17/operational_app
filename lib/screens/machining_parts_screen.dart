@@ -120,6 +120,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       () => _sheetsService.addMachiningPart(
         customer: widget.customer,
         part: input.name,
+        operation: widget.operation.value,
         mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
@@ -142,6 +143,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         customer: widget.customer,
         part: part.part,
         newPart: input.name,
+        operation: widget.operation.value,
         mo: input.mo,
       ),
     );
@@ -198,6 +200,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         kind: 'part',
         group: widget.customer,
         value: part.part,
+        // Scoped, or deleting from machining takes it out of assembly too.
+        operation: widget.operation.value,
       ),
     );
   }

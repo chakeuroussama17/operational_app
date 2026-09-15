@@ -217,7 +217,7 @@ Widget _body() {
 }
 
 /// Day/Night selector — Secondary runs the same real shift schedule as
-/// Casting (Day 8AM-6PM, Night 8PM-6AM crossing midnight), not calendar
+/// Casting (Day 10AM-8PM, Night 10PM-8AM crossing midnight), not calendar
 /// midnight. Everything below this screen operates within the selected shift.
 class _ShiftToggle extends StatelessWidget {
   const _ShiftToggle({required this.shift, required this.onChanged});

@@ -1,6 +1,6 @@
 /// Data types for the Casting module's incremental logging API.
 ///
-/// Casting is shift-aware (Day 10AM-6PM / Night 8PM-6AM, crossing midnight) —
+/// Casting is shift-aware (Day 10AM-8PM / Night 10PM-8AM, crossing midnight) —
 /// the only module with this schema; Secondary/Machining are unchanged. The
 /// backend exposes (all on the webhook URL):
 ///   GET  ?action=dashboard&shift=Z             -> [DcmStatus]
@@ -22,35 +22,27 @@ class CastingSlot {
   final String lorKey;
 }
 
-/// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM
-/// checkpoint — Night still opens at 8PM and keeps its six.
+/// Day shift: 10AM-8PM, logged every 4 hours.
 const List<CastingSlot> castingDaySlots = [
-  CastingSlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
   CastingSlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
-  CastingSlot('2 PM', 'Actual_2PM', 'LOR_2PM'),
   CastingSlot('4 PM', 'Actual_4PM', 'LOR_4PM'),
-  CastingSlot('6 PM', 'Actual_6PM', 'LOR_6PM'),
+  CastingSlot('7:30 PM', 'Actual_7_30PM', 'LOR_7_30PM'),
 ];
 
-/// Night shift: 8PM-6AM, crossing midnight.
+/// Night shift: 10PM-8AM, logged every 4 hours.
 const List<CastingSlot> castingNightSlots = [
-  CastingSlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
-  CastingSlot('10 PM', 'Actual_10PM', 'LOR_10PM'),
   CastingSlot('12 AM', 'Actual_12AM', 'LOR_12AM'),
-  CastingSlot('2 AM', 'Actual_2AM', 'LOR_2AM'),
   CastingSlot('4 AM', 'Actual_4AM', 'LOR_4AM'),
-  CastingSlot('6 AM', 'Actual_6AM', 'LOR_6AM'),
+  CastingSlot('7:30 AM', 'Actual_7_30AM', 'LOR_7_30AM'),
 ];
 
 List<CastingSlot> castingSlotsForShift(String shift) =>
     shift == 'Night' ? castingNightSlots : castingDaySlots;
 
-/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
-/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
-/// override it (e.g. logging a late entry after shift changeover).
+/// Day runs from 10:00 through 21:59; Night takes over at 22:00.
 String autoDetectCastingShift() {
   final hour = DateTime.now().hour;
-  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+  return (hour >= 10 && hour < 22) ? 'Day' : 'Night';
 }
 
 /// Dashboard card: one DCM machine and when it was last logged this shift.
@@ -85,7 +77,7 @@ class PartStatus {
   final String? name;
   final String? lastUpdated;
 
-  /// 0-100: how many of this shift's six time slots are filled today.
+  /// 0-100: how many of this shift's three checkpoints are filled today.
   final int fillPercent;
 
   factory PartStatus.fromJson(Map<String, dynamic> json) {

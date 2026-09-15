@@ -215,8 +215,8 @@ Widget _body() {
   }
 }
 
-/// Day/Night selector — Casting's real shift schedule (Day 8AM-6PM, Night
-/// 8PM-6AM crossing midnight), not calendar midnight. Everything below this
+/// Day/Night selector — Casting's real shift schedule (Day 10AM-8PM, Night
+/// 10PM-8AM crossing midnight), not calendar midnight. Everything below this
 /// screen (parts, entry form) operates within whichever shift is selected.
 class _ShiftToggle extends StatelessWidget {
   const _ShiftToggle({required this.shift, required this.onChanged});

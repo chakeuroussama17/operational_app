@@ -64,6 +64,13 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final slot in _slots) slot.downtimeKey: TextEditingController(),
   };
 
+  /// Why the machine stopped, in the operator's own words. Free text and
+  /// never locked, for the same reason the minutes aren't: a stoppage is
+  /// often still being understood when the checkpoint passes.
+  late final Map<String, TextEditingController> _reasonControllers = {
+    for (final slot in _slots) slot.downtimeReasonKey: TextEditingController(),
+  };
+
   /// Backend-computed LOR% labels, keyed by lorKey. Only a fallback: with a
   /// Plan on the row the badge shows a live cumulative figure instead, so a
   /// pending correction is visible before it is saved.
@@ -131,6 +138,9 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       controller.dispose();
     }
     for (final controller in _downtimeControllers.values) {
+      controller.dispose();
+    }
+    for (final controller in _reasonControllers.values) {
       controller.dispose();
     }
     _disposeRejectionRows();
@@ -327,6 +337,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           }
           _downtimeControllers[slot.downtimeKey]!.text =
               row?.value(slot.downtimeKey) ?? '';
+          _reasonControllers[slot.downtimeReasonKey]!.text =
+              row?.value(slot.downtimeReasonKey) ?? '';
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
         _logMeta = _parseLogMeta(row?.raw['LogMeta']);
@@ -382,6 +394,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final slot in _slots) ...{
       slot.outputKey: _outputControllers[slot.outputKey]!.text.trim(),
       slot.downtimeKey: _downtimeControllers[slot.downtimeKey]!.text.trim(),
+      slot.downtimeReasonKey: _reasonControllers[slot.downtimeReasonKey]!.text
+          .trim(),
     },
   };
 
@@ -498,83 +512,84 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           'Machining — ${widget.operation.label} · ${widget.customer} · '
           'Part ${widget.part} · ${widget.shift} shift',
       child: _loading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppColors.steelBlue),
-              )
-            : Form(
-                key: _formKey,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(AppDimens.screenPadding),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _ContextHeader(
-                        customer: widget.customer,
-                        part: widget.part,
-                        operation: widget.operation,
-                        shift: widget.shift,
-                        mo: widget.mo,
-                      ),
-                      if (_loadError != null) ...[
-                        const SizedBox(height: 14),
-                        _LoadErrorBanner(message: _loadError!, onRetry: _load),
-                      ],
-                      const SizedBox(height: AppDimens.fieldSpacing),
-                      if (_planLocked)
-                        _LockedField(label: 'Plan', value: _planController.text)
-                      else
-                        AppNumberField(
-                          label: 'Plan',
-                          controller: _planController,
-                          required: false,
-                          onChanged: (_) => setState(() {}),
-                        ),
-                      for (final slot in _slots) ...[
-                        const SizedBox(height: AppDimens.fieldSpacing),
-                        _SlotBlock(
-                          slot: slot,
-                          outputController: _outputControllers[slot.outputKey]!,
-                          downtimeController:
-                              _downtimeControllers[slot.downtimeKey]!,
-                          lorLabel: _lorLabel(slot),
-                          locked: _lockedOutputs.contains(slot.outputKey),
-                          stamp: _logMeta[slot.slotKey] as Map?,
-                          saved:
-                              _savedRows[slot.outputKey] ??
-                              const <_SavedRejection>[],
-                          rows: _slotRows[slot.outputKey]!,
-                          onPickType: _pickType,
-                          onQtyChanged: () => setState(() {}),
-                          onDowntimeChanged: () => setState(() {}),
-                          onAddRow: () => setState(
-                            () =>
-                                _slotRows[slot.outputKey]!.add(_RejectionRow()),
-                          ),
-                          onRemoveRow: (row) => setState(() {
-                            _slotRows[slot.outputKey]!.remove(row);
-                            row.dispose();
-                          }),
-                        ),
-                      ],
-                      const SizedBox(height: 26),
-                      _OverallSummary(
-                        actualTotal: _actualTotal,
-                        rejectedTotal: _rejectedTotal,
-                        downtimeTotal: _downtimeTotal,
-                        plan: double.tryParse(_planController.text.trim()),
-                        entries: _rejectionSummary,
-                      ),
-                      const SizedBox(height: 28),
-                      SubmitButton(
-                        onPressed: _submit,
-                        busy: _submitting,
-                        label: 'SAVE LOG',
-                      ),
-                      const SizedBox(height: 24),
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.steelBlue),
+            )
+          : Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppDimens.screenPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _ContextHeader(
+                      customer: widget.customer,
+                      part: widget.part,
+                      operation: widget.operation,
+                      shift: widget.shift,
+                      mo: widget.mo,
+                    ),
+                    if (_loadError != null) ...[
+                      const SizedBox(height: 14),
+                      _LoadErrorBanner(message: _loadError!, onRetry: _load),
                     ],
-                  ),
+                    const SizedBox(height: AppDimens.fieldSpacing),
+                    if (_planLocked)
+                      _LockedField(label: 'Plan', value: _planController.text)
+                    else
+                      AppNumberField(
+                        label: 'Plan',
+                        controller: _planController,
+                        required: false,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    for (final slot in _slots) ...[
+                      const SizedBox(height: AppDimens.fieldSpacing),
+                      _SlotBlock(
+                        slot: slot,
+                        outputController: _outputControllers[slot.outputKey]!,
+                        downtimeController:
+                            _downtimeControllers[slot.downtimeKey]!,
+                        reasonController:
+                            _reasonControllers[slot.downtimeReasonKey]!,
+                        lorLabel: _lorLabel(slot),
+                        locked: _lockedOutputs.contains(slot.outputKey),
+                        stamp: _logMeta[slot.slotKey] as Map?,
+                        saved:
+                            _savedRows[slot.outputKey] ??
+                            const <_SavedRejection>[],
+                        rows: _slotRows[slot.outputKey]!,
+                        onPickType: _pickType,
+                        onQtyChanged: () => setState(() {}),
+                        onDowntimeChanged: () => setState(() {}),
+                        onAddRow: () => setState(
+                          () => _slotRows[slot.outputKey]!.add(_RejectionRow()),
+                        ),
+                        onRemoveRow: (row) => setState(() {
+                          _slotRows[slot.outputKey]!.remove(row);
+                          row.dispose();
+                        }),
+                      ),
+                    ],
+                    const SizedBox(height: 26),
+                    _OverallSummary(
+                      actualTotal: _actualTotal,
+                      rejectedTotal: _rejectedTotal,
+                      downtimeTotal: _downtimeTotal,
+                      plan: double.tryParse(_planController.text.trim()),
+                      entries: _rejectionSummary,
+                    ),
+                    const SizedBox(height: 28),
+                    SubmitButton(
+                      onPressed: _submit,
+                      busy: _submitting,
+                      label: 'SAVE LOG',
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
               ),
+            ),
     );
   }
 }
@@ -732,6 +747,7 @@ class _SlotBlock extends StatelessWidget {
     required this.slot,
     required this.outputController,
     required this.downtimeController,
+    required this.reasonController,
     required this.lorLabel,
     required this.locked,
     required this.stamp,
@@ -747,6 +763,7 @@ class _SlotBlock extends StatelessWidget {
   final MachiningSlot slot;
   final TextEditingController outputController;
   final TextEditingController downtimeController;
+  final TextEditingController reasonController;
   final String? lorLabel;
 
   /// True when this hour's output is already saved to the sheet.
@@ -927,47 +944,90 @@ class _SlotBlock extends StatelessWidget {
   Widget _downtimeRow() {
     return Padding(
       padding: const EdgeInsets.only(top: 4, bottom: 2),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(
-            Icons.timer_off_outlined,
-            size: 18,
-            color: AppColors.textSecondary,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Downtime this hour',
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Icon(
+                Icons.timer_off_outlined,
+                size: 18,
                 color: AppColors.textSecondary,
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Downtime this hour',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 110,
+                child: TextFormField(
+                  controller: downtimeController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  textAlign: TextAlign.end,
+                  onChanged: (_) => onDowntimeChanged(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '0',
+                    // Named in the box, so the sheet's "20min" needs no
+                    // explaining.
+                    suffixText: 'min',
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          SizedBox(
-            width: 110,
-            child: TextFormField(
-              controller: downtimeController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              textAlign: TextAlign.end,
+          // The reason appears only once minutes have been entered. Asking
+          // "why did it stop?" beside a blank box is noise on the hours
+          // nothing went wrong, and there are three of these on the form.
+          if (downtimeController.text.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: reasonController,
+              textCapitalization: TextCapitalization.sentences,
+              // Free text, and as long as they like: a stoppage explanation
+              // is the one field nobody can give a dropdown for.
+              maxLines: null,
+              minLines: 1,
+              keyboardType: TextInputType.multiline,
               onChanged: (_) => onDowntimeChanged(),
               decoration: InputDecoration(
                 isDense: true,
-                hintText: '0',
-                // Named in the box, so the sheet's "20min" needs no explaining.
-                suffixText: 'min',
+                labelText: 'Reason for the stop',
+                hintText: 'e.g. mould change, no operator, tool broken',
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                ),
+                prefixIcon: Icon(
+                  Icons.edit_note_rounded,
+                  size: 20,
+                  color: AppColors.textSecondary,
+                ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
-                  vertical: 10,
+                  vertical: 12,
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -1160,8 +1220,9 @@ class _OverallSummary extends StatelessWidget {
     final good = actualTotal - rejectedTotal;
     final sorted = [...entries]
       ..sort(
-        (a, b) =>
-            (double.tryParse(b.qty) ?? 0).compareTo(double.tryParse(a.qty) ?? 0),
+        (a, b) => (double.tryParse(b.qty) ?? 0).compareTo(
+          double.tryParse(a.qty) ?? 0,
+        ),
       );
 
     return Container(
@@ -1176,11 +1237,7 @@ class _OverallSummary extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.summarize_outlined,
-                size: 20,
-                color: AppColors.navy,
-              ),
+              Icon(Icons.summarize_outlined, size: 20, color: AppColors.navy),
               const SizedBox(width: 8),
               Text(
                 'Overall summary',

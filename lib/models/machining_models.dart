@@ -2,7 +2,7 @@
 ///
 /// One level deeper than Casting/Secondary: Operation -> Customer -> Part ->
 /// entry (keyed by Customer + PartNo + Operation + shift-date). Shift-aware
-/// like the others (Day 10AM-6PM / Night 8PM-6AM crossing midnight), MO number
+/// like the others (Day 10AM-8PM / Night 10PM-8AM crossing midnight), MO number
 /// per part.
 ///
 /// Rejections are NOT per slot — they're a typed list for the whole entry
@@ -13,7 +13,7 @@ library;
 import 'part_code.dart';
 import 'rejection.dart';
 
-/// One checkpoint of a shift — five on Day, six on Night.
+/// One checkpoint of a shift — three of them, one every four hours.
 class MachiningSlot {
   const MachiningSlot(this.label, this.outputKey, this.lorKey);
 
@@ -34,37 +34,33 @@ class MachiningSlot {
   /// "Downtime_10AM". Derived from [slotKey] rather than stored, so a slot
   /// can never be declared with the two out of step.
   String get downtimeKey => 'Downtime_$slotKey';
+
+  /// Column/field name of the free-text reason for that stop, e.g.
+  /// "DowntimeReason_12PM". Minutes say how long; only this says why.
+  String get downtimeReasonKey => 'DowntimeReason_$slotKey';
 }
 
-/// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM
-/// checkpoint — Night still opens at 8PM and keeps its six.
+/// Day shift: 10AM-8PM, logged every 4 hours.
 const List<MachiningSlot> machiningDaySlots = [
-  MachiningSlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
   MachiningSlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
-  MachiningSlot('2 PM', 'Actual_2PM', 'LOR_2PM'),
   MachiningSlot('4 PM', 'Actual_4PM', 'LOR_4PM'),
-  MachiningSlot('6 PM', 'Actual_6PM', 'LOR_6PM'),
+  MachiningSlot('7:30 PM', 'Actual_7_30PM', 'LOR_7_30PM'),
 ];
 
-/// Night shift: 8PM-6AM, crossing midnight.
+/// Night shift: 10PM-8AM, logged every 4 hours.
 const List<MachiningSlot> machiningNightSlots = [
-  MachiningSlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
-  MachiningSlot('10 PM', 'Actual_10PM', 'LOR_10PM'),
   MachiningSlot('12 AM', 'Actual_12AM', 'LOR_12AM'),
-  MachiningSlot('2 AM', 'Actual_2AM', 'LOR_2AM'),
   MachiningSlot('4 AM', 'Actual_4AM', 'LOR_4AM'),
-  MachiningSlot('6 AM', 'Actual_6AM', 'LOR_6AM'),
+  MachiningSlot('7:30 AM', 'Actual_7_30AM', 'LOR_7_30AM'),
 ];
 
 List<MachiningSlot> machiningSlotsForShift(String shift) =>
     shift == 'Night' ? machiningNightSlots : machiningDaySlots;
 
-/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
-/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
-/// override it (e.g. logging a late entry after shift changeover).
+/// Day runs from 10:00 through 21:59; Night takes over at 22:00.
 String autoDetectMachiningShift() {
   final hour = DateTime.now().hour;
-  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+  return (hour >= 10 && hour < 22) ? 'Day' : 'Night';
 }
 
 /// Which operation a log belongs to — the first thing the module asks for,
@@ -180,7 +176,7 @@ class MachiningPartStatus {
   final String? name;
   final String? lastUpdated;
 
-  /// 0-100: how many of the six time slots are filled this shift.
+  /// 0-100: how many of the three checkpoints are filled this shift.
   final int fillPercent;
 
   factory MachiningPartStatus.fromJson(Map<String, dynamic> json) {

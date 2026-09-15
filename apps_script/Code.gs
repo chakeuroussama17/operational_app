@@ -2,8 +2,8 @@
  * HICOM Production Log — Apps Script reference.
  *
  * Unified incremental upsert backend for Casting, Secondary, and Machining.
- * ALL THREE now run the same real 2-shift schedule (Day 10AM-6PM, Night
- * 8PM-6AM crossing midnight), each split into two per-shift sheet tabs with
+ * ALL THREE now run the same real 2-shift schedule (Day 10AM-8PM, Night
+ * 10PM-8AM crossing midnight), each split into two per-shift sheet tabs with
  * no Shift column, keyed by their selectors + shift-date (see getShiftDate).
  * Casting/Secondary key on (DCM|Station) + Part; Machining adds a third
  * selector, Operation, so it keys on Customer + Part + Operation. Parts in all
@@ -27,6 +27,12 @@
  *     Value blank. (Lets a group exist with zero parts yet.)
  *   - Kind = "part": one row per part under a group. Group = the parent
  *     DCM/Station/Customer name, Value = the part name.
+ *   Operation (machining part rows only): which operation the part belongs
+ *     to, "machining" or "assembly". Machining and assembly run the same
+ *     customers but not the same parts, so each keeps its own list and
+ *     deleting from one leaves the other alone. Blank on every other row,
+ *     and on machining part rows that predate the column — those count as
+ *     belonging to BOTH until splitMachiningPartsByOperation() is run.
  *   - Kind = "operation": Machining only, global (not per-part). Group blank,
  *     Value = "machining" or "assembly". Optional — the app ships the pair,
  *     and getConfigOperations() falls back to it when no rows exist.
@@ -42,19 +48,17 @@
  * the tab a row lives in IS its shift. Run setupCastingShiftSheets() once to
  * create both tabs. Keyed by DCM+PartNo+shift-date within each sheet):
  *
- *   Casting_Day (Day shift, checkpoints 10AM-6PM — five, not six):
+ *   Casting_Day (Day shift, checkpoints 12PM, 4PM, 7:30PM):
  *     Date | DCM | PartNo | MO | Plan |
- *     Actual_10AM | LOR_10AM | Actual_12PM | LOR_12PM |
- *     Actual_2PM  | LOR_2PM  | Actual_4PM  | LOR_4PM  |
- *     Actual_6PM  | LOR_6PM  | LastUpdated
+ *     Actual_12PM | LOR_12PM | Actual_4PM | LOR_4PM |
+ *     Actual_7_30PM | LOR_7_30PM | LastUpdated
  *
- *   Casting_Night (Night shift, checkpoints 8PM-6AM crossing midnight —
- *   post-midnight checkpoints file under the date the shift STARTED, see
- *   getShiftDate):
+ *   Casting_Night (Night shift, checkpoints 12AM, 4AM, 7:30AM crossing
+ *   midnight — post-midnight checkpoints file under the date the shift
+ *   STARTED, see getShiftDate):
  *     Date | DCM | PartNo | MO | Plan |
- *     Actual_8PM  | LOR_8PM  | Actual_10PM | LOR_10PM |
- *     Actual_12AM | LOR_12AM | Actual_2AM  | LOR_2AM  |
- *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
+ *     Actual_12AM | LOR_12AM | Actual_4AM | LOR_4AM |
+ *     Actual_7_30AM | LOR_7_30AM | LastUpdated
  *
  *   - MO = manufacturing order number, snapshotted from the part's Config
  *     MO onto the row once, at creation — never rewritten by later Config
@@ -65,32 +69,33 @@
  * shift-date, Actual_/LOR_ prefixes, MO number per part. Run
  * setupSecondaryShiftSheets() once):
  *
- *   Secondary_Day (Day shift, checkpoints 10AM-6PM):
+ *   Secondary_Day (Day shift, checkpoints 12PM, 4PM, 7:30PM):
  *     Date | Station | PartNo | MO | Plan |
- *     Actual_10AM | LOR_10AM | Actual_12PM | LOR_12PM |
- *     Actual_2PM  | LOR_2PM  | Actual_4PM  | LOR_4PM  |
- *     Actual_6PM  | LOR_6PM  | LastUpdated
+ *     Actual_12PM | LOR_12PM | Actual_4PM | LOR_4PM |
+ *     Actual_7_30PM | LOR_7_30PM | LastUpdated
  *
- *   Secondary_Night (Night shift, checkpoints 8PM-6AM crossing midnight):
+ *   Secondary_Night (Night shift, checkpoints 12AM, 4AM, 7:30AM crossing
+ *   midnight):
  *     Date | Station | PartNo | MO | Plan |
- *     Actual_8PM  | LOR_8PM  | Actual_10PM | LOR_10PM |
- *     Actual_12AM | LOR_12AM | Actual_2AM  | LOR_2AM  |
- *     Actual_4AM  | LOR_4AM  | Actual_6AM  | LOR_6AM  | LastUpdated
+ *     Actual_12AM | LOR_12AM | Actual_4AM | LOR_4AM |
+ *     Actual_7_30AM | LOR_7_30AM | LastUpdated
  *
  * Machining (shift-split like the others — two tabs, keyed Customer+PartNo+
  * Operation+shift-date, MO per part. Run setupMachiningShiftSheets() once):
  *
- *   Machining_Day (Day 10AM-6PM) / Machining_Night (8PM-6AM):
+ *   Machining_Day (Day 10AM-8PM) / Machining_Night (10PM-8AM):
  *     Date | Customer | PartNo | Operation | Barcode | PartName | MO | Plan |
- *     Actual_<slot> | LOR_<slot> | Downtime_<slot> (x5 Day / x6 Night) |
+ *     Actual_<slot> | LOR_<slot> | Downtime_<slot> |
+ *     DowntimeReason_<slot> (x3 Day / x3 Night) |
  *     ActualTotal | RejectionTotal | GoodTotal | RejectionSummary |
  *     DowntimeTotal | DowntimeSummary | LastUpdated
  *
  *   ActualTotal counts every part the shift produced; GoodTotal is that less
  *   RejectionTotal. Actual is NOT the good count (it was, up to v15).
- *   Downtime_<slot> is minutes lost in that hour, typed by the operator;
- *   DowntimeSummary reads "10AM 20min, 12PM 10min" and names only the hours
- *   actually recorded.
+ *   Downtime_<slot> is minutes lost at that checkpoint and
+ *   DowntimeReason_<slot> is why, in the operator's own words;
+ *   DowntimeSummary reads "12PM 20min (mould change), 4PM 10min" and names
+ *   only the checkpoints actually recorded.
  *
  *   Machining_Rejections — rejections are a typed LIST per entry, not one
  *   number per slot, so they live here, one row per defect type:
@@ -153,11 +158,10 @@ function moduleDepartment(module) {
 }
 
 // ALL THREE modules run the same real 2-shift schedule. Day checkpoints run
-// 10AM-6PM; Night checkpoints run 8PM-6AM (crossing midnight).
+// 10AM-8PM; Night checkpoints run 10PM-8AM (crossing midnight).
 //
-// Day has FIVE checkpoints, not six: production starts at 10AM, so the old 8AM
-// slot was always blank and is gone (v16). Night still starts at 8PM and keeps
-// its six.
+// Each shift now logs every 4 hours: Day = 12PM, 4PM, 7:30PM; Night = 12AM,
+// 4AM, 7:30AM.
 //
 // Each shift is its OWN sheet tab (Casting_Day/Casting_Night,
 // Secondary_Day/Secondary_Night, Machining_Day/Machining_Night) so every row
@@ -171,8 +175,8 @@ var SECONDARY_DAY_SHEET = 'Secondary_Day';
 var SECONDARY_NIGHT_SHEET = 'Secondary_Night';
 var MACHINING_DAY_SHEET = 'Machining_Day';
 var MACHINING_NIGHT_SHEET = 'Machining_Night';
-var DAY_SLOTS = ['10AM', '12PM', '2PM', '4PM', '6PM'];
-var NIGHT_SLOTS = ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'];
+var DAY_SLOTS = ['12PM', '4PM', '7_30PM'];
+var NIGHT_SLOTS = ['12AM', '4AM', '7_30AM'];
 // Back-compat aliases (Casting code referred to these names).
 var CASTING_DAY_SLOTS = DAY_SLOTS;
 var CASTING_NIGHT_SLOTS = NIGHT_SLOTS;
@@ -233,6 +237,9 @@ function machiningHeadersForShift(shift) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
     headers.push('Downtime_' + slot);
+    // Free text, typed by whoever logged the stop. Minutes say how long the
+    // machine was down; only this says why, which is the half you can act on.
+    headers.push('DowntimeReason_' + slot);
   });
   // Derived on every save — read these, never type them.
   headers.push('ActualTotal', 'RejectionTotal', 'GoodTotal', 'RejectionSummary',
@@ -255,20 +262,17 @@ function secondaryHeadersForShift(shift) {
 
 // Config's own frame: the part's identity (Value = code, Barcode, PartName)
 // grouped, with the monthly MO last since it's the one that gets edited.
-var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Barcode', 'PartName', 'MO'];
+var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'Barcode', 'PartName', 'MO'];
 
-// The "business date" a shift row belongs to. Day shift never crosses
-// midnight, so it's always today. Night shift starts in the evening and
-// runs past midnight — its early-morning checkpoints (12AM/2AM/4AM/6AM)
-// must still be filed under the date the shift STARTED (yesterday evening),
-// not the calendar day they happen to be typed in on. Shared by Casting and
-// Secondary (both run the same 2-shift schedule).
+// The "business date" a shift row belongs to. Day shift runs from 10AM to
+// 8PM; Night shift takes over at 10PM and continues through the overnight
+// hours. The overnight row stays on the date the shift started.
 function getShiftDate(shift) {
   var tz = Session.getScriptTimeZone();
   var now = new Date();
   if (shift === 'Night') {
     var hour = parseInt(Utilities.formatDate(now, tz, 'H'), 10);
-    if (hour < 8) {
+    if (hour < 10) {
       var yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       return Utilities.formatDate(yesterday, tz, 'yyyy-MM-dd');
     }
@@ -278,7 +282,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'RAWTAB-v20';
+var BACKEND_VERSION = 'SHIFT-4H-v22';
 
 function doGet(e) {
   try {
@@ -658,12 +662,19 @@ function upsertCastingRow(data) {
 // A part's snapshot attributes, read from its Config row: MO, plus the
 // Barcode (CSV "Part number") and PartName carried over from the master when
 // the part was added. Blank strings when the part or columns don't exist.
-function getConfigPartInfo(module, group, part) {
+function getConfigPartInfo(module, group, part, operation) {
   var rows = getConfigRows();
-  var match = rows.find(function (r) {
+  var candidates = rows.filter(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
-      String(r.Group) === group && String(r.Value) === part;
+      String(r.Group) === group && String(r.Value) === part &&
+      partRowMatchesOperation(r, operation);
   });
+  // Machining and assembly can carry different MOs for the same part, so an
+  // exact operation match wins over the legacy blank-Operation row that also
+  // matched.
+  var match = candidates.find(function (r) {
+    return String(r.Operation === undefined ? '' : r.Operation).trim() !== '';
+  }) || candidates[0];
   if (!match) return { mo: '', barcode: '', name: '' };
   return {
     mo: match.MO ? String(match.MO) : '',
@@ -809,19 +820,26 @@ function addPartWithMo(module, payload) {
   var group = String(payload.group || '');
   var part = String(payload.part || '').trim();   // the chosen Part CODE
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo) : '';
+  // Machining only; blank everywhere else.
+  var operation = module === 'machining'
+    ? String(payload.operation || '').trim() : '';
   if (!group || !part) return { status: 'error', message: 'group and part are required' };
 
   var sheet = getConfigSheet();
   var rows = getAllRowsAsObjects(sheet);
+  // Scoped: the same part code may legitimately exist under machining AND
+  // assembly for one customer, since they are different jobs on it.
   var dup = rows.some(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
-      String(r.Group) === group && String(r.Value) === part;
+      String(r.Group) === group && String(r.Value) === part &&
+      partRowMatchesOperation(r, operation);
   });
   if (dup) return { status: 'error', message: 'Already exists' };
 
   var info = lookupMasterPart(module, part);
   writeConfigRow(sheet, {
     Module: module, Kind: 'part', Group: group, Value: part,
+    Operation: operation,
     MO: mo, Barcode: info.barcode, PartName: info.name,
   });
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
@@ -843,11 +861,19 @@ function editPartWithMo(module, payload) {
   var moCol = headers.indexOf('MO') + 1;
   var barcodeCol = headers.indexOf('Barcode') + 1;
   var nameCol = headers.indexOf('PartName') + 1;
+  var operation = module === 'machining'
+    ? String(payload.operation || '').trim() : '';
   var rows = getAllRowsAsObjects(sheet);
-  var match = rows.find(function (r) {
+  var candidates = rows.filter(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
-      String(r.Group) === group && String(r.Value) === part;
+      String(r.Group) === group && String(r.Value) === part &&
+      partRowMatchesOperation(r, operation);
   });
+  // Prefer the row that names this operation over a legacy blank one, so
+  // editing under machining cannot quietly rewrite assembly's row.
+  var match = candidates.find(function (r) {
+    return String(r.Operation === undefined ? '' : r.Operation).trim() !== '';
+  }) || candidates[0];
   if (!match) return { status: 'error', message: 'Not found' };
   if (newPart !== part) {
     // Code changed -> re-resolve its barcode/name from the master.
@@ -895,7 +921,7 @@ function getMachiningParts(customer, shift, operation) {
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
   var slots = slotsForShift(shift);
-  var parts = getConfigParts('machining', customer);
+  var parts = getConfigParts('machining', customer, operation);
   var result = parts.map(function (part) {
     var match = rows.find(function (r) {
       return String(r.Customer) === customer && String(r.PartNo) === part &&
@@ -908,7 +934,7 @@ function getMachiningParts(customer, shift, operation) {
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
-    var info = getConfigPartInfo('machining', customer, part);
+    var info = getConfigPartInfo('machining', customer, part, operation);
     return {
       part: part,
       mo: info.mo,
@@ -997,7 +1023,7 @@ function upsertMachiningRow(data) {
     // Snapshot the part's currently-configured MO onto the row once, at
     // creation — later Config MO edits never rewrite already-logged rows.
     // MO is per-part, so both operations of a part log the same MO.
-    var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo);
+    var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo, data.Operation);
     merged.MO = pinfo.mo;
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
@@ -1032,6 +1058,13 @@ function upsertMachiningRow(data) {
     var dtKey = 'Downtime_' + slot;
     if (data[dtKey] !== undefined && data[dtKey] !== '') {
       merged[dtKey] = data[dtKey];
+    }
+    // Sent whenever the box is touched, INCLUDING when it is cleared — a
+    // reason typed by mistake has to be removable, so '' is a real value
+    // here rather than "leave it alone" the way a blank actual is.
+    var reasonKey = 'DowntimeReason_' + slot;
+    if (data[reasonKey] !== undefined) {
+      merged[reasonKey] = String(data[reasonKey]);
     }
   });
 
@@ -1585,7 +1618,15 @@ function summariseDowntime(row, slots) {
     var minutes = parseFloat(raw);
     if (isNaN(minutes)) return;
     total += minutes;
-    parts.push(slot + ' ' + minutes + 'min');
+    // "12PM 20min (mould change)" — the reason belongs in the one-line
+    // summary, since that is the cell anyone scanning the sheet reads. A
+    // stop with no reason given still lists its minutes.
+    var reason = row['DowntimeReason_' + slot];
+    var text = slot + ' ' + minutes + 'min';
+    if (reason !== undefined && reason !== null && String(reason).trim() !== '') {
+      text += ' (' + String(reason).trim() + ')';
+    }
+    parts.push(text);
   });
   return { total: total, summary: parts.join(', ') };
 }
@@ -1757,12 +1798,27 @@ function getConfigGroups(module) {
   return groups;
 }
 
-function getConfigParts(module, group) {
+// Does this Config part row belong to [operation]?
+//
+// Only machining scopes parts by operation; Casting and Secondary pass
+// nothing and match everything. A machining row with a BLANK Operation is a
+// legacy row from before the split and counts as belonging to both, so no
+// part vanishes from a list the day this ships —
+// splitMachiningPartsByOperation() is what gives those rows an owner.
+function partRowMatchesOperation(row, operation) {
+  if (!operation) return true;
+  var rowOp = String(row.Operation === undefined ? '' : row.Operation).trim();
+  if (!rowOp) return true;
+  return rowOp.toLowerCase() === String(operation).trim().toLowerCase();
+}
+
+function getConfigParts(module, group, operation) {
   var rows = getConfigRows();
   var parts = [];
   rows.forEach(function (r) {
     if (String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
-        String(r.Group) === group && r.Value) {
+        String(r.Group) === group && r.Value &&
+        partRowMatchesOperation(r, operation)) {
       parts.push(String(r.Value));
     }
   });
@@ -2074,6 +2130,8 @@ function configMutate(payload) {
   var op = payload.op;
   var module = String(payload.module || '').toLowerCase();
   var kind = payload.kind; // 'group' | 'part' | 'operation'
+  // Machining parts are per-operation; every other kind ignores this.
+  var operation = String(payload.operation || '').trim();
   var group = payload.group !== undefined && payload.group !== null ? String(payload.group) : '';
   var value = payload.value !== undefined && payload.value !== null ? String(payload.value) : '';
   var newValue = payload.newValue !== undefined && payload.newValue !== null ? String(payload.newValue) : '';
@@ -2125,9 +2183,39 @@ function configMutate(payload) {
     }
     var target = rows.filter(function (r) {
       return String(r.Module).toLowerCase() === module && r.Kind === kind &&
-        String(r.Group || '') === group && String(r.Value || '') === value;
+        String(r.Group || '') === group && String(r.Value || '') === value &&
+        (kind !== 'part' || partRowMatchesOperation(r, operation));
     });
     if (target.length === 0) return { status: 'error', message: 'Not found' };
+    // A machining part that still has no operation of its own lives in both
+    // lists on ONE row, so deleting it from here would take it out of the
+    // other list too — which is the bug this scoping exists to fix. Give the
+    // other operation its own row first, then remove only this one.
+    if (kind === 'part' && module === 'machining' && operation) {
+      var orphaned = target.filter(function (r) {
+        return String(r.Operation === undefined ? '' : r.Operation).trim() === '';
+      });
+      orphaned.forEach(function (r) {
+        MACHINING_OPERATIONS.forEach(function (op) {
+          if (op.toLowerCase() === operation.toLowerCase()) return;
+          writeConfigRow(sheet, {
+            Module: module, Kind: 'part', Group: group, Value: value,
+            Operation: op, MO: r.MO || '',
+            Barcode: r.Barcode || '', PartName: r.PartName || '',
+          });
+        });
+      });
+      // The appends shifted nothing above them, so the captured row numbers
+      // are still valid — but re-read anyway rather than rely on that.
+      if (orphaned.length) {
+        rows = getAllRowsAsObjects(sheet);
+        target = rows.filter(function (r) {
+          return String(r.Module).toLowerCase() === module && r.Kind === kind &&
+            String(r.Group || '') === group && String(r.Value || '') === value &&
+            String(r.Operation === undefined ? '' : r.Operation).trim() === '';
+        });
+      }
+    }
     deleteSheetRows(sheet, target);
     return { status: 'success', version: BACKEND_VERSION, message: 'Deleted' };
   }
@@ -2167,6 +2255,58 @@ function deleteSheetRows(sheet, rowsToDelete) {
     sheet.deleteRow(rowNum);
   });
   invalidateCaches();
+}
+
+// ---------- One-off: give every machining part its own operation ----------
+//
+// Machining and assembly share customers but not parts. Until v22 a part row
+// carried no operation, so both lists read the same rows — and deleting a
+// part from one list deleted it from the other, because there was only ever
+// one row to delete.
+//
+// This splits each legacy row in two, one per operation, so the lists own
+// their parts separately from here on. Both halves inherit the original's
+// MO, barcode and name, so nothing is lost and nothing has to be retyped.
+//
+// Safe to re-run: a row that already names an operation is left alone, so a
+// second run finds nothing to do. Run it ONCE after migrateColumnOrder()
+// has added the Operation column.
+function splitMachiningPartsByOperation() {
+  var sheet = getConfigSheet();
+  if (getHeaders(sheet).indexOf('Operation') === -1) {
+    throw new Error(
+      'Config has no Operation column yet — run migrateColumnOrder() first.'
+    );
+  }
+
+  var legacy = getAllRowsAsObjects(sheet).filter(function (r) {
+    return String(r.Module).toLowerCase() === 'machining' && r.Kind === 'part' &&
+      r.Value && String(r.Operation === undefined ? '' : r.Operation).trim() === '';
+  });
+  if (!legacy.length) {
+    Logger.log('Nothing to split — every machining part already names an operation.');
+    return;
+  }
+
+  var opCol = getHeaders(sheet).indexOf('Operation') + 1;
+  var added = 0;
+  legacy.forEach(function (r) {
+    // The existing row becomes the first operation; the rest get copies.
+    sheet.getRange(r._rowNum, opCol).setValue(MACHINING_OPERATIONS[0]);
+    MACHINING_OPERATIONS.slice(1).forEach(function (op) {
+      writeConfigRow(sheet, {
+        Module: 'machining', Kind: 'part',
+        Group: r.Group, Value: r.Value, Operation: op,
+        MO: r.MO || '', Barcode: r.Barcode || '', PartName: r.PartName || '',
+      });
+      added++;
+    });
+  });
+  invalidateCaches();
+  Logger.log(
+    'Split ' + legacy.length + ' legacy part row(s) across ' +
+    MACHINING_OPERATIONS.join(' + ') + ' — ' + added + ' row(s) added.'
+  );
 }
 
 // ---------- One-time setup: run manually from the Apps Script editor ----------

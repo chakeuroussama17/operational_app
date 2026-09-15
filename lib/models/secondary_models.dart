@@ -1,6 +1,6 @@
 /// Data types for the Secondary module's incremental logging API.
 ///
-/// Mirrors Casting (shift-aware, Day 10AM-6PM / Night 8PM-6AM crossing
+/// Mirrors Casting (shift-aware, Day 10AM-8PM / Night 10PM-8AM crossing
 /// midnight, MO number per part) but with different column names:
 ///   DCM → Station; the Actual_*/LOR_* column names are now shared by all
 ///   three modules.
@@ -19,35 +19,27 @@ class SecondarySlot {
   final String lorKey;
 }
 
-/// Day shift: 10AM-6PM. Production starts at 10, so there is no 8AM
-/// checkpoint — Night still opens at 8PM and keeps its six.
+/// Day shift: 10AM-8PM, logged every 4 hours.
 const List<SecondarySlot> secondaryDaySlots = [
-  SecondarySlot('10 AM', 'Actual_10AM', 'LOR_10AM'),
   SecondarySlot('12 PM', 'Actual_12PM', 'LOR_12PM'),
-  SecondarySlot('2 PM', 'Actual_2PM', 'LOR_2PM'),
   SecondarySlot('4 PM', 'Actual_4PM', 'LOR_4PM'),
-  SecondarySlot('6 PM', 'Actual_6PM', 'LOR_6PM'),
+  SecondarySlot('7:30 PM', 'Actual_7_30PM', 'LOR_7_30PM'),
 ];
 
-/// Night shift: 8PM-6AM, crossing midnight.
+/// Night shift: 10PM-8AM, logged every 4 hours.
 const List<SecondarySlot> secondaryNightSlots = [
-  SecondarySlot('8 PM', 'Actual_8PM', 'LOR_8PM'),
-  SecondarySlot('10 PM', 'Actual_10PM', 'LOR_10PM'),
   SecondarySlot('12 AM', 'Actual_12AM', 'LOR_12AM'),
-  SecondarySlot('2 AM', 'Actual_2AM', 'LOR_2AM'),
   SecondarySlot('4 AM', 'Actual_4AM', 'LOR_4AM'),
-  SecondarySlot('6 AM', 'Actual_6AM', 'LOR_6AM'),
+  SecondarySlot('7:30 AM', 'Actual_7_30AM', 'LOR_7_30AM'),
 ];
 
 List<SecondarySlot> secondarySlotsForShift(String shift) =>
     shift == 'Night' ? secondaryNightSlots : secondaryDaySlots;
 
-/// Guesses the active shift from wall-clock time: Day runs 8AM-8PM, Night
-/// runs 8PM-8AM. Only a starting-point default — the supervisor can always
-/// override it (e.g. logging a late entry after shift changeover).
+/// Day runs from 10:00 through 21:59; Night takes over at 22:00.
 String autoDetectSecondaryShift() {
   final hour = DateTime.now().hour;
-  return (hour >= 8 && hour < 20) ? 'Day' : 'Night';
+  return (hour >= 10 && hour < 22) ? 'Day' : 'Night';
 }
 
 /// Dashboard card: one Station and when it was last logged today.
@@ -82,7 +74,7 @@ class SecondaryPartStatus {
   final String? name;
   final String? lastUpdated;
 
-  /// 0-100: how many of this shift's six time slots are filled today.
+  /// 0-100: how many of this shift's three checkpoints are filled today.
   final int fillPercent;
 
   factory SecondaryPartStatus.fromJson(Map<String, dynamic> json) {

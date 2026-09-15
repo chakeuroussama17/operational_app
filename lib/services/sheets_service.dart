@@ -401,11 +401,15 @@ class SheetsService {
     });
   }
 
-  /// Adds a new Machining part under [customer], optionally with its current
-  /// MO (manufacturing order) number. MO is per-part — shared by both operations.
+  /// Adds a new Machining part under [customer], for ONE operation.
+  ///
+  /// Machining and assembly run the same customers but not the same parts, so
+  /// the operation is part of the part's identity — without it, adding or
+  /// deleting under one operation changes the other's list too.
   Future<void> addMachiningPart({
     required String customer,
     required String part,
+    required String operation,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -415,6 +419,7 @@ class SheetsService {
       'op': 'machiningAddPart',
       'group': customer,
       'part': part,
+      'operation': operation,
       'mo': ?mo,
     });
   }
@@ -425,6 +430,7 @@ class SheetsService {
     required String customer,
     required String part,
     required String newPart,
+    required String operation,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -435,6 +441,7 @@ class SheetsService {
       'group': customer,
       'part': part,
       'newPart': newPart,
+      'operation': operation,
       'mo': ?mo,
     });
   }
@@ -534,12 +541,24 @@ class SheetsService {
   }) => _configMutate('add', module, kind, group, value, null);
 
   /// Deletes a group (cascades to its parts), a part, or an operation.
+  /// [operation] scopes a Machining part delete to one operation's list.
+  /// Without it the backend cannot tell which of the two lists to remove
+  /// from, and removes the part from both.
   Future<void> configDelete({
     required String module,
     required String kind,
     String? group,
     required String value,
-  }) => _configMutate('delete', module, kind, group, value, null);
+    String? operation,
+  }) => _configMutate(
+    'delete',
+    module,
+    kind,
+    group,
+    value,
+    null,
+    operation: operation,
+  );
 
   /// Renames a group (cascades to its parts' group reference), a part, or a
   /// operation. Only updates the Config sheet — historical production rows keep
@@ -558,8 +577,9 @@ class SheetsService {
     String kind,
     String? group,
     String value,
-    String? newValue,
-  ) async {
+    String? newValue, {
+    String? operation,
+  }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
       'action': 'config',
@@ -570,6 +590,7 @@ class SheetsService {
       'group': ?group,
       'value': value,
       'newValue': ?newValue,
+      'operation': ?operation,
     });
   }
 

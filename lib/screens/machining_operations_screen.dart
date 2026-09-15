@@ -73,7 +73,7 @@ Widget build(BuildContext context) {
 }
 
 /// Day/Night selector — Machining runs the same real shift schedule as the
-/// other modules (Day 8AM-6PM, Night 8PM-6AM crossing midnight), not calendar
+/// other modules (Day 10AM-8PM, Night 10PM-8AM crossing midnight), not calendar
 /// midnight. Everything below this screen operates within the selected shift.
 class ShiftToggle extends StatelessWidget {
   const ShiftToggle({super.key, required this.shift, required this.onChanged});

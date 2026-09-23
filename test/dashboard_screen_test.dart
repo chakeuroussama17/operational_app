@@ -372,6 +372,43 @@ void main() {
     expect(find.text('Downtime by Customer'), findsOneWidget);
   });
 
+  testWidgets('an older backend that sends no downtime renders anyway', (
+    tester,
+  ) async {
+    // Exactly the shape v23 returns: every downtime field simply absent.
+    // The app ships ahead of the Apps Script deploy, so this is the real
+    // state for as long as it takes someone to paste Code.gs in.
+    final payload = _machiningPayload()
+      ..remove('downtime')
+      ..remove('downtimeByReason');
+    for (final g in payload['byGroup'] as List) {
+      (g as Map).remove('downtime');
+    }
+    for (final part in payload['parts'] as List) {
+      (part as Map).remove('downtime');
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DashboardScreen(
+            modules: const ['machining'],
+            service: _mockService(byModule: {'machining': payload}),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // The section is there and honestly empty rather than missing or broken.
+    await _scrollTo(tester, find.text('Downtime by Customer'));
+    expect(
+      find.text('No downtime logged in this window'),
+      findsWidgets,
+    );
+  });
+
   testWidgets('casting is never asked about downtime it does not log', (
     tester,
   ) async {

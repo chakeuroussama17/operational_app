@@ -64,9 +64,10 @@ Map<String, dynamic> _machiningPayload() => {
   'output': [90, 60],
   'lorPercent': [30.0, 50.0],
   'rejection': [8, 20],
+  'downtime': [45, 75],
   'byGroup': [
-    {'group': 'Mazda', 'output': 100, 'lorPercent': 40.0},
-    {'group': 'Proton', 'output': 50, 'lorPercent': 20.0},
+    {'group': 'Mazda', 'output': 100, 'lorPercent': 40.0, 'downtime': 90},
+    {'group': 'Proton', 'output': 50, 'lorPercent': 20.0, 'downtime': 30},
   ],
   'parts': [
     // Mazda M1: lots of output, few rejects -> low rate.
@@ -76,6 +77,7 @@ Map<String, dynamic> _machiningPayload() => {
       'name': 'BRKT-LH',
       'output': 100,
       'rejection': 4,
+      'downtime': 90,
     },
     // Proton M2: little output, many rejects -> the real problem.
     {
@@ -84,6 +86,7 @@ Map<String, dynamic> _machiningPayload() => {
       'name': 'BRKT-RH',
       'output': 50,
       'rejection': 24,
+      'downtime': 30,
     },
   ],
   'byShift': [
@@ -106,6 +109,14 @@ Map<String, dynamic> _machiningPayload() => {
     {'type': 'OTHERS MACH', 'qty': 20},
     {'type': 'POROSITY', 'qty': 5},
     {'type': 'FLASHES', 'qty': 3},
+  ],
+  // A coded reason, a second coded one, a typed "Other", and minutes logged
+  // with no reason at all — the four shapes a reason cell can actually take.
+  'downtimeByReason': [
+    {'reason': '008 \u00b7 MACHINING MAINTENANCE DOWNTIME', 'minutes': 60},
+    {'reason': '012 \u00b7 TEA BREAK', 'minutes': 30},
+    {'reason': 'Crane operator off sick', 'minutes': 20},
+    {'reason': '(no reason given)', 'minutes': 10},
   ],
 };
 
@@ -280,6 +291,101 @@ void main() {
     expect(find.text('Worst rejection rate'), findsOneWidget);
     // On the bar and again in the Parts table's Rate column.
     expect(find.text('32.4%'), findsWidgets, reason: '24 of 74 for M2');
+  });
+
+  testWidgets('machining charts the time it lost, and to what', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DashboardScreen(
+            modules: const ['machining'],
+            service: _mockService(byModule: {'machining': _machiningPayload()}),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 45 + 75 across the window, with the hours spelled out beneath because
+    // 120 minutes is not a quantity anyone converts in their head.
+    expect(find.text('Downtime'), findsWidgets);
+    expect(find.text('120'), findsWidgets);
+    expect(find.text('2.0 hours lost'), findsOneWidget);
+
+    await _scrollTo(tester, find.text('Downtime causes'));
+    expect(find.text('Downtime causes'), findsOneWidget);
+
+    // The code earns the bucket but not the legend — it is noise competing
+    // with the words once the slice is already its own colour.
+    expect(find.text('MACHINING MAINTENANCE DOWNTIME'), findsWidgets);
+    expect(
+      find.text('008 \u00b7 MACHINING MAINTENANCE DOWNTIME'),
+      findsNothing,
+    );
+    // A typed Other and unexplained minutes are both carried through as-is,
+    // so the breakdown still adds up to the 120 on the tile.
+    expect(find.text('Crane operator off sick'), findsWidgets);
+    expect(find.text('(no reason given)'), findsWidgets);
+
+    await _scrollTo(tester, find.text('Downtime by Customer'));
+    expect(find.text('Downtime by Customer'), findsOneWidget);
+    // Ranked by minutes lost, not by output, and carrying what was made in
+    // that time so a big number on a busy line reads differently.
+    expect(find.text('90 min'), findsWidgets);
+    expect(find.text('100 pcs made'), findsOneWidget);
+  });
+
+  testWidgets('a machine filter scopes downtime and hides what it cannot', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DashboardScreen(
+            modules: const ['machining'],
+            service: _mockService(byModule: {'machining': _machiningPayload()}),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('120'), findsWidgets);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(FilterChipRow),
+        matching: find.text('Mazda'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Mazda's own 90 minutes, off its parts — the same route the rejection
+    // total takes under a filter.
+    expect(find.text('90'), findsWidgets);
+    expect(find.text('120'), findsNothing);
+
+    // The reason breakdown has no per-machine split behind it, so it goes
+    // rather than showing plant-wide numbers under a machine's name.
+    await _scrollTo(tester, find.text('Downtime by Customer'));
+    expect(find.text('Downtime causes'), findsNothing);
+    // The cross-machine ranking stays, as the output one does.
+    expect(find.text('Downtime by Customer'), findsOneWidget);
+  });
+
+  testWidgets('casting is never asked about downtime it does not log', (
+    tester,
+  ) async {
+    await _pumpCasting(tester);
+    for (var i = 0; i < 12; i++) {
+      expect(find.text('Downtime'), findsNothing);
+      expect(find.text('Downtime causes'), findsNothing);
+      expect(find.text('Downtime by DCM'), findsNothing);
+      await tester.drag(
+        find.byKey(const ValueKey('dashboardScrollList')),
+        const Offset(0, -600),
+      );
+      await tester.pump();
+    }
   });
 
   testWidgets('the admin (no modules filter) sees all three sections', (

@@ -222,8 +222,8 @@ class _RangeChip extends StatelessWidget {
 /// Everything for one module, in the order a supervisor asks the questions:
 /// where do we stand (KPIs), how are we trending (lines), day or night, who
 /// is behind (ranking by machine/station/customer), what are we running
-/// (ranking by part), what is failing (Machining's defect breakdown), and
-/// the exact figures (tables).
+/// (ranking by part), what is failing (Machining's defect breakdown), where
+/// the time went (Machining's downtime), and the exact figures (tables).
 ///
 /// The filter strip at the top scopes the trends and the part ranking to one
 /// machine; the cross-group ranking stays, with the picked one emphasised so
@@ -310,6 +310,20 @@ class _ModuleSectionState extends State<_ModuleSection> {
         ? totalRejection / (totalOutput + totalRejection) * 100
         : null;
 
+    // Follows the machine filter the same way rejections do: the window
+    // series when unfiltered, the filtered parts' own minutes when not.
+    final totalDowntime = group == null
+        ? s.downtime.fold<double>(0, (a, b) => a + b)
+        : parts.fold<double>(0, (a, p) => a + p.downtime);
+
+    // Ranked by time lost, not by output — the whole question this chart
+    // answers is who is losing the most of it. The backend sorts byGroup by
+    // output, so this re-sorts, as the rejection charts already do.
+    final downtimeByGroup = [
+      for (final g in s.byGroup)
+        if (g.downtime > 0) g,
+    ]..sort((a, b) => b.downtime.compareTo(a.downtime));
+
     var bestDayIndex = -1;
     for (var i = 0; i < outputSeries.length; i++) {
       final v = outputSeries[i] ?? 0;
@@ -375,6 +389,18 @@ class _ModuleSectionState extends State<_ModuleSection> {
                     value: avgLor == null ? '—' : avgLor.toStringAsFixed(1),
                     unit: avgLor == null ? null : '%',
                   ),
+                  StatTile(
+                    icon: Icons.timer_off_outlined,
+                    accent: AppColors.downtimeAccent,
+                    label: 'Downtime',
+                    value: _fmt(totalDowntime),
+                    unit: 'min',
+                    // Past an hour, minutes stop being a quantity anyone can
+                    // feel. The hours are what gets said out loud.
+                    helper: totalDowntime >= 60
+                        ? '${(totalDowntime / 60).toStringAsFixed(1)} hours lost'
+                        : null,
+                  ),
                 ]
               : [
                   StatTile(
@@ -436,6 +462,17 @@ class _ModuleSectionState extends State<_ModuleSection> {
             values: s.rejection.map<double?>((v) => v).toList(),
             color: AppColors.danger,
           ),
+          const SizedBox(height: 14),
+          // Gated on the unfiltered view for the same reason the rejection
+          // trend is: there is no per-machine daily downtime series, so under
+          // a filter this line would quietly still be plant-wide.
+          TrendChart.single(
+            title: 'Downtime',
+            dates: s.dates,
+            values: s.downtime.map<double?>((v) => v).toList(),
+            color: AppColors.downtimeAccent,
+            suffix: ' min',
+          ),
         ],
         // Day vs Night is a department-level question and the backend splits
         // it that way, so it stays whole rather than pretending to follow
@@ -486,6 +523,30 @@ class _ModuleSectionState extends State<_ModuleSection> {
           ],
           const SizedBox(height: 14),
           _RejectionsByPart(parts: parts, scope: scope),
+          if (group == null) ...[
+            const SizedBox(height: 14),
+            _DowntimeBreakdown(reasons: s.downtimeByReason),
+          ],
+          const SizedBox(height: 14),
+          RankedBarChart(
+            title: 'Downtime by ${widget.groupLabel}',
+            entries: [
+              for (final g in downtimeByGroup.take(10))
+                RankedBarEntry(
+                  label: g.group,
+                  value: g.downtime,
+                  sublabel: g.output <= 0 ? null : '${_fmt(g.output)} pcs made',
+                ),
+            ],
+            color: AppColors.downtimeAccent,
+            suffix: ' min',
+            emptyMessage: 'No downtime logged in this window',
+            colorForIndex: group == null
+                ? null
+                : (i) => downtimeByGroup[i].group == group
+                      ? AppColors.downtimeAccent
+                      : AppColors.chartMuted,
+          ),
         ],
         const SizedBox(height: 14),
         InsightTable(
@@ -496,6 +557,8 @@ class _ModuleSectionState extends State<_ModuleSection> {
             const TableColumn('LOR%', alignRight: true),
             if (widget.showRejection && group == null)
               const TableColumn('Rejects', alignRight: true),
+            if (widget.showRejection && group == null)
+              const TableColumn('Downtime', alignRight: true),
           ],
           rows: [
             for (var i = s.dates.length - 1; i >= 0; i--)
@@ -507,6 +570,8 @@ class _ModuleSectionState extends State<_ModuleSection> {
                     : '—',
                 if (widget.showRejection && group == null)
                   _fmt(i < s.rejection.length ? s.rejection[i] : 0),
+                if (widget.showRejection && group == null)
+                  _fmt(i < s.downtime.length ? s.downtime[i] : 0),
               ],
           ],
         ),
@@ -521,6 +586,8 @@ class _ModuleSectionState extends State<_ModuleSection> {
               const TableColumn('Rejects', alignRight: true),
             if (widget.showRejection)
               const TableColumn('Rate', alignRight: true),
+            if (widget.showRejection)
+              const TableColumn('Downtime', alignRight: true),
           ],
           rows: [
             for (final p in parts)
@@ -533,6 +600,7 @@ class _ModuleSectionState extends State<_ModuleSection> {
                   p.rejectRate == null
                       ? '—'
                       : '${p.rejectRate!.toStringAsFixed(1)}%',
+                if (widget.showRejection) _fmt(p.downtime),
               ],
           ],
         ),
@@ -821,6 +889,60 @@ class _RejectionsByPart extends StatelessWidget {
             suffix: '%',
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Where the time went: composition (donut, top 5 + Other) paired with the
+/// full ranking, same as the defect breakdown beside it. The codes are what
+/// make this worth charting at all — free text would fragment into one slice
+/// per typist and say nothing.
+class _DowntimeBreakdown extends StatelessWidget {
+  const _DowntimeBreakdown({required this.reasons});
+
+  final List<ReasonTotal> reasons;
+
+  static const _topN = 5;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppColors.categoricalOf;
+    final top = reasons.take(_topN).toList();
+    final rest = reasons.skip(_topN).fold<double>(0, (a, b) => a + b.minutes);
+
+    final slices = <DonutSlice>[
+      for (var i = 0; i < top.length; i++)
+        DonutSlice(
+          label: top[i].label,
+          value: top[i].minutes,
+          color: palette[i],
+        ),
+      if (rest > 0)
+        DonutSlice(label: 'Other', value: rest, color: AppColors.textSecondary),
+    ];
+
+    return Column(
+      children: [
+        DonutChart(
+          title: 'Downtime causes',
+          slices: slices,
+          totalLabel: 'minutes lost',
+          emptyMessage: 'No downtime logged in this window',
+        ),
+        const SizedBox(height: 14),
+        RankedBarChart(
+          title: 'Downtime by reason',
+          entries: [
+            for (final r in reasons)
+              RankedBarEntry(label: r.label, value: r.minutes),
+          ],
+          color: AppColors.downtimeAccent,
+          suffix: ' min',
+          emptyMessage: 'No downtime logged in this window',
+          colorForIndex: (i) =>
+              i < top.length ? palette[i] : AppColors.downtimeAccent,
+        ),
       ],
     );
   }

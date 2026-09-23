@@ -190,6 +190,14 @@ abstract class AppColors {
   static Color get chartMuted =>
       _dark ? const Color(0xFF4A4463) : const Color(0xFFC3BFD6);
 
+  /// Time lost to a stoppage. Its own semantic, kept clear of Danger (a
+  /// quality failure) and Amber (LOR, a rate) so three different kinds of bad
+  /// news don't all read as the same one. This is the categorical palette's
+  /// orange, reused rather than invented — those two values are already
+  /// validated against both chart surfaces.
+  static Color get downtimeAccent =>
+      _dark ? const Color(0xFFD95926) : const Color(0xFFEB6834);
+
   /// Fixed-order, colorblind-safe 8-hue set for telling distinct identities
   /// apart (currently: rejection defect types). Assigned by POSITION in this
   /// list, never generated or cycled — a 9th distinct value folds into

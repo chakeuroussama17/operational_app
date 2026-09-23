@@ -177,6 +177,10 @@ var MACHINING_DAY_SHEET = 'Machining_Day';
 var MACHINING_NIGHT_SHEET = 'Machining_Night';
 var DAY_SLOTS = ['12PM', '4PM', '7_30PM'];
 var NIGHT_SLOTS = ['12AM', '4AM', '7_30AM'];
+
+// Where minutes go when the machine stopped but nobody said why. Parenthesised
+// so it can never collide with a real reason from the plant's code list.
+var NO_DOWNTIME_REASON = '(no reason given)';
 // Back-compat aliases (Casting code referred to these names).
 var CASTING_DAY_SLOTS = DAY_SLOTS;
 var CASTING_NIGHT_SLOTS = NIGHT_SLOTS;
@@ -282,7 +286,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'SHIFT-4H-v23';
+var BACKEND_VERSION = 'DOWNTIME-ANALYTICS-v24';
 
 function doGet(e) {
   try {
@@ -1915,9 +1919,15 @@ function getAnalytics(module, days) {
   var timeSlots = DAY_SLOTS.concat(NIGHT_SLOTS);
   var outputKeys = timeSlots.map(function (s) { return outputPrefix + s; });
   var lorKeys = timeSlots.map(function (s) { return lorPrefix + s; });
+  // Machining alone logs downtime, and it sits on the row beside the actual
+  // it belongs to (unlike rejections, which are their own fact table). The
+  // reason column is read in step with the minutes so a stop's cause travels
+  // with its cost.
+  var downtimeKeys = timeSlots.map(function (s) { return 'Downtime_' + s; });
+  var downtimeReasonKeys = timeSlots.map(function (s) { return 'DowntimeReason_' + s; });
   var byDate = {};
   dateKeys.forEach(function (dk) {
-    byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0 };
+    byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0, downtime: 0 };
   });
   // Same window as byDate, sliced by group instead of by day — feeds the
   // "output by machine/station/customer" ranking bar chart.
@@ -1935,6 +1945,12 @@ function getAnalytics(module, days) {
   // silently drops a chart is worse than one that never had it.
   var groupDaily = {};
   var groupLorDaily = {};
+  // Minutes lost per reason across the window. Keyed by the cell verbatim, so
+  // the coded reasons collapse into one bucket each (their labels are
+  // byte-identical) while a typed "Other" stays its own line — which is the
+  // point of having typed it. The app folds the tail into "Other" for the
+  // donut, exactly as it already does for defect types.
+  var downtimeByReason = {};
 
   rows.forEach(function (r) {
     var dk = formatDateOnly(r.Date);
@@ -1976,6 +1992,27 @@ function getAnalytics(module, days) {
       byShift[shift].output += rowOutput;
       shiftDaily[shift][dk] = (shiftDaily[shift][dk] || 0) + rowOutput;
       if (group) groupDaily[group][dk] = (groupDaily[group][dk] || 0) + rowOutput;
+    }
+
+    // Downtime is only ever a machining column; the others don't have it and
+    // reading the absent keys would just add zeroes.
+    if (module === 'machining') {
+      var rowDowntime = 0;
+      downtimeKeys.forEach(function (k, idx) {
+        var mins = parseFloat(r[k]);
+        if (isNaN(mins) || mins <= 0) return;
+        rowDowntime += mins;
+        // Minutes with no reason still have to land somewhere, or the
+        // breakdown stops adding up to the headline total and reads as a bug.
+        var reason = String(r[downtimeReasonKeys[idx]] || '').trim();
+        if (!reason) reason = NO_DOWNTIME_REASON;
+        downtimeByReason[reason] = (downtimeByReason[reason] || 0) + mins;
+      });
+      if (rowDowntime !== 0) {
+        bucket.downtime += rowDowntime;
+        if (groupBucket) groupBucket.downtime = (groupBucket.downtime || 0) + rowDowntime;
+        if (partBucket) partBucket.downtime = (partBucket.downtime || 0) + rowDowntime;
+      }
     }
 
     // LOR cells are cumulative (running total / plan), so a row's true
@@ -2057,11 +2094,13 @@ function getAnalytics(module, days) {
   var output = [];
   var lorPercent = [];
   var rejection = [];
+  var downtime = [];
   dateKeys.forEach(function (dk) {
     var b = byDate[dk];
     output.push(Math.round(b.output * 10) / 10);
     lorPercent.push(b.lorCount > 0 ? Math.round((b.lorSum / b.lorCount) * 10) / 10 : null);
     rejection.push(Math.round(b.rejection * 10) / 10);
+    downtime.push(Math.round((b.downtime || 0) * 10) / 10);
   });
 
   var round1 = function (v) { return Math.round(v * 10) / 10; };
@@ -2070,7 +2109,9 @@ function getAnalytics(module, days) {
   };
 
   var byGroupArr = Object.keys(byGroup).map(function (g) {
-    return { group: g, output: round1(byGroup[g].output), lorPercent: avg(byGroup[g]) };
+    var entry = { group: g, output: round1(byGroup[g].output), lorPercent: avg(byGroup[g]) };
+    if (module === 'machining') entry.downtime = round1(byGroup[g].downtime || 0);
+    return entry;
   }).sort(function (a, b) { return b.output - a.output; });
 
   var partsArr = Object.keys(byGroupPart).map(function (k) {
@@ -2079,7 +2120,10 @@ function getAnalytics(module, days) {
       group: b.group, part: b.part, name: b.name,
       output: round1(b.output), lorPercent: avg(b),
     };
-    if (module === 'machining') entry.rejection = round1(b.rejection || 0);
+    if (module === 'machining') {
+      entry.rejection = round1(b.rejection || 0);
+      entry.downtime = round1(b.downtime || 0);
+    }
     return entry;
   }).sort(function (a, b) { return b.output - a.output; });
 
@@ -2118,6 +2162,10 @@ function getAnalytics(module, days) {
     result.rejectionsByType = Object.keys(rejByType).map(function (t) {
       return { type: t, qty: round1(rejByType[t]) };
     }).sort(function (a, b) { return b.qty - a.qty; });
+    result.downtime = downtime;
+    result.downtimeByReason = Object.keys(downtimeByReason).map(function (r) {
+      return { reason: r, minutes: round1(downtimeByReason[r]) };
+    }).sort(function (a, b) { return b.minutes - a.minutes; });
   }
   return { status: 'success', data: result };
 }

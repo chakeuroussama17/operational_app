@@ -11,6 +11,8 @@
 ///   [shiftSeries]      ...and is the gap widening
 ///   [groupSeries]      one machine's own trend, without a second request
 ///   [rejectionsByType] what's failing (Machining only)
+///   [downtime]         how much time we lost (Machining only)
+///   [downtimeByReason] ...and to what (Machining only)
 library;
 
 class AnalyticsSeries {
@@ -19,8 +21,10 @@ class AnalyticsSeries {
     required this.output,
     required this.lorPercent,
     this.rejection = const [],
+    this.downtime = const [],
     this.byGroup = const [],
     this.rejectionsByType = const [],
+    this.downtimeByReason = const [],
     this.parts = const [],
     this.byShift = const [],
     this.shiftSeries = const {},
@@ -33,6 +37,10 @@ class AnalyticsSeries {
   final List<double?> lorPercent; // null on days with no logged LOR
   final List<double> rejection; // empty for Casting/Secondary
 
+  /// Minutes lost per day. Empty for Casting/Secondary, which don't log
+  /// downtime at all — only Machining has the columns.
+  final List<double> downtime;
+
   /// Output + avg LOR% totalled per DCM/Station/Customer over the window,
   /// sorted highest output first.
   final List<GroupTotal> byGroup;
@@ -40,6 +48,11 @@ class AnalyticsSeries {
   /// Defect quantity totalled per rejection type over the window, sorted
   /// highest first. Empty for Casting/Secondary.
   final List<TypeTotal> rejectionsByType;
+
+  /// Minutes lost per reason over the window, sorted highest first. The
+  /// plant's coded reasons each collapse to one entry; a typed "Other" keeps
+  /// its own. Empty for Casting/Secondary.
+  final List<ReasonTotal> downtimeByReason;
 
   /// One entry per (group, part). Flat and carrying its group, so the same
   /// list answers "which part runs most" (summed across groups) and "for
@@ -85,6 +98,7 @@ class AnalyticsSeries {
               name: p.name.isNotEmpty ? p.name : existing.name,
               output: existing.output + p.output,
               rejection: existing.rejection + p.rejection,
+              downtime: existing.downtime + p.downtime,
               // A part's LOR across machines is only meaningful per machine,
               // so the merged row deliberately drops it rather than
               // inventing an average of averages.
@@ -118,6 +132,7 @@ class AnalyticsSeries {
       rejection: (json['rejection'] as List? ?? const [])
           .map(toDouble)
           .toList(),
+      downtime: (json['downtime'] as List? ?? const []).map(toDouble).toList(),
       byGroup: (json['byGroup'] as List? ?? const [])
           .whereType<Map>()
           .map((m) => GroupTotal.fromJson(m.cast<String, dynamic>()))
@@ -125,6 +140,10 @@ class AnalyticsSeries {
       rejectionsByType: (json['rejectionsByType'] as List? ?? const [])
           .whereType<Map>()
           .map((m) => TypeTotal.fromJson(m.cast<String, dynamic>()))
+          .toList(),
+      downtimeByReason: (json['downtimeByReason'] as List? ?? const [])
+          .whereType<Map>()
+          .map((m) => ReasonTotal.fromJson(m.cast<String, dynamic>()))
           .toList(),
       parts: (json['parts'] as List? ?? const [])
           .whereType<Map>()
@@ -155,16 +174,22 @@ class GroupTotal {
     required this.group,
     required this.output,
     this.lorPercent,
+    this.downtime = 0,
   });
 
   final String group;
   final double output;
   final double? lorPercent;
 
+  /// Minutes this group lost over the window. Machining only — 0 elsewhere,
+  /// and 0 on an older backend that didn't report it.
+  final double downtime;
+
   factory GroupTotal.fromJson(Map<String, dynamic> json) => GroupTotal(
     group: (json['group'] ?? '').toString(),
     output: (json['output'] as num?)?.toDouble() ?? 0,
     lorPercent: (json['lorPercent'] as num?)?.toDouble(),
+    downtime: (json['downtime'] as num?)?.toDouble() ?? 0,
   );
 }
 
@@ -182,6 +207,29 @@ class TypeTotal {
   );
 }
 
+/// One downtime reason's minutes for the window — a row of the downtime
+/// breakdown (donut + ranked list). The reason is the sheet cell verbatim:
+/// "008 · MACHINING MAINTENANCE DOWNTIME" for a coded one, whatever was typed
+/// for an "Other", or "(no reason given)" for minutes logged without one.
+class ReasonTotal {
+  const ReasonTotal({required this.reason, required this.minutes});
+
+  final String reason;
+  final double minutes;
+
+  factory ReasonTotal.fromJson(Map<String, dynamic> json) => ReasonTotal(
+    reason: (json['reason'] ?? '').toString(),
+    minutes: (json['minutes'] as num?)?.toDouble() ?? 0,
+  );
+
+  /// Just the cause, with the leading code stripped — what a chart legend
+  /// shows, where the code is noise competing with the words.
+  String get label {
+    final match = RegExp(r'^\d{3}\s+·\s+(.+)$').firstMatch(reason);
+    return match == null ? reason : match.group(1)!;
+  }
+}
+
 /// One part's totals for the window, within one group. [group] is empty on a
 /// row merged across groups by [AnalyticsSeries.partsFor].
 class PartTotal {
@@ -192,6 +240,7 @@ class PartTotal {
     required this.output,
     this.lorPercent,
     this.rejection = 0,
+    this.downtime = 0,
     this.groupCount = 1,
   });
 
@@ -211,6 +260,9 @@ class PartTotal {
 
   /// Machining only — 0 elsewhere.
   final double rejection;
+
+  /// Minutes lost on this part over the window. Machining only — 0 elsewhere.
+  final double downtime;
 
   /// Share of everything this part produced that was scrapped. Null when the
   /// part has no activity at all. Output counts GOOD parts, so the
@@ -236,6 +288,7 @@ class PartTotal {
     output: (json['output'] as num?)?.toDouble() ?? 0,
     lorPercent: (json['lorPercent'] as num?)?.toDouble(),
     rejection: (json['rejection'] as num?)?.toDouble() ?? 0,
+    downtime: (json['downtime'] as num?)?.toDouble() ?? 0,
   );
 }
 

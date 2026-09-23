@@ -25,6 +25,7 @@ const state = {
   module: 'casting',
   shift: 'all',
   days: 30,
+  date: null,           // a single yyyy-mm-dd, or null for the rolling range
   group: null,          // null = every machine/station/customer
   operation: null,      // machining only; null = every operation
   rawTab: 'Casting_Day',// which sheet tab the Tables view shows
@@ -36,6 +37,19 @@ const state = {
     still filed under the day it STARTED, which is exactly what the Date
     column already holds — so a plain date match is the right test. */
 const todayKey = () => new Date().toISOString().slice(0, 10);
+
+/** The dates on screen. A picked day collapses the window to that one day;
+    otherwise the rolling range applies. Everything that slices by date asks
+    this, so the picker reaches every chart, table and KPI at once instead of
+    each one having to remember it exists. */
+function activeWindow() {
+  return state.date ? [state.date] : dateWindow(state.days);
+}
+
+/** How the current window should be described in prose. */
+function windowLabel() {
+  return state.date ? `on ${state.date}` : `in the last ${state.days} days`;
+}
 
 /** Sheet values are inconsistent ("machining " with a space, and legacy
     line names like "FY2" from before operations existed). Match on a
@@ -65,7 +79,7 @@ function rowsFor(module) {
   const rows = state.shift === 'all'
     ? [...bucket.Day, ...bucket.Night]
     : bucket[state.shift];
-  const window = new Set(dateWindow(state.days));
+  const window = new Set(activeWindow());
   return rows.filter(
     (r) =>
       window.has(r.date) &&
@@ -76,7 +90,7 @@ function rowsFor(module) {
 
 function rejectionsFor() {
   const all = state.data?.rejections ?? [];
-  const window = new Set(dateWindow(state.days));
+  const window = new Set(activeWindow());
   return all.filter(
     (r) =>
       window.has(r.date) &&
@@ -89,7 +103,7 @@ function rejectionsFor() {
 const sum = (rows, pick) => rows.reduce((a, r) => a + (pick(r) || 0), 0);
 
 function byDate(rows, pick) {
-  const dates = dateWindow(state.days);
+  const dates = activeWindow();
   const map = new Map(dates.map((d) => [d, 0]));
   let touched = new Set();
   for (const r of rows) {
@@ -243,7 +257,7 @@ function render() {
   const module = state.module;
   const labels = MODULE_LABELS[module];
   const rows = rowsFor(module);
-  const dates = dateWindow(state.days);
+  const dates = activeWindow();
   const axis = dates.map(shortDate);
 
   $('#groupFilterLabel').textContent = labels.group;
@@ -251,7 +265,7 @@ function render() {
   if (!rows.length) {
     view.innerHTML = `<section class="card"><div class="empty">
       Nothing logged for ${labels.title}${state.group ? ` · ${state.group}` : ''}
-      in the last ${state.days} days${state.shift === 'all' ? '' : ` on the ${state.shift} shift`}.
+      ${windowLabel()}${state.shift === 'all' ? '' : ` on the ${state.shift} shift`}.
     </div></section>`;
     return;
   }
@@ -652,10 +666,15 @@ function wireTwins() {
    the shift, so it lists every live job rather than summarising them. */
 function liveCard(module, labels) {
   const today = todayKey();
+  // Follows the picked day. On a past date "what is on the floor now" would
+  // be a lie, so the card reports what was logged that day instead — and
+  // loses the live dot, which only means anything about now.
+  const day = state.date || today;
+  const isToday = day === today;
   const bucket = state.data[module];
   const rows = [...bucket.Day, ...bucket.Night].filter(
     (r) =>
-      r.date === today &&
+      r.date === day &&
       (!state.group || r.group === state.group) &&
       (!state.operation || opKey(r.operation) === state.operation) &&
       (state.shift === 'all' || r.shift === state.shift)
@@ -663,17 +682,21 @@ function liveCard(module, labels) {
 
   const head = `
     <div class="card-head live-head">
-      <span class="live-dot"></span>
+      ${isToday ? '<span class="live-dot"></span>' : ''}
       <div>
-        <div class="card-title">Running today</div>
-        <div class="card-sub">${today} — only what is on the floor now</div>
+        <div class="card-title">${isToday ? 'Running today' : 'Logged that day'}</div>
+        <div class="card-sub">${day} — ${
+          isToday ? 'only what is on the floor now' : 'every job logged on this date'
+        }</div>
       </div>
       ${rows.length ? `<div class="card-actions"><span class="live-count">${rows.length} job${rows.length === 1 ? '' : 's'}</span></div>` : ''}
     </div>`;
 
   if (!rows.length) {
     return `<section class="card live-card" style="margin-bottom:16px">${head}
-      <div class="empty">Nothing logged today yet${state.group ? ` for ${state.group}` : ''}.</div>
+      <div class="empty">Nothing logged ${
+        isToday ? 'today yet' : `on ${day}`
+      }${state.group ? ` for ${state.group}` : ''}.</div>
     </section>`;
   }
 
@@ -996,6 +1019,28 @@ async function boot() {
       renderTables();
     }, 180);
   });
+
+  const dateInput = $('#dateInput');
+  const dateClear = $('#dateClear');
+  // No future days: the sheet cannot have them, and an empty dashboard that
+  // looks like a fault is worse than a control that will not offer the date.
+  dateInput.max = todayKey();
+
+  function applyDate(value) {
+    state.date = value || null;
+    dateInput.value = state.date ?? '';
+    dateClear.hidden = !state.date;
+    // The rolling range is replaced, not narrowed, so it is shown inert
+    // rather than left looking like it still decides something.
+    $('#rangeSeg').classList.toggle('inert', Boolean(state.date));
+    $('#rangeSeg').querySelectorAll('button').forEach((b) => {
+      b.disabled = Boolean(state.date);
+    });
+    render();
+  }
+
+  dateInput.addEventListener('change', () => applyDate(dateInput.value));
+  dateClear.addEventListener('click', () => applyDate(null));
 
   const segs = [
     ['#shiftSeg', 'shift', (b) => b.dataset.shift],

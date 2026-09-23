@@ -441,6 +441,27 @@ table.data td .swatch {
   border-radius: 9px; padding: 6px 12px; min-width: 190px;
 }
 .search::placeholder { color: var(--text-muted); }
+
+/* The single-day picker. Sized to sit level with the segmented controls
+   beside it rather than to the browser's own default, which varies. */
+.date-input {
+  font: inherit; font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px; padding: 5px 10px;
+}
+.date-input:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+.date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: .55;
+}
+.date-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+.date-clear { padding: 5px 11px; }
+
+/* A picked day replaces the rolling range rather than narrowing it, so the
+   range control is shown inert instead of silently doing nothing. */
+.seg.inert { opacity: .45; }
+.seg.inert button { cursor: not-allowed; }
 .search:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
 
 .raw-wrap { margin-top: 12px; overflow: auto; max-height: 70vh; }

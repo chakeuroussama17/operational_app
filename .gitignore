@@ -57,3 +57,6 @@ app.*.map.json
 # Kept out of the app's history like the landing pages; give it its own repo
 # when it's ready to ship.
 /operational dashboard/
+
+.vercel
+.env*

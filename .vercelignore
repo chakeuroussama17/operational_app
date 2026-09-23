@@ -1,0 +1,10 @@
+# Vercel serves one thing from this repo: the static dashboard in dashboard/.
+# Everything else here is the Flutter app, and .dart_tool and build together
+# are over 500MB against the dashboard's 312KB — uploading them times out the
+# deploy rather than slowing it down.
+#
+# Exclude everything at the top level, then add back the two paths the
+# deployment actually needs.
+/*
+!/dashboard
+!/vercel.json

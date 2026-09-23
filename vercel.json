@@ -1,0 +1,18 @@
+{
+  "//": "The repo root is a Flutter project; the thing Vercel serves is the static dashboard in dashboard/. Naming it here means connecting this repo to a Vercel project needs no dashboard-side settings at all — and, more to the point, it means the deployment has a source in git. The build that was live before this file existed matched no commit in the history: someone had uploaded a working copy by hand, so nobody could tell what was on it without diffing the served JavaScript, which is how it sat for weeks reading retired spreadsheet columns.",
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "dashboard",
+  "headers": [
+    {
+      "//": "The dashboard reads the sheet live on every load and ships no hashed filenames, so a cached app.js is a dashboard showing last month's logic. Vercel already revalidates by default; this states it rather than relying on a default staying put.",
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ]
+}

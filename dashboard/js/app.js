@@ -13,7 +13,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import {
-  CONFIG, loadAll, dateWindow, shortDate, SLOTS, MODULE_LABELS,
+  CONFIG, loadAll, dateWindow, shortDate, SLOTS, slotLabel, MODULE_LABELS,
   RAW_TABS, sheetUrl,
 } from './data.js';
 import {
@@ -134,9 +134,9 @@ function partTotals(rows) {
   return [...map.values()].sort((a, b) => b.actual - a.actual);
 }
 
-/** The checkpoints on screen. With both shifts showing that is all eleven
-    in running order — anything less quietly drops a shift's output while
-    the card still calls itself a total. */
+/** The checkpoints on screen. With both shifts showing that is all six in
+    running order — anything less quietly drops output while the card still
+    calls itself a total. */
 function checkpoints() {
   if (state.shift === 'Day') return SLOTS.Day;
   if (state.shift === 'Night') return SLOTS.Night;
@@ -152,7 +152,7 @@ function hourProfile(rows) {
       if (map.has(s.slot)) map.set(s.slot, map.get(s.slot) + (s.actual || 0));
     }
   }
-  return slots.map((slot) => ({ label: slot, value: map.get(slot) }));
+  return slots.map((slot) => ({ label: slotLabel(slot), value: map.get(slot) }));
 }
 
 function downtimeByHour(rows) {
@@ -163,8 +163,31 @@ function downtimeByHour(rows) {
       if (map.has(s.slot)) map.set(s.slot, map.get(s.slot) + (s.downtime || 0));
     }
   }
-  return slots.map((slot) => ({ label: slot, value: map.get(slot) }));
+  return slots.map((slot) => ({ label: slotLabel(slot), value: map.get(slot) }));
 }
+
+/** Where the time actually went. Minutes are grouped by the reason cell
+    verbatim, so the coded reasons collapse into one bucket each while a
+    typed "Other" keeps its own — which is the point of having typed it.
+    Minutes logged with no reason still have to land somewhere, or the
+    breakdown stops adding up to the downtime KPI and reads as a bug. */
+function downtimeReasons(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    for (const s of r.slots) {
+      if (!s.downtime) continue;
+      const key = s.reason || 'No reason given';
+      map.set(key, (map.get(key) || 0) + s.downtime);
+    }
+  }
+  return [...map.entries()]
+    .map(([reason, minutes]) => ({ reason, minutes }))
+    .sort((a, b) => b.minutes - a.minutes);
+}
+
+/** The code earns the bucket; the reader does not need it once the slice
+    has its own colour. "008 · TEA BREAK" reads as "TEA BREAK". */
+const reasonLabel = (reason) => reason.replace(/^\d{3}\s+·\s+/, '');
 
 /** Top 5 defect types plus Other — never a 9th generated hue. */
 function defectTotals(rejections) {
@@ -338,6 +361,11 @@ function render() {
       sub: 'Minutes lost across the window',
       span: 6, id: 'downtime', body: plot('downtime'),
     }));
+    cards.push(card({
+      title: 'Why the machines stopped',
+      sub: 'Minutes by reason — top 5 and the rest folded into Other',
+      span: 6, id: 'reasons', body: plot('reasons'),
+    }));
   }
 
   cards.push(card({
@@ -362,6 +390,7 @@ function render() {
     drawDefects();
     drawScrap(parts);
     drawDowntime(rows);
+    drawReasons(rows);
   }
   drawDaily(module, rows, dates);
   wireTwins();
@@ -534,6 +563,36 @@ function drawDowntime(rows) {
   $('#downtime-twin').innerHTML = table(
     ['Checkpoint', 'Minutes'],
     items.map((d) => [d.label, fmtInt(d.value)])
+  );
+}
+
+function drawReasons(rows) {
+  const all = downtimeReasons(rows);
+  if (!all.length) {
+    $('#reasons').innerHTML =
+      '<div class="empty">No downtime recorded in this window.</div>';
+    $('#reasons-twin').innerHTML = '';
+    return;
+  }
+  const top = all.slice(0, 5);
+  const rest = all.slice(5).reduce((a, r) => a + r.minutes, 0);
+  const items = top.map((r) => ({
+    label: reasonLabel(r.reason),
+    value: r.minutes,
+    valueLabel: 'Minutes',
+  }));
+  if (rest > 0) items.push({ label: 'Other', value: rest, valueLabel: 'Minutes' });
+  const colorFor = (d, i) =>
+    d.label === 'Other' ? 'var(--series-other)' : seriesColor(i);
+  barsH($('#reasons'), { items, format: fmtMin, colorFor });
+  $('#reasons-twin').innerHTML = table(
+    ['Reason', 'Minutes'],
+    all.map((r, i) => [
+      `<span class="swatch" style="background:${
+        i < 5 ? seriesColor(i) : 'var(--series-other)'
+      }"></span>${reasonLabel(r.reason)}`,
+      fmtInt(r.minutes),
+    ])
   );
 }
 

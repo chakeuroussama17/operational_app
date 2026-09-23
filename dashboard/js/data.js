@@ -35,11 +35,25 @@ const TABS = {
 };
 const REJECTIONS_TAB = 'Machining_Rejections';
 
-/** Day lost its 8AM checkpoint (production starts at 10); Night keeps six. */
+/** Three checkpoints a shift, one every four hours: Day runs 10AM-8PM and
+    Night 10PM-8AM.
+
+    These MUST match the live columns. The two-hourly set this replaced
+    (10AM/2PM/6PM on Day, 8PM/10PM/2AM/6AM on Night) still exists in the
+    sheet — the migration parked the retired columns to the right of
+    LastUpdated rather than deleting history — so reading the old list does
+    not fail, it quietly returns pre-migration numbers and drops both 7:30
+    checkpoints. That is worth more than it sounds: 7:30 is where a third of
+    the day's output lands. */
 export const SLOTS = {
-  Day:   ['10AM', '12PM', '2PM', '4PM', '6PM'],
-  Night: ['8PM', '10PM', '12AM', '2AM', '4AM', '6AM'],
+  Day:   ['12PM', '4PM', '7_30PM'],
+  Night: ['12AM', '4AM', '7_30AM'],
 };
+
+/** What a checkpoint is called on screen. The 7:30 slots are STORED with an
+    underscore because a colon makes Sheets read "7:30PM" as a time and
+    rewrite the cell; the colon comes back for display only. */
+export const slotLabel = (slot) => slot.replace('_', ':');
 
 /** Every raw tab, in the order the Tables view lists them. */
 export const RAW_TABS = [
@@ -143,6 +157,9 @@ function normaliseRow(raw, module, shift) {
       return v <= 3 ? v * 100 : v;
     })(),
     downtime: num(raw[`Downtime_${slot}`]),
+    // Free text or one of the plant's fifteen codes, as the entry form
+    // wrote it: "008 · MACHINING MAINTENANCE DOWNTIME".
+    reason: String(raw[`DowntimeReason_${slot}`] ?? '').trim(),
   }));
 
   const actualTotal = slots.reduce((a, s) => a + (s.actual || 0), 0);

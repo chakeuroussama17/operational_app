@@ -10,6 +10,7 @@ class AppUser {
     required this.employeeId,
     required this.department,
     required this.status,
+    this.role = '',
   });
 
   final String email;
@@ -22,9 +23,29 @@ class AppUser {
   final String department;
   final String status;
 
+  /// "operator" | "superadmin", from the Users tab's Role column. Blank on
+  /// every row written before that column existed, which reads as operator —
+  /// see [isSuperAdmin].
+  final String role;
+
   bool get isActive => status.toLowerCase() == 'active';
 
   bool get isAdmin => email.trim().toLowerCase() == adminEmail;
+
+  /// Whether this person may change what the plant makes, as opposed to
+  /// recording what it made.
+  ///
+  /// Blank reads as operator, never as superadmin: every existing row has a
+  /// blank Role, and defaulting the other way would grant everyone exactly
+  /// the thing this restricts. The admin address is always a superadmin, so
+  /// an empty column is recoverable rather than a lockout.
+  bool get isSuperAdmin =>
+      isAdmin || role.trim().toLowerCase() == 'superadmin';
+
+  /// Adding, renaming or deleting a customer, a part or an operation. The
+  /// backend enforces this too — the app only stops offering what would be
+  /// refused, which is a courtesy rather than the boundary.
+  bool get canManageConfig => isSuperAdmin;
 
   /// True once this account is confined to (or, for the admin, granted) a
   /// department. A blank one means registration never finished.
@@ -50,6 +71,7 @@ class AppUser {
     name: (json['name'] ?? '').toString().trim(),
     employeeId: (json['employeeId'] ?? '').toString().trim(),
     department: (json['department'] ?? '').toString().trim(),
+    role: (json['role'] ?? '').toString().trim(),
     status: (json['status'] ?? '').toString().trim(),
   );
 }

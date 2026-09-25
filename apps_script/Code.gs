@@ -290,7 +290,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'MACHINE-v26';
+var BACKEND_VERSION = 'ROLES-v27';
 
 function doGet(e) {
   try {
@@ -357,7 +357,7 @@ function doPost(e) {
       // Editing a module's parts/groups is a write like any other, so it
       // answers to the same department rule as logging into it.
       try {
-        resolveWriter(payload, configModuleOf(payload));
+        requireSuperAdmin(payload, configModuleOf(payload));
       } catch (userError) {
         return jsonResponse({ status: 'error', message: userError.message });
       }
@@ -1183,7 +1183,30 @@ function upsertMachiningRow(data) {
 // the next login. Registration appends here (Firebase confirms the email is
 // real; this sheet says who they are and whether they're still with us).
 var USERS_SHEET = 'Users';
-var USERS_HEADERS = ['Email', 'Name', 'EmployeeID', 'Department', 'Status', 'RegisteredAt'];
+var USERS_HEADERS = ['Email', 'Name', 'EmployeeID', 'Department', 'Role', 'Status', 'RegisteredAt'];
+
+// Who may change WHAT THE PLANT MAKES, as opposed to recording what it made.
+// Adding a customer or a part decides what every other person can log against
+// for months; logging output is a shift's own work. They are different kinds
+// of act and the sheet now says which people may do the first.
+var ROLE_OPERATOR = 'operator';
+var ROLE_SUPERADMIN = 'superadmin';
+var USER_ROLES = [ROLE_OPERATOR, ROLE_SUPERADMIN];
+
+// Blank reads as operator, NOT as superadmin. Every row on the sheet predates
+// this column, so the opposite default would quietly grant everyone the thing
+// this is meant to restrict. The admin address is always a superadmin, which
+// is what makes an empty Role column recoverable rather than a lockout.
+function roleOf(user) {
+  if (!user) return ROLE_OPERATOR;
+  if (user.isAdmin) return ROLE_SUPERADMIN;
+  var role = String(user.role || '').trim().toLowerCase();
+  return role === ROLE_SUPERADMIN ? ROLE_SUPERADMIN : ROLE_OPERATOR;
+}
+
+function userIsSuperAdmin(user) {
+  return roleOf(user) === ROLE_SUPERADMIN;
+}
 
 // Sees every department and every dashboard. Everyone else is confined to the
 // one department on their Users row.
@@ -1256,6 +1279,7 @@ function setupUsersValidation() {
     range.clearDataValidations();
     var choices = null;
     if (header === 'Status') choices = ['active', 'inactive'];
+    if (header === 'Role') choices = USER_ROLES;
     if (header === 'Department') choices = DEPARTMENTS.concat([ALL_DEPARTMENTS]);
     if (choices) {
       range.setDataValidation(
@@ -1266,7 +1290,7 @@ function setupUsersValidation() {
       );
     }
   });
-  return 'Users dropdowns refreshed (Status, Department)';
+  return 'Users dropdowns refreshed (Status, Role, Department)';
 }
 
 function getUserByEmail(email) {
@@ -1281,6 +1305,7 @@ function getUserByEmail(email) {
     name: String(match.Name || '').trim(),
     employeeId: String(match.EmployeeID || '').trim(),
     department: String(match.Department || '').trim(),
+    role: String(match.Role || '').trim().toLowerCase(),
     status: String(match.Status || '').trim().toLowerCase(),
     isAdmin: isAdminEmail(match.Email),
   };
@@ -1329,6 +1354,9 @@ function registerUser(payload) {
     merged.Name = name;
     merged.EmployeeID = employeeId;
     merged.Department = department;
+    // Repairing a half-finished registration must never quietly demote
+    // someone the admin has already promoted.
+    if (!String(merged.Role || '').trim()) merged.Role = ROLE_OPERATOR;
     if (!String(merged.Status || '').trim()) merged.Status = 'active';
     sheet.getRange(existing._rowNum, 1, 1, headers.length).setValues([
       headers.map(function (h) {
@@ -1340,6 +1368,7 @@ function registerUser(payload) {
       data: {
         email: email, name: name, employeeId: employeeId,
         department: department,
+        role: String(merged.Role || ROLE_OPERATOR).trim().toLowerCase(),
         status: String(merged.Status).trim().toLowerCase(),
         isAdmin: isAdminEmail(email),
       },
@@ -1355,6 +1384,9 @@ function registerUser(payload) {
     Name: name,
     EmployeeID: employeeId,
     Department: department,
+    // Nobody signs themselves up as a super admin. The admin raises it on the
+    // Users tab, the same place and the same act as admitting them at all.
+    Role: ROLE_OPERATOR,
     Status: 'inactive',
     RegisteredAt: new Date(),
   };
@@ -1376,7 +1408,8 @@ function registerUser(payload) {
     notify: notify,
     data: {
       email: email, name: name, employeeId: employeeId,
-      department: department, status: 'inactive', isAdmin: isAdminEmail(email),
+      department: department, role: ROLE_OPERATOR,
+      status: 'inactive', isAdmin: isAdminEmail(email),
     },
   };
 }
@@ -1543,6 +1576,29 @@ function testTelegram() {
 // pre-login app during the rollout window — which is allowed through
 // unattributed rather than bricking every tablet the moment the backend
 // deploys. Once an email IS sent it must belong to a registered, ACTIVE user.
+// The gate on everything under action=config: adding, renaming or deleting a
+// customer, a part or an operation. Logging production is untouched — that is
+// what an operator is for.
+//
+// Server-side because it has to be: the app hides the buttons, but hiding a
+// button is a courtesy, not a permission.
+function requireSuperAdmin(payload, module) {
+  var user = resolveWriter(payload, module);
+  // No email at all is a pre-login or unattributed call. resolveWriter lets
+  // those through for logging; config edits are not something to let through
+  // on an anonymous request.
+  if (!user) {
+    throw new Error('Sign in to change parts and customers.');
+  }
+  if (!userIsSuperAdmin(user)) {
+    throw new Error(
+      'Only a super admin can add or change parts and customers. ' +
+      'Yours is an operator account — ask the admin to change your Role on the Users tab.'
+    );
+  }
+  return user;
+}
+
 function resolveWriter(data, module) {
   var email = data.UserEmail === undefined ? '' : String(data.UserEmail).trim();
   if (!email) return null;

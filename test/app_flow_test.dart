@@ -14,6 +14,9 @@ import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/casting_models.dart';
 import 'package:hicom_ops/models/downtime_reason.dart';
+import 'package:hicom_ops/screens/machining_parts_screen.dart';
+import 'package:hicom_ops/screens/auth_gate.dart';
+import 'package:hicom_ops/models/app_user.dart';
 import 'package:hicom_ops/models/machine.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/secondary_models.dart';
@@ -1169,6 +1172,127 @@ void main() {
             DateWindow(DateTime(2026, 8, 1), DateTime(2026, 8, 31))),
         'Casting_Night_2026-08-01_to_2026-08-31.csv',
       );
+    });
+  });
+
+  testWidgets('an operator is not offered Add part, or the row menu', (
+    tester,
+  ) async {
+    final mock = MockClient((request) async {
+      if (request.url.queryParameters['action'] == 'parts') {
+        return http.Response(
+          '{"status":"success","data":[{"part":"2214","mo":"2214",'
+          '"machineName":"Fanuc","machineNo":"21","fillPercent":0}]}',
+          200,
+        );
+      }
+      return http.Response('{"status":"success","data":[]}', 200);
+    });
+
+    Widget asRole(String role) => MaterialApp(
+      home: AuthScope(
+        user: AppUser(
+          email: 'ahmad@hidsb.com',
+          name: 'Ahmad',
+          employeeId: 'E1',
+          department: 'Machining',
+          role: role,
+          status: 'active',
+        ),
+        signOut: () {},
+        child: MachiningPartsScreen(
+          customer: 'Mazda',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(asRole('operator'));
+    await tester.pumpAndSettle();
+
+    // The part is there to log against — that is the operator's whole job.
+    expect(find.text('2214'), findsOneWidget);
+    // What is gone is everything that changes what the plant makes.
+    expect(find.text('Add part'), findsNothing);
+    expect(find.byType(CardMenuButton), findsNothing);
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(asRole('superadmin'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add part'), findsOneWidget);
+    expect(find.byType(CardMenuButton), findsOneWidget);
+  });
+
+  group('who may change what the plant makes', () {
+    AppUser user({String role = '', String email = 'ahmad@hidsb.com'}) =>
+        AppUser(
+          email: email,
+          name: 'Ahmad',
+          employeeId: 'E1',
+          department: 'Machining',
+          role: role,
+          status: 'active',
+        );
+
+    test('a blank role is an operator, never a super admin', () {
+      // Every row on the Users tab predates the Role column. Defaulting the
+      // other way would hand everyone exactly what this restricts.
+      expect(user().role, '');
+      expect(user().isSuperAdmin, isFalse);
+      expect(user().canManageConfig, isFalse);
+    });
+
+    test('operator cannot manage config; superadmin can', () {
+      expect(user(role: 'operator').canManageConfig, isFalse);
+      expect(user(role: 'superadmin').canManageConfig, isTrue);
+    });
+
+    test('the role is read however it was typed into the sheet', () {
+      for (final spelling in ['superadmin', 'SuperAdmin', 'SUPERADMIN', '  superadmin  ']) {
+        expect(
+          user(role: spelling).isSuperAdmin,
+          isTrue,
+          reason: 'a human types this cell',
+        );
+      }
+      // Anything that is not the superadmin value is an operator, rather
+      // than some third state that quietly gets permissions.
+      expect(user(role: 'admin').isSuperAdmin, isFalse);
+      expect(user(role: 'super admin').isSuperAdmin, isFalse);
+    });
+
+    test('the admin address is a super admin whatever the column says', () {
+      // This is what makes an empty Role column recoverable instead of a
+      // lockout: someone can always get in and set the others.
+      final admin = user(role: '', email: adminEmail);
+      expect(admin.isSuperAdmin, isTrue);
+      expect(admin.canManageConfig, isTrue);
+      expect(user(role: 'operator', email: adminEmail).isSuperAdmin, isTrue);
+    });
+
+    test('the role rides back from the sheet', () {
+      final parsed = AppUser.fromJson(const {
+        'email': 'ahmad@hidsb.com',
+        'name': 'Ahmad',
+        'employeeId': 'E1',
+        'department': 'Machining',
+        'role': 'superadmin',
+        'status': 'active',
+      });
+      expect(parsed.canManageConfig, isTrue);
+      // An older backend sends no role at all.
+      final legacy = AppUser.fromJson(const {
+        'email': 'ahmad@hidsb.com',
+        'name': 'Ahmad',
+        'employeeId': 'E1',
+        'department': 'Machining',
+        'status': 'active',
+      });
+      expect(legacy.role, '');
+      expect(legacy.canManageConfig, isFalse);
     });
   });
 

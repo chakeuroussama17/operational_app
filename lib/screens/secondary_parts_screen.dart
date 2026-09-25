@@ -5,6 +5,7 @@ import '../models/part_code.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/module_shell.dart';
+import 'auth_gate.dart';
 import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/manage_dialogs.dart';
@@ -199,6 +200,17 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
     return 'No entries yet · ${widget.shift.toLowerCase()} shift';
   }
 
+
+  /// Whether the signed-in person may change what the plant makes. Operators
+  /// log production; adding or removing a part or a customer decides what
+  /// everyone else logs against for months, so it is a super admin's act.
+  ///
+  /// The backend refuses either way — this only stops offering a control that
+  /// would come back as an error. Absent a session (widget tests pump these
+  /// screens bare) there is nothing to gate on, so the controls stay.
+  bool get _canManage =>
+      AuthScope.maybeOf(context)?.user.canManageConfig ?? true;
+
   @override
 Widget build(BuildContext context) {
     return ModuleScaffold(
@@ -232,7 +244,7 @@ Widget _body() {
           AppDimens.screenPadding,
           28,
         ),
-        itemCount: _parts.length + 1,
+        itemCount: _parts.length + (_canManage ? 1 : 0),
         separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == _parts.length) {
@@ -248,7 +260,9 @@ Widget _body() {
             icon: Icons.tag_rounded,
             onTap: () => _openPart(part),
             fillPercent: part.fillPercent,
-            trailing: CardMenuButton(
+            trailing: !_canManage
+                ? null
+                : CardMenuButton(
               onEdit: () => _editPart(part),
               onDelete: () => _deletePart(part),
             ),

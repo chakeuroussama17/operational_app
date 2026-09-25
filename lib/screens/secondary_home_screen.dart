@@ -4,6 +4,7 @@ import '../config/constants.dart';
 import '../models/secondary_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/module_shell.dart';
+import 'auth_gate.dart';
 import '../widgets/card_menu_button.dart';
 import '../widgets/error_retry.dart';
 import '../widgets/manage_dialogs.dart';
@@ -154,6 +155,17 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
     );
   }
 
+
+  /// Whether the signed-in person may change what the plant makes. Operators
+  /// log production; adding or removing a part or a customer decides what
+  /// everyone else logs against for months, so it is a super admin's act.
+  ///
+  /// The backend refuses either way — this only stops offering a control that
+  /// would come back as an error. Absent a session (widget tests pump these
+  /// screens bare) there is nothing to gate on, so the controls stay.
+  bool get _canManage =>
+      AuthScope.maybeOf(context)?.user.canManageConfig ?? true;
+
   @override
 Widget build(BuildContext context) {
     return ModuleScaffold(
@@ -188,7 +200,7 @@ Widget _body() {
           AppDimens.screenPadding,
           28,
         ),
-        itemCount: _stations.length + 1,
+        itemCount: _stations.length + (_canManage ? 1 : 0),
         separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == _stations.length) {
@@ -205,7 +217,9 @@ Widget _body() {
                 : 'No entries yet this shift',
             icon: Icons.handyman_rounded,
             onTap: () => _openStation(station),
-            trailing: CardMenuButton(
+            trailing: !_canManage
+                ? null
+                : CardMenuButton(
               onEdit: () => _renameStation(station),
               onDelete: () => _deleteStation(station),
             ),

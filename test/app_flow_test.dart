@@ -14,6 +14,7 @@ import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/casting_models.dart';
 import 'package:hicom_ops/models/downtime_reason.dart';
+import 'package:hicom_ops/models/machine.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/secondary_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
@@ -612,6 +613,102 @@ void main() {
     });
   });
 
+  testWidgets('part picker: machining asks which machine, and will not skip it', (
+    tester,
+  ) async {
+    PartWithMoInput? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                result = await promptPartCode(
+                  context,
+                  title: 'Add Part',
+                  moduleLabel: 'Machining',
+                  pickMachine: true,
+                  codes: const [
+                    PartCode(
+                      code: '2214',
+                      barcode: '2214-MAZ-M',
+                      name: '2214-MAZ-BRACKET-CAP-LASER-MARKING-MACH',
+                    ),
+                  ],
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Choose part code'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2214').last);
+    await tester.pumpAndSettle();
+
+    // Saving without a machine is refused — a blank one would file the entry
+    // under no machine, which is the state the field exists to end.
+    await tester.tap(find.text('SAVE 2214'));
+    await tester.pumpAndSettle();
+    expect(result, isNull);
+    expect(find.text('Pick the machine this part runs on'), findsOneWidget);
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fanuc 21').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('SAVE 2214'));
+    await tester.pumpAndSettle();
+    expect(result?.name, '2214');
+    expect(result?.machine, 'Fanuc 21');
+  });
+
+  testWidgets('part picker: the other modules are never asked for a machine', (
+    tester,
+  ) async {
+    PartWithMoInput? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                result = await promptPartCode(
+                  context,
+                  title: 'Add Part',
+                  moduleLabel: 'Casting',
+                  codes: const [PartCode(code: '1145', barcode: '', name: '')],
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    // Casting logs one machine per DCM already; asking again would ask twice.
+    expect(find.text('Machine'), findsNothing);
+
+    await tester.tap(find.text('Choose part code'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1145').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SAVE 1145'));
+    await tester.pumpAndSettle();
+    expect(result?.name, '1145');
+    expect(result?.machine, '');
+  });
+
   testWidgets('part picker: a code missing from the list can be typed in', (
     tester,
   ) async {
@@ -1068,6 +1165,37 @@ void main() {
             DateWindow(DateTime(2026, 8, 1), DateTime(2026, 8, 31))),
         'Casting_Night_2026-08-01_to_2026-08-31.csv',
       );
+    });
+  });
+
+  group('machine picker', () {
+    test('a machine reads as the floor says it, name then number', () {
+      expect(machines, isNotEmpty);
+      expect(const Machine('Fanuc', '21').label, 'Fanuc 21');
+      // Numbers stay strings — they are identifiers, and "07" must survive.
+      expect(const Machine('Okuma', '07').label, 'Okuma 07');
+    });
+
+    test('every machine in the roster is distinct', () {
+      final labels = machines.map((m) => m.label).toList();
+      expect(labels.toSet().length, labels.length);
+    });
+
+    test('a stored label resolves back to its machine', () {
+      for (final machine in machines) {
+        expect(machineFromLabel(machine.label)?.label, machine.label);
+      }
+      // Case is how someone typed it, not part of the identity.
+      expect(machineFromLabel('fanuc 21')?.label, 'Fanuc 21');
+      expect(machineFromLabel('  Fanuc 21  ')?.label, 'Fanuc 21');
+    });
+
+    test('a retired machine resolves to null rather than throwing', () {
+      // Rows logged against a machine since removed from the roster still
+      // have to read back — the picker shows the value and lets it change.
+      expect(machineFromLabel('Mazak 99'), isNull);
+      expect(machineFromLabel(''), isNull);
+      expect(machineFromLabel(null), isNull);
     });
   });
 

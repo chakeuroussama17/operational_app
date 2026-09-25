@@ -236,7 +236,11 @@ function castingHeadersForShift(shift) {
 // MACHINING_REJECTIONS_SHEET; downtime is a plain minutes box per hour, so it
 // sits on the row beside the actual it belongs to.
 function machiningHeadersForShift(shift) {
-  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName', 'MO', 'Plan'];
+  // Machine sits beside Operation because it is the same kind of thing: part
+  // of WHICH entry this is, not something measured about it. A part can run on
+  // more than one machine, and before this column existed people encoded that
+  // by renaming the part ("2214 Fanuc 21"), which split every per-part figure.
+  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'Machine', 'Barcode', 'PartName', 'MO', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
@@ -266,7 +270,7 @@ function secondaryHeadersForShift(shift) {
 
 // Config's own frame: the part's identity (Value = code, Barcode, PartName)
 // grouped, with the monthly MO last since it's the one that gets edited.
-var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'Barcode', 'PartName', 'MO'];
+var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'Machine', 'Barcode', 'PartName', 'MO'];
 
 // The "business date" a shift row belongs to. Day shift runs from 10AM to
 // 8PM; Night shift takes over at 10PM and continues through the overnight
@@ -286,7 +290,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'DOWNTIME-ANALYTICS-v24';
+var BACKEND_VERSION = 'MACHINE-v25';
 
 function doGet(e) {
   try {
@@ -311,7 +315,7 @@ function doGet(e) {
       if (action === 'dashboard') return jsonResponse(getMachiningDashboard(mShift, mOp));
       if (action === 'parts') return jsonResponse(getMachiningParts(e.parameter.customer, mShift, mOp));
       if (action === 'row') {
-        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, mOp, mShift));
+        return jsonResponse(getMachiningRow(e.parameter.customer, e.parameter.part, mOp, mShift, e.parameter.machine));
       }
     } else if (module === 'secondary') {
       // Secondary is now shift-aware too (Secondary_Day/Secondary_Night),
@@ -666,12 +670,13 @@ function upsertCastingRow(data) {
 // A part's snapshot attributes, read from its Config row: MO, plus the
 // Barcode (CSV "Part number") and PartName carried over from the master when
 // the part was added. Blank strings when the part or columns don't exist.
-function getConfigPartInfo(module, group, part, operation) {
+function getConfigPartInfo(module, group, part, operation, machine) {
   var rows = getConfigRows();
   var candidates = rows.filter(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part &&
-      partRowMatchesOperation(r, operation);
+      partRowMatchesOperation(r, operation) &&
+      partRowMatchesMachine(r, machine);
   });
   // Machining and assembly can carry different MOs for the same part, so an
   // exact operation match wins over the legacy blank-Operation row that also
@@ -827,23 +832,28 @@ function addPartWithMo(module, payload) {
   // Machining only; blank everywhere else.
   var operation = module === 'machining'
     ? String(payload.operation || '').trim() : '';
+  var machine = module === 'machining'
+    ? String(payload.machine || '').trim() : '';
   if (!group || !part) return { status: 'error', message: 'group and part are required' };
 
   var sheet = getConfigSheet();
   var rows = getAllRowsAsObjects(sheet);
   // Scoped: the same part code may legitimately exist under machining AND
-  // assembly for one customer, since they are different jobs on it.
+  // assembly for one customer, and on more than one machine within each,
+  // since every one of those is a different job on it.
   var dup = rows.some(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part &&
-      partRowMatchesOperation(r, operation);
+      partRowMatchesOperation(r, operation) &&
+      String(r.Machine === undefined || r.Machine === null ? '' : r.Machine).trim().toLowerCase()
+        === machine.toLowerCase();
   });
   if (dup) return { status: 'error', message: 'Already exists' };
 
   var info = lookupMasterPart(module, part);
   writeConfigRow(sheet, {
     Module: module, Kind: 'part', Group: group, Value: part,
-    Operation: operation,
+    Operation: operation, Machine: machine,
     MO: mo, Barcode: info.barcode, PartName: info.name,
   });
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
@@ -865,13 +875,20 @@ function editPartWithMo(module, payload) {
   var moCol = headers.indexOf('MO') + 1;
   var barcodeCol = headers.indexOf('Barcode') + 1;
   var nameCol = headers.indexOf('PartName') + 1;
+  var machineCol = headers.indexOf('Machine') + 1;
   var operation = module === 'machining'
     ? String(payload.operation || '').trim() : '';
+  var machine = module === 'machining'
+    ? String(payload.machine || '').trim() : '';
+  // Absent means "leave it where it is"; a value moves the part to it.
+  var newMachine = payload.newMachine !== undefined && payload.newMachine !== null
+    ? String(payload.newMachine).trim() : machine;
   var rows = getAllRowsAsObjects(sheet);
   var candidates = rows.filter(function (r) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part &&
-      partRowMatchesOperation(r, operation);
+      partRowMatchesOperation(r, operation) &&
+      partRowMatchesMachine(r, machine);
   });
   // Prefer the row that names this operation over a legacy blank one, so
   // editing under machining cannot quietly rewrite assembly's row.
@@ -887,6 +904,9 @@ function editPartWithMo(module, payload) {
     if (nameCol > 0) sheet.getRange(match._rowNum, nameCol).setValue(info.name);
   }
   if (mo !== null && moCol > 0) sheet.getRange(match._rowNum, moCol).setValue(mo);
+  if (machineCol > 0 && newMachine !== machine) {
+    sheet.getRange(match._rowNum, machineCol).setValue(newMachine);
+  }
   invalidateCaches();
   return { status: 'success', version: BACKEND_VERSION, message: 'Updated' };
 }
@@ -925,11 +945,14 @@ function getMachiningParts(customer, shift, operation) {
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
   var slots = slotsForShift(shift);
-  var parts = getConfigParts('machining', customer, operation);
-  var result = parts.map(function (part) {
+  var entries = getConfigPartEntries('machining', customer, operation);
+  var result = entries.map(function (entry) {
+    var part = entry.part;
+    var machine = entry.machine;
     var match = rows.find(function (r) {
       return String(r.Customer) === customer && String(r.PartNo) === part &&
-        matchesOperation(r, operation) && formatDateOnly(r.Date) === shiftDate;
+        matchesOperation(r, operation) && matchesMachine(r, machine) &&
+        formatDateOnly(r.Date) === shiftDate;
     });
     var filled = 0;
     if (match) {
@@ -938,9 +961,10 @@ function getMachiningParts(customer, shift, operation) {
         if (v !== '' && v !== null && v !== undefined) filled++;
       });
     }
-    var info = getConfigPartInfo('machining', customer, part, operation);
+    var info = getConfigPartInfo('machining', customer, part, operation, machine);
     return {
       part: part,
+      machine: machine,
       mo: info.mo,
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
@@ -950,13 +974,14 @@ function getMachiningParts(customer, shift, operation) {
   return { status: 'success', data: result };
 }
 
-function getMachiningRow(customer, part, operation, shift) {
+function getMachiningRow(customer, part, operation, shift, machine) {
   shift = shift === 'Night' ? 'Night' : 'Day';
   var rows = getAllRowsAsObjects(getMachiningSheetForShift(shift));
   var shiftDate = getShiftDate(shift);
   var match = rows.find(function (r) {
     return String(r.Customer) === customer && String(r.PartNo) === part &&
-      matchesOperation(r, operation) && formatDateOnly(r.Date) === shiftDate;
+      matchesOperation(r, operation) && matchesMachine(r, machine) &&
+      formatDateOnly(r.Date) === shiftDate;
   });
   if (!match) return { status: 'success', data: null };
   delete match._rowNum;
@@ -971,6 +996,21 @@ function getMachiningRow(customer, part, operation, shift) {
 function matchesOperation(row, operation) {
   if (operation === undefined || operation === null || operation === '') return true;
   return String(row.Operation) === String(operation);
+}
+
+// A logged row from before the Machine column existed has a blank one, and it
+// is the only row that part has. Treating blank as "matches whatever is asked"
+// keeps that history reachable instead of orphaning it the day this ships.
+function matchesMachine(row, machine) {
+  var wanted = String(machine === undefined || machine === null ? '' : machine).trim();
+  var have = String(row.Machine === undefined || row.Machine === null ? '' : row.Machine).trim();
+  if (!wanted || !have) return true;
+  return have.toLowerCase() === wanted.toLowerCase();
+}
+
+// Same rule on the Config side.
+function partRowMatchesMachine(row, machine) {
+  return matchesMachine(row, machine);
 }
 
 // ---------- Machining: upsert (per-shift sheet, snapshots MO, Rejection per slot) ----------
@@ -991,10 +1031,13 @@ function upsertMachiningRow(data) {
   var shiftDate = getShiftDate(shift);
   var slots = slotsForShift(shift);
 
+  // Machine joins the key: the same part running on two machines keeps two
+  // rows a day instead of the pair overwriting each other's checkpoints.
   var existing = rows.find(function (r) {
     return String(r.Customer) === String(data.Customer) &&
       String(r.PartNo) === String(data.PartNo) &&
       String(r.Operation) === String(data.Operation) &&
+      matchesMachine(r, data.Machine) &&
       formatDateOnly(r.Date) === shiftDate;
   });
 
@@ -1023,11 +1066,17 @@ function upsertMachiningRow(data) {
   merged.Customer = data.Customer;
   merged.PartNo = data.PartNo;
   merged.Operation = data.Operation;
+  // Written on every save, not only at creation: a row that predates the
+  // column has a blank Machine and matched on that blankness, so this is
+  // what fills it in the first time that entry is logged again.
+  if (data.Machine !== undefined && data.Machine !== null && String(data.Machine).trim() !== '') {
+    merged.Machine = String(data.Machine).trim();
+  }
   if (!existing) {
     // Snapshot the part's currently-configured MO onto the row once, at
     // creation — later Config MO edits never rewrite already-logged rows.
     // MO is per-part, so both operations of a part log the same MO.
-    var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo, data.Operation);
+    var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo, data.Operation, data.Machine);
     merged.MO = pinfo.mo;
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
@@ -1816,6 +1865,25 @@ function partRowMatchesOperation(row, operation) {
   return rowOp.toLowerCase() === String(operation).trim().toLowerCase();
 }
 
+// Machining's parts are (part, machine) pairs — the same code can be
+// configured on several machines and each is its own entry. The other modules
+// have one machine per group already, so they keep the flat string list.
+function getConfigPartEntries(module, group, operation) {
+  var rows = getConfigRows();
+  var out = [];
+  rows.forEach(function (r) {
+    if (String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
+        String(r.Group) === group && r.Value &&
+        partRowMatchesOperation(r, operation)) {
+      out.push({
+        part: String(r.Value),
+        machine: String(r.Machine === undefined || r.Machine === null ? '' : r.Machine).trim(),
+      });
+    }
+  });
+  return out;
+}
+
 function getConfigParts(module, group, operation) {
   var rows = getConfigRows();
   var parts = [];
@@ -2184,6 +2252,8 @@ function configMutate(payload) {
   var kind = payload.kind; // 'group' | 'part' | 'operation'
   // Machining parts are per-operation; every other kind ignores this.
   var operation = String(payload.operation || '').trim();
+  // Machining parts are per-machine too; every other kind ignores this.
+  var machine = String(payload.machine || '').trim();
   var group = payload.group !== undefined && payload.group !== null ? String(payload.group) : '';
   var value = payload.value !== undefined && payload.value !== null ? String(payload.value) : '';
   var newValue = payload.newValue !== undefined && payload.newValue !== null ? String(payload.newValue) : '';
@@ -2225,6 +2295,7 @@ function configMutate(payload) {
     writeConfigRow(sheet, {
       Module: module, Kind: kind, Group: group, Value: value,
       Operation: kind === 'part' ? operation : '',
+      Machine: kind === 'part' ? machine : '',
     });
     return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
   }
@@ -2241,7 +2312,8 @@ function configMutate(payload) {
     var target = rows.filter(function (r) {
       return String(r.Module).toLowerCase() === module && r.Kind === kind &&
         String(r.Group || '') === group && String(r.Value || '') === value &&
-        (kind !== 'part' || partRowMatchesOperation(r, operation));
+        (kind !== 'part' || (partRowMatchesOperation(r, operation) &&
+          partRowMatchesMachine(r, machine)));
     });
     if (target.length === 0) return { status: 'error', message: 'Not found' };
     // A machining part that still has no operation of its own lives in both
@@ -2292,7 +2364,8 @@ function configMutate(payload) {
     var partRow = rows.find(function (r) {
       return String(r.Module).toLowerCase() === module && r.Kind === kind &&
         String(r.Group || '') === group && String(r.Value || '') === value &&
-        (kind !== 'part' || partRowMatchesOperation(r, operation));
+        (kind !== 'part' || (partRowMatchesOperation(r, operation) &&
+          partRowMatchesMachine(r, machine)));
     });
     if (!partRow) return { status: 'error', message: 'Not found' };
     sheet.getRange(partRow._rowNum, valueCol).setValue(newValue);

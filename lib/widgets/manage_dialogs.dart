@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
+import '../models/machine.dart';
 import '../models/part_code.dart';
 
 // NOTE on dialog controllers: every dialog here is a StatefulWidget that owns
@@ -82,15 +83,25 @@ class _PromptTextDialogState extends State<_PromptTextDialog> {
 }
 
 /// Result of [promptPartCode]: [name] holds the chosen part CODE (from the
-/// master list), plus its MO (manufacturing order) number.
+/// master list), plus its MO (manufacturing order) number and — for
+/// Machining — the machine it runs on.
 class PartWithMoInput {
-  const PartWithMoInput({required this.name, required this.mo});
+  const PartWithMoInput({
+    required this.name,
+    required this.mo,
+    this.machine = '',
+  });
 
   /// The chosen part code.
   final String name;
 
   /// '' if left blank (no MO set / clearing an existing one).
   final String mo;
+
+  /// "Fanuc 21", or '' for the modules that don't track a machine. Part of
+  /// the part's identity where it is set: the same code on two machines is
+  /// two entries, not one shared between them.
+  final String machine;
 }
 
 /// Single-select picker over a fixed list of names — the casting machines.
@@ -239,6 +250,8 @@ Future<PartWithMoInput?> promptPartCode(
   List<PartCode> codes = const [],
   String? initialCode,
   String? initialMo,
+  bool pickMachine = false,
+  String? initialMachine,
 }) {
   return showDialog<PartWithMoInput>(
     context: context,
@@ -248,6 +261,8 @@ Future<PartWithMoInput?> promptPartCode(
       codes: codes,
       initialCode: initialCode,
       initialMo: initialMo,
+      pickMachine: pickMachine,
+      initialMachine: initialMachine,
     ),
   );
 }
@@ -259,6 +274,8 @@ class _PartCodeDialog extends StatefulWidget {
     required this.codes,
     this.initialCode,
     this.initialMo,
+    this.pickMachine = false,
+    this.initialMachine,
   });
 
   final String title;
@@ -266,6 +283,11 @@ class _PartCodeDialog extends StatefulWidget {
   final List<PartCode> codes;
   final String? initialCode;
   final String? initialMo;
+
+  /// Machining only — the other modules log one machine per group already,
+  /// so asking again there would be asking twice.
+  final bool pickMachine;
+  final String? initialMachine;
 
   @override
   State<_PartCodeDialog> createState() => _PartCodeDialogState();
@@ -281,17 +303,24 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   /// feel this number — anywhere taller, `room` exceeds the 260 cap anyway.
   static const double _dialogChromeHeight = 420;
 
+  /// The machine row adds a field and its gap. Measured the same way as
+  /// [_dialogChromeHeight]: without this the open list keeps its old height
+  /// and pushes the dialog off a short screen.
+  static const double _machineRowHeight = 70;
+
   final _searchController = TextEditingController();
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
   );
   late String _selectedCode = widget.initialCode ?? '';
+  late String _machine = (widget.initialMachine ?? '').trim();
 
   /// The list is shut until the picker row is tapped, and shuts again the
   /// moment a code is chosen. Keeping it closed is what leaves room for the
   /// MO field below — an always-open list covered it.
   bool _open = false;
   String? _error;
+  String? _machineError;
 
   @override
   void dispose() {
@@ -350,9 +379,22 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
       });
       return;
     }
-    Navigator.of(
-      context,
-    ).pop(PartWithMoInput(name: _selectedCode, mo: _moController.text.trim()));
+    // Required where it is asked for: a blank machine would file the entry
+    // under no machine at all, which is the state this field exists to end.
+    if (widget.pickMachine && _machine.isEmpty) {
+      setState(() {
+        _machineError = 'Pick the machine this part runs on';
+        _open = false;
+      });
+      return;
+    }
+    Navigator.of(context).pop(
+      PartWithMoInput(
+        name: _selectedCode,
+        mo: _moController.text.trim(),
+        machine: _machine,
+      ),
+    );
   }
 
   @override
@@ -380,7 +422,10 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     // keyboard and the rest of the dialog have taken their share.
     final media = MediaQuery.of(context);
     final room =
-        media.size.height - media.viewInsets.bottom - _dialogChromeHeight;
+        media.size.height -
+        media.viewInsets.bottom -
+        _dialogChromeHeight -
+        (widget.pickMachine ? _machineRowHeight : 0);
     final listHeight = room.clamp(120.0, 260.0);
 
     return AlertDialog(
@@ -500,6 +545,45 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                           ),
                   ),
                 ),
+              ),
+            ],
+            if (widget.pickMachine) ...[
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: _machine.isEmpty ? null : _machine,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Machine',
+                  isDense: true,
+                  errorText: _machineError,
+                  prefixIcon: const Icon(
+                    Icons.precision_manufacturing_outlined,
+                    size: 20,
+                  ),
+                ),
+                items: [
+                  for (final machine in machines)
+                    DropdownMenuItem(
+                      value: machine.label,
+                      child: Text(machine.label),
+                    ),
+                  // A machine the roster no longer lists still has to be
+                  // selectable, or editing that part would silently move it
+                  // onto a different machine.
+                  if (_machine.isNotEmpty && machineFromLabel(_machine) == null)
+                    DropdownMenuItem(
+                      value: _machine,
+                      child: Text('$_machine (not in the list)'),
+                    ),
+                ],
+                onChanged: (value) => setState(() {
+                  _machine = value ?? '';
+                  _machineError = null;
+                  _open = false;
+                }),
+                onTap: () {
+                  if (_open) setState(() => _open = false);
+                },
               ),
             ],
             const SizedBox(height: 14),

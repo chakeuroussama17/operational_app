@@ -164,6 +164,7 @@ class MachiningPartStatus {
     required this.part,
     this.mo,
     this.name,
+    this.machine = '',
     this.lastUpdated,
     this.fillPercent = 0,
   });
@@ -171,6 +172,11 @@ class MachiningPartStatus {
   /// The part CODE (chosen from the master list) — this card's title.
   final String part;
   final String? mo;
+
+  /// "Fanuc 21" — which machine this entry runs on. Part of the entry's
+  /// identity, so two cards can share a part code and differ only here.
+  /// Empty on rows configured before the machine was asked for.
+  final String machine;
 
   /// Human-readable part name from the master list.
   final String? name;
@@ -185,6 +191,7 @@ class MachiningPartStatus {
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
       name: cleanCell(json['name']),
+      machine: cleanCell(json['machine']) ?? '',
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: fill.clamp(0, 100).round(),
     );

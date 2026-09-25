@@ -290,7 +290,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'LINE-v28';
+var BACKEND_VERSION = 'TELEGRAM-MULTI-v29';
 
 function doGet(e) {
   try {
@@ -1489,15 +1489,31 @@ function getRawTab(name, limit) {
 // SETUP (once, and NOT in this file — the repo is public):
 //   Apps Script editor -> Project Settings -> Script Properties -> add
 //     TELEGRAM_BOT_TOKEN   the token BotFather gave you
-//     TELEGRAM_CHAT_ID     the chat to notify
+//     TELEGRAM_CHAT_ID     who to notify — one chat id, or several separated
+//                          by commas: "12345678, -100987654321, 87654321"
 //   Missing either one just turns notifications off; nothing else breaks.
+//
+//   ADDING SOMEONE: append their chat id to TELEGRAM_CHAT_ID. Two things have
+//   to be true or Telegram silently drops it — they must have opened a chat
+//   with the bot and pressed Start (a bot cannot message a stranger), and the
+//   id must be theirs, which @userinfobot will tell them. A group works too:
+//   add the bot to it and use the group's id, which starts with a minus.
 // If the token ever lands in a commit, revoke it in BotFather and put the
 // replacement here — a leaked bot token lets anyone post as the bot.
 function telegramConfig() {
   var props = PropertiesService.getScriptProperties();
+  var raw = String(props.getProperty('TELEGRAM_CHAT_ID') || '');
+  // Commas, semicolons, spaces and newlines all separate, because the person
+  // editing a Script Property is typing into a single-line box and will use
+  // whichever of those they reach for.
+  var chatIds = raw.split(/[\s,;]+/).map(function (id) {
+    return id.trim();
+  }).filter(function (id) {
+    return id !== '';
+  });
   return {
     token: String(props.getProperty('TELEGRAM_BOT_TOKEN') || '').trim(),
-    chatId: String(props.getProperty('TELEGRAM_CHAT_ID') || '').trim(),
+    chatIds: chatIds,
   };
 }
 
@@ -1512,15 +1528,24 @@ function escapeHtmlForTelegram(value) {
 // Every error is swallowed and logged, so the operator still gets in.
 function sendTelegram(text) {
   var config = telegramConfig();
-  if (!config.token || !config.chatId) return 'skipped (no Telegram config)';
+  if (!config.token || !config.chatIds.length) return 'skipped (no Telegram config)';
+  // Each recipient is sent to independently: one id that has never opened a
+  // chat with the bot must not cost everyone else their notification.
+  var results = config.chatIds.map(function (chatId) {
+    return sendTelegramTo(config.token, chatId, text);
+  });
+  return results.join('; ');
+}
+
+function sendTelegramTo(token, chatId, text) {
   try {
     var response = UrlFetchApp.fetch(
-      'https://api.telegram.org/bot' + config.token + '/sendMessage',
+      'https://api.telegram.org/bot' + token + '/sendMessage',
       {
         method: 'post',
         contentType: 'application/json',
         payload: JSON.stringify({
-          chat_id: config.chatId,
+          chat_id: chatId,
           parse_mode: 'HTML',
           disable_web_page_preview: true,
           text: text,
@@ -1528,18 +1553,29 @@ function sendTelegram(text) {
         muteHttpExceptions: true,
       }
     );
-    return 'telegram ' + response.getResponseCode();
+    var code = response.getResponseCode();
+    if (code === 200) return chatId + ' ok';
+    // Telegram explains itself in the body, and the usual explanation is
+    // that this person never pressed Start. Carry it back rather than
+    // leaving a bare 403 to be guessed at.
+    var why = '';
+    try {
+      why = ' ' + String(JSON.parse(response.getContentText()).description || '');
+    } catch (ignored) {
+      // A non-JSON body is not worth failing over.
+    }
+    return chatId + ' FAILED ' + code + why;
   } catch (err) {
-    Logger.log('Telegram send failed: ' + err);
+    Logger.log('Telegram send failed for ' + chatId + ': ' + err);
     var message = String(err);
     // The first external request a script ever makes needs a scope the
     // project does not have yet. Say so plainly — the fix is to run
     // testTelegram() once from the editor and accept the prompt.
     if (message.indexOf('permission') !== -1 || message.indexOf('Authorization') !== -1) {
-      return 'telegram blocked: run testTelegram() once from the editor and ' +
+      return chatId + ' blocked: run testTelegram() once from the editor and ' +
         'grant the external-request permission';
     }
-    return 'telegram failed: ' + message;
+    return chatId + ' failed: ' + message;
   }
 }
 
@@ -1566,7 +1602,13 @@ function notifyNewRegistration(user) {
 
 // Run once from the editor after adding the Script Properties, to prove the
 // bot and chat ID are right before a real registration depends on them.
+// Run once from the editor after adding or changing the Script Properties,
+// to prove every recipient is reachable before a real registration depends
+// on them. The log names each chat id and says ok or why not, so an id that
+// never pressed Start is obvious rather than silently missing out.
 function testTelegram() {
+  var config = telegramConfig();
+  Logger.log('Recipients configured: ' + (config.chatIds.length || 'NONE'));
   Logger.log(sendTelegram(
     '<b>HICOM Ops</b> — test message. New registrations will appear here.'
   ));

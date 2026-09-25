@@ -36,12 +36,9 @@ class ProductionLine {
 }
 
 const List<ProductionLine> productionLines = [
-  ProductionLine('Fanuc', '20'),
-  ProductionLine('Fanuc', '21'),
-  ProductionLine('Fanuc', '30'),
-  ProductionLine('Okuma', '7'),
-  ProductionLine('Okuma', '8'),
-  ProductionLine('Okuma', '11'),
+  ProductionLine('Line 1', '001'),
+  ProductionLine('Line 2', '002'),
+  ProductionLine('Line 3', '003'),
 ];
 
 /// Splits a picker label back into the pair the sheet stores.

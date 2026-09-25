@@ -662,18 +662,19 @@ void main() {
     expect(result, isNull);
     expect(find.text('Pick the line this part runs on'), findsOneWidget);
 
+    final line = productionLines.first;
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Fanuc 21').last);
+    await tester.tap(find.text(line.label).last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('SAVE 2214'));
     await tester.pumpAndSettle();
     expect(result?.name, '2214');
     // Split the way the sheet stores it, joined again for display.
-    expect(result?.lineName, 'Fanuc');
-    expect(result?.lineNo, '21');
-    expect(result?.lineLabel, 'Fanuc 21');
+    expect(result?.lineName, line.name);
+    expect(result?.lineNo, line.number);
+    expect(result?.lineLabel, line.label);
   });
 
   testWidgets('part picker: the other modules are never asked for a line', (
@@ -1314,9 +1315,13 @@ void main() {
       for (final line in productionLines) {
         expect(lineFromLabel(line.label)?.label, line.label);
       }
-      // Case is how someone typed it, not part of the identity.
-      expect(lineFromLabel('fanuc 21')?.label, 'Fanuc 21');
-      expect(lineFromLabel('  Fanuc 21  ')?.label, 'Fanuc 21');
+      // Case and stray spacing are how someone typed it, not part of the
+      // identity. Taken from the roster rather than written out, because the
+      // plant edits that list and a test must not pin its contents.
+      final label = productionLines.first.label;
+      expect(lineFromLabel(label.toLowerCase())?.label, label);
+      expect(lineFromLabel(label.toUpperCase())?.label, label);
+      expect(lineFromLabel('  $label  ')?.label, label);
     });
 
     test('a label splits into the two columns the sheet keeps', () {

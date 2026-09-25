@@ -365,30 +365,30 @@ class SheetsService {
         .toList();
   }
 
-  /// This shift's saved row for this Customer + Part + Operation + Machine,
-  /// or null. The machine is part of the key: the same part running on two
-  /// machines keeps two rows a day rather than the pair colliding into one.
+  /// This shift's saved row for this Customer + Part + Operation + ProductionLine,
+  /// or null. The line is part of the key: the same part running on two
+  /// productionLines keeps two rows a day rather than the pair colliding into one.
   Future<MachiningRow?> fetchMachiningRow({
     required String customer,
     required String part,
     required String operation,
     required String shift,
-    String machineName = '',
-    String machineNo = '',
+    String lineName = '',
+    String lineNo = '',
   }) async {
-    // Omitted rather than sent blank when the entry has no machine: the
-    // backend reads an absent machine as "any", which is what a pre-machine
+    // Omitted rather than sent blank when the entry has no line: the
+    // backend reads an absent line as "any", which is what a pre-line
     // entry needs, and an empty parameter would say the same thing louder.
-    final name = machineName.trim();
-    final number = machineNo.trim();
+    final name = lineName.trim();
+    final number = lineNo.trim();
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'row',
       'module': 'machining',
       'customer': customer,
       'part': part,
       'operation': operation,
-      'machineName': ?(name.isEmpty ? null : name),
-      'machineNo': ?(number.isEmpty ? null : number),
+      'lineName': ?(name.isEmpty ? null : name),
+      'lineNo': ?(number.isEmpty ? null : number),
       'shift': shift,
     });
     if (decoded == null) return null;
@@ -418,8 +418,8 @@ class SheetsService {
   /// the operation is part of the part's identity — without it, adding or
   /// deleting under one operation changes the other's list too.
   ///
-  /// The machine is part of that identity too: the same code running on two
-  /// machines is two entries, which is what stops people encoding the machine
+  /// The line is part of that identity too: the same code running on two
+  /// productionLines is two entries, which is what stops people encoding the line
   /// into the part's own name and splitting every per-part figure with it.
   /// Name and number travel separately because that is how the sheet keeps
   /// them — one column each, so a pivot can group a whole family.
@@ -427,8 +427,8 @@ class SheetsService {
     required String customer,
     required String part,
     required String operation,
-    required String machineName,
-    required String machineNo,
+    required String lineName,
+    required String lineNo,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -439,8 +439,8 @@ class SheetsService {
       'group': customer,
       'part': part,
       'operation': operation,
-      'machineName': machineName,
-      'machineNo': machineNo,
+      'lineName': lineName,
+      'lineNo': lineNo,
       'mo': ?mo,
     });
   }
@@ -448,17 +448,17 @@ class SheetsService {
   /// Renames a Machining part and/or updates its MO number. Only ever touches
   /// the Config sheet — rows already logged keep the MO snapshotted onto them.
   ///
-  /// [machineName]/[machineNo] identify WHICH entry is being edited; the
-  /// `new` pair moves it to another machine, and default to staying put.
+  /// [lineName]/[lineNo] identify WHICH entry is being edited; the
+  /// `new` pair moves it to another line, and default to staying put.
   Future<void> editMachiningPart({
     required String customer,
     required String part,
     required String newPart,
     required String operation,
-    required String machineName,
-    required String machineNo,
-    String? newMachineName,
-    String? newMachineNo,
+    required String lineName,
+    required String lineNo,
+    String? newLineName,
+    String? newLineNo,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -470,10 +470,10 @@ class SheetsService {
       'part': part,
       'newPart': newPart,
       'operation': operation,
-      'machineName': machineName,
-      'machineNo': machineNo,
-      'newMachineName': newMachineName ?? machineName,
-      'newMachineNo': newMachineNo ?? machineNo,
+      'lineName': lineName,
+      'lineNo': lineNo,
+      'newLineName': newLineName ?? lineName,
+      'newLineNo': newLineNo ?? lineNo,
       'mo': ?mo,
     });
   }
@@ -587,8 +587,8 @@ class SheetsService {
     String? group,
     required String value,
     String? operation,
-    String? machineName,
-    String? machineNo,
+    String? lineName,
+    String? lineNo,
   }) => _configMutate(
     'delete',
     module,
@@ -597,8 +597,8 @@ class SheetsService {
     value,
     null,
     operation: operation,
-    machineName: machineName,
-    machineNo: machineNo,
+    lineName: lineName,
+    lineNo: lineNo,
   );
 
   /// Renames a group (cascades to its parts' group reference), a part, or a
@@ -620,8 +620,8 @@ class SheetsService {
     String value,
     String? newValue, {
     String? operation,
-    String? machineName,
-    String? machineNo,
+    String? lineName,
+    String? lineNo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -634,8 +634,8 @@ class SheetsService {
       'value': value,
       'newValue': ?newValue,
       'operation': ?operation,
-      'machineName': ?machineName,
-      'machineNo': ?machineNo,
+      'lineName': ?lineName,
+      'lineNo': ?lineNo,
     });
   }
 

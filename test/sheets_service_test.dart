@@ -20,16 +20,16 @@ void main() {
         }),
       );
 
-      final machines = await service.fetchCastingDashboard(shift: 'Day');
+      final productionLines = await service.fetchCastingDashboard(shift: 'Day');
 
       expect(requested.queryParameters, {
         'action': 'dashboard',
         'shift': 'Day',
       });
-      expect(machines, hasLength(2));
-      expect(machines[0].dcm, '1212');
-      expect(machines[0].lastUpdated, '14:32');
-      expect(machines[1].lastUpdated, isNull);
+      expect(productionLines, hasLength(2));
+      expect(productionLines[0].dcm, '1212');
+      expect(productionLines[0].lastUpdated, '14:32');
+      expect(productionLines[1].lastUpdated, isNull);
     });
 
     test(
@@ -569,8 +569,8 @@ void main() {
         customer: 'Mazda',
         part: '9',
         operation: 'assembly',
-        machineName: 'Fanuc',
-        machineNo: '21',
+        lineName: 'Fanuc',
+        lineNo: '21',
         mo: 'MACH-09',
       );
 
@@ -581,11 +581,11 @@ void main() {
       expect(sent['mo'], 'MACH-09');
       // Without this the part lands in both operations' lists.
       expect(sent['operation'], 'assembly');
-      // And without these, the same code on a second machine would collide
+      // And without these, the same code on a second line would collide
       // with the first instead of being its own entry. Two columns, so the
       // sheet can group a whole family or sort by number.
-      expect(sent['machineName'], 'Fanuc');
-      expect(sent['machineNo'], '21');
+      expect(sent['lineName'], 'Fanuc');
+      expect(sent['lineNo'], '21');
     });
 
     test('editMachiningPart: omits mo when left unset', () async {
@@ -602,8 +602,8 @@ void main() {
         part: '1',
         newPart: '1',
         operation: 'machining',
-        machineName: 'Okuma',
-        machineNo: '7',
+        lineName: 'Okuma',
+        lineNo: '7',
       );
 
       expect(sent['op'], 'machiningEditPart');
@@ -968,8 +968,8 @@ void main() {
         customer: 'Mazda',
         part: '9',
         operation: 'machining',
-        machineName: 'Fanuc',
-        machineNo: '20',
+        lineName: 'Fanuc',
+        lineNo: '20',
       );
 
       expect(
@@ -1020,10 +1020,10 @@ void main() {
         }),
       );
 
-      final machines = await service.fetchCastingDashboard(shift: 'Day');
+      final productionLines = await service.fetchCastingDashboard(shift: 'Day');
 
       expect(attempts, 2, reason: 'the first attempt timed out');
-      expect(machines.single.dcm, '1212');
+      expect(productionLines.single.dcm, '1212');
     });
 
     test('a read that keeps timing out reports it plainly', () async {

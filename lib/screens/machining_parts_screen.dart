@@ -87,8 +87,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               customer: widget.customer,
               part: part.part,
               operation: widget.operation,
-              machineName: part.machineName,
-              machineNo: part.machineNo,
+              lineName: part.lineName,
+              lineNo: part.lineNo,
               shift: widget.shift,
               mo: part.mo,
             ),
@@ -122,7 +122,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       title: 'Add Part',
       moduleLabel: widget.operation.label,
       codes: codes,
-      pickMachine: true,
+      pickLine: true,
     );
     if (input == null) return;
     await _mutate(
@@ -130,8 +130,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         customer: widget.customer,
         part: input.name,
         operation: widget.operation.value,
-        machineName: input.machineName,
-        machineNo: input.machineNo,
+        lineName: input.lineName,
+        lineNo: input.lineNo,
         mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
@@ -147,8 +147,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
-      pickMachine: true,
-      initialMachine: part.machine,
+      pickLine: true,
+      initialLine: part.line,
     );
     if (input == null) return;
     await _mutate(
@@ -158,11 +158,11 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         newPart: input.name,
         operation: widget.operation.value,
         // Which entry is being edited, and where it ends up — the pair is
-        // how a part gets moved from one machine to another.
-        machineName: part.machineName,
-        machineNo: part.machineNo,
-        newMachineName: input.machineName,
-        newMachineNo: input.machineNo,
+        // how a part gets moved from one line to another.
+        lineName: part.lineName,
+        lineNo: part.lineNo,
+        newLineName: input.lineName,
+        newLineNo: input.lineNo,
         mo: input.mo,
       ),
     );
@@ -207,9 +207,9 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   Future<void> _deletePart(MachiningPartStatus part) async {
     final confirmed = await confirmDelete(
       context,
-      title: part.machine.isEmpty
+      title: part.line.isEmpty
           ? 'Delete Part ${part.part}?'
-          : 'Delete ${part.part} on ${part.machine}?',
+          : 'Delete ${part.part} on ${part.line}?',
       message:
           'Historical logs already saved are not affected. '
           'This cannot be undone.',
@@ -223,10 +223,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         value: part.part,
         // Scoped, or deleting from machining takes it out of assembly too.
         operation: widget.operation.value,
-        // And scoped again by machine, or deleting the part from one machine
-        // takes it off every other machine running it.
-        machineName: part.machineName,
-        machineNo: part.machineNo,
+        // And scoped again by line, or deleting the part from one line
+        // takes it off every other line running it.
+        lineName: part.lineName,
+        lineNo: part.lineNo,
       ),
     );
   }
@@ -308,11 +308,11 @@ Widget _body() {
 
 /// "Fanuc 21 · MO X · HH:mm" and so on down to "No entries yet today".
 ///
-/// The machine leads, because it is the only thing distinguishing two cards
+/// The line leads, because it is the only thing distinguishing two cards
 /// that share a part code — which is the whole reason it is asked for.
 String _partSubtitle(MachiningPartStatus part) {
   final parts = <String>[
-    if (part.machine.isNotEmpty) part.machine,
+    if (part.line.isNotEmpty) part.line,
     if (part.mo != null) 'MO ${part.mo}',
     if (part.name != null) part.name!,
   ];

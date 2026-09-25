@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
-import '../models/machine.dart';
+import '../models/production_line.dart';
 import '../models/part_code.dart';
 
 // NOTE on dialog controllers: every dialog here is a StatefulWidget that owns
@@ -84,13 +84,13 @@ class _PromptTextDialogState extends State<_PromptTextDialog> {
 
 /// Result of [promptPartCode]: [name] holds the chosen part CODE (from the
 /// master list), plus its MO (manufacturing order) number and — for
-/// Machining — the machine it runs on.
+/// Machining — the line it runs on.
 class PartWithMoInput {
   const PartWithMoInput({
     required this.name,
     required this.mo,
-    this.machineName = '',
-    this.machineNo = '',
+    this.lineName = '',
+    this.lineNo = '',
   });
 
   /// The chosen part code.
@@ -99,27 +99,27 @@ class PartWithMoInput {
   /// '' if left blank (no MO set / clearing an existing one).
   final String mo;
 
-  /// The machine split the way the sheet stores it — "Fanuc" and "21" in
+  /// The line split the way the sheet stores it — "Fanuc" and "21" in
   /// their own columns, so a pivot can group every Okuma or sort by number.
-  /// Both are '' for the modules that don't track a machine.
+  /// Both are '' for the modules that don't track a line.
   ///
   /// Part of the part's identity where it is set: the same code on two
-  /// machines is two entries, not one shared between them.
-  final String machineName;
-  final String machineNo;
+  /// productionLines is two entries, not one shared between them.
+  final String lineName;
+  final String lineNo;
 
   /// The pair as one line, for anything that just wants to show it.
-  String get machineLabel => machineLabelOf(machineName, machineNo);
+  String get lineLabel => lineLabelOf(lineName, lineNo);
 }
 
-/// Single-select picker over a fixed list of names — the casting machines.
+/// Single-select picker over a fixed list of names — the casting productionLines.
 ///
-/// Free text let the same machine into the sheet under several spellings
+/// Free text let the same line into the sheet under several spellings
 /// ("DCM8", "dcm 08"), and every one of those is a separate group that splits
 /// its own history. Picking from a list makes that impossible.
 ///
 /// [taken] are names already configured: shown, but greyed and unselectable,
-/// so it's obvious the machine exists rather than the list being wrong.
+/// so it's obvious the line exists rather than the list being wrong.
 /// [initialValue] is always selectable even when taken (that's the row being
 /// renamed) and is shown even when it isn't in [options] at all — which is how
 /// a legacy name like "1212" can be moved onto a real one.
@@ -258,8 +258,8 @@ Future<PartWithMoInput?> promptPartCode(
   List<PartCode> codes = const [],
   String? initialCode,
   String? initialMo,
-  bool pickMachine = false,
-  String? initialMachine,
+  bool pickLine = false,
+  String? initialLine,
 }) {
   return showDialog<PartWithMoInput>(
     context: context,
@@ -269,8 +269,8 @@ Future<PartWithMoInput?> promptPartCode(
       codes: codes,
       initialCode: initialCode,
       initialMo: initialMo,
-      pickMachine: pickMachine,
-      initialMachine: initialMachine,
+      pickLine: pickLine,
+      initialLine: initialLine,
     ),
   );
 }
@@ -282,8 +282,8 @@ class _PartCodeDialog extends StatefulWidget {
     required this.codes,
     this.initialCode,
     this.initialMo,
-    this.pickMachine = false,
-    this.initialMachine,
+    this.pickLine = false,
+    this.initialLine,
   });
 
   final String title;
@@ -292,10 +292,10 @@ class _PartCodeDialog extends StatefulWidget {
   final String? initialCode;
   final String? initialMo;
 
-  /// Machining only — the other modules log one machine per group already,
+  /// Machining only — the other modules log one line per group already,
   /// so asking again there would be asking twice.
-  final bool pickMachine;
-  final String? initialMachine;
+  final bool pickLine;
+  final String? initialLine;
 
   @override
   State<_PartCodeDialog> createState() => _PartCodeDialogState();
@@ -311,24 +311,24 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   /// feel this number — anywhere taller, `room` exceeds the 260 cap anyway.
   static const double _dialogChromeHeight = 420;
 
-  /// The machine row adds a field and its gap. Measured the same way as
+  /// The line row adds a field and its gap. Measured the same way as
   /// [_dialogChromeHeight]: without this the open list keeps its old height
   /// and pushes the dialog off a short screen.
-  static const double _machineRowHeight = 70;
+  static const double _lineRowHeight = 70;
 
   final _searchController = TextEditingController();
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
   );
   late String _selectedCode = widget.initialCode ?? '';
-  late String _machine = (widget.initialMachine ?? '').trim();
+  late String _line = (widget.initialLine ?? '').trim();
 
   /// The list is shut until the picker row is tapped, and shuts again the
   /// moment a code is chosen. Keeping it closed is what leaves room for the
   /// MO field below — an always-open list covered it.
   bool _open = false;
   String? _error;
-  String? _machineError;
+  String? _lineError;
 
   @override
   void dispose() {
@@ -387,22 +387,22 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
       });
       return;
     }
-    // Required where it is asked for: a blank machine would file the entry
-    // under no machine at all, which is the state this field exists to end.
-    if (widget.pickMachine && _machine.isEmpty) {
+    // Required where it is asked for: a blank line would file the entry
+    // under no line at all, which is the state this field exists to end.
+    if (widget.pickLine && _line.isEmpty) {
       setState(() {
-        _machineError = 'Pick the machine this part runs on';
+        _lineError = 'Pick the line this part runs on';
         _open = false;
       });
       return;
     }
-    final machine = splitMachineLabel(_machine);
+    final line = splitLineLabel(_line);
     Navigator.of(context).pop(
       PartWithMoInput(
         name: _selectedCode,
         mo: _moController.text.trim(),
-        machineName: machine.name,
-        machineNo: machine.number,
+        lineName: line.name,
+        lineNo: line.number,
       ),
     );
   }
@@ -435,7 +435,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
         media.size.height -
         media.viewInsets.bottom -
         _dialogChromeHeight -
-        (widget.pickMachine ? _machineRowHeight : 0);
+        (widget.pickLine ? _lineRowHeight : 0);
     final listHeight = room.clamp(120.0, 260.0);
 
     return AlertDialog(
@@ -557,38 +557,38 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                 ),
               ),
             ],
-            if (widget.pickMachine) ...[
+            if (widget.pickLine) ...[
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
-                initialValue: _machine.isEmpty ? null : _machine,
+                initialValue: _line.isEmpty ? null : _line,
                 isExpanded: true,
                 decoration: InputDecoration(
-                  labelText: 'Machine',
+                  labelText: 'Line',
                   isDense: true,
-                  errorText: _machineError,
+                  errorText: _lineError,
                   prefixIcon: const Icon(
                     Icons.precision_manufacturing_outlined,
                     size: 20,
                   ),
                 ),
                 items: [
-                  for (final machine in machines)
+                  for (final line in productionLines)
                     DropdownMenuItem(
-                      value: machine.label,
-                      child: Text(machine.label),
+                      value: line.label,
+                      child: Text(line.label),
                     ),
-                  // A machine the roster no longer lists still has to be
+                  // A line the roster no longer lists still has to be
                   // selectable, or editing that part would silently move it
-                  // onto a different machine.
-                  if (_machine.isNotEmpty && machineFromLabel(_machine) == null)
+                  // onto a different line.
+                  if (_line.isNotEmpty && lineFromLabel(_line) == null)
                     DropdownMenuItem(
-                      value: _machine,
-                      child: Text('$_machine (not in the list)'),
+                      value: _line,
+                      child: Text('$_line (not in the list)'),
                     ),
                 ],
                 onChanged: (value) => setState(() {
-                  _machine = value ?? '';
-                  _machineError = null;
+                  _line = value ?? '';
+                  _lineError = null;
                   _open = false;
                 }),
                 onTap: () {

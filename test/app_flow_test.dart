@@ -17,7 +17,7 @@ import 'package:hicom_ops/models/downtime_reason.dart';
 import 'package:hicom_ops/screens/machining_parts_screen.dart';
 import 'package:hicom_ops/screens/auth_gate.dart';
 import 'package:hicom_ops/models/app_user.dart';
-import 'package:hicom_ops/models/machine.dart';
+import 'package:hicom_ops/models/production_line.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/models/secondary_models.dart';
 import 'package:hicom_ops/models/part_code.dart';
@@ -616,7 +616,7 @@ void main() {
     });
   });
 
-  testWidgets('part picker: machining asks which machine, and will not skip it', (
+  testWidgets('part picker: machining asks which line, and will not skip it', (
     tester,
   ) async {
     PartWithMoInput? result;
@@ -630,7 +630,7 @@ void main() {
                   context,
                   title: 'Add Part',
                   moduleLabel: 'Machining',
-                  pickMachine: true,
+                  pickLine: true,
                   codes: const [
                     PartCode(
                       code: '2214',
@@ -655,12 +655,12 @@ void main() {
     await tester.tap(find.text('2214').last);
     await tester.pumpAndSettle();
 
-    // Saving without a machine is refused — a blank one would file the entry
-    // under no machine, which is the state the field exists to end.
+    // Saving without a line is refused — a blank one would file the entry
+    // under no line, which is the state the field exists to end.
     await tester.tap(find.text('SAVE 2214'));
     await tester.pumpAndSettle();
     expect(result, isNull);
-    expect(find.text('Pick the machine this part runs on'), findsOneWidget);
+    expect(find.text('Pick the line this part runs on'), findsOneWidget);
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
@@ -671,12 +671,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(result?.name, '2214');
     // Split the way the sheet stores it, joined again for display.
-    expect(result?.machineName, 'Fanuc');
-    expect(result?.machineNo, '21');
-    expect(result?.machineLabel, 'Fanuc 21');
+    expect(result?.lineName, 'Fanuc');
+    expect(result?.lineNo, '21');
+    expect(result?.lineLabel, 'Fanuc 21');
   });
 
-  testWidgets('part picker: the other modules are never asked for a machine', (
+  testWidgets('part picker: the other modules are never asked for a line', (
     tester,
   ) async {
     PartWithMoInput? result;
@@ -702,8 +702,9 @@ void main() {
 
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    // Casting logs one machine per DCM already; asking again would ask twice.
-    expect(find.text('Machine'), findsNothing);
+    // Casting already logs against a DCM; asking for a line too would be
+    // asking the same question twice.
+    expect(find.text('Line'), findsNothing);
 
     await tester.tap(find.text('Choose part code'));
     await tester.pumpAndSettle();
@@ -712,8 +713,8 @@ void main() {
     await tester.tap(find.text('SAVE 1145'));
     await tester.pumpAndSettle();
     expect(result?.name, '1145');
-    expect(result?.machineName, '');
-    expect(result?.machineNo, '');
+    expect(result?.lineName, '');
+    expect(result?.lineNo, '');
   });
 
   testWidgets('part picker: a code missing from the list can be typed in', (
@@ -864,7 +865,7 @@ void main() {
       tester,
     ) async {
       // The seeded placeholders (1212, 3131...) predate this list; renaming is
-      // how they become real machines, so the old name needs a row.
+      // how they become real productionLines, so the old name needs a row.
       await open(tester, initialValue: '1212', taken: {'1212'});
 
       expect(find.text('1212'), findsOneWidget);
@@ -1182,7 +1183,7 @@ void main() {
       if (request.url.queryParameters['action'] == 'parts') {
         return http.Response(
           '{"status":"success","data":[{"part":"2214","mo":"2214",'
-          '"machineName":"Fanuc","machineNo":"21","fillPercent":0}]}',
+          '"lineName":"Fanuc","lineNo":"21","fillPercent":0}]}',
           200,
         );
       }
@@ -1296,70 +1297,70 @@ void main() {
     });
   });
 
-  group('machine picker', () {
-    test('a machine reads as the floor says it, name then number', () {
-      expect(machines, isNotEmpty);
-      expect(const Machine('Fanuc', '21').label, 'Fanuc 21');
+  group('line picker', () {
+    test('a line reads as the floor says it, name then number', () {
+      expect(productionLines, isNotEmpty);
+      expect(const ProductionLine('Fanuc', '21').label, 'Fanuc 21');
       // Numbers stay strings — they are identifiers, and "07" must survive.
-      expect(const Machine('Okuma', '07').label, 'Okuma 07');
+      expect(const ProductionLine('Okuma', '07').label, 'Okuma 07');
     });
 
-    test('every machine in the roster is distinct', () {
-      final labels = machines.map((m) => m.label).toList();
+    test('every line in the roster is distinct', () {
+      final labels = productionLines.map((m) => m.label).toList();
       expect(labels.toSet().length, labels.length);
     });
 
-    test('a stored label resolves back to its machine', () {
-      for (final machine in machines) {
-        expect(machineFromLabel(machine.label)?.label, machine.label);
+    test('a stored label resolves back to its line', () {
+      for (final line in productionLines) {
+        expect(lineFromLabel(line.label)?.label, line.label);
       }
       // Case is how someone typed it, not part of the identity.
-      expect(machineFromLabel('fanuc 21')?.label, 'Fanuc 21');
-      expect(machineFromLabel('  Fanuc 21  ')?.label, 'Fanuc 21');
+      expect(lineFromLabel('fanuc 21')?.label, 'Fanuc 21');
+      expect(lineFromLabel('  Fanuc 21  ')?.label, 'Fanuc 21');
     });
 
     test('a label splits into the two columns the sheet keeps', () {
-      expect(splitMachineLabel('Fanuc 21'), (name: 'Fanuc', number: '21'));
-      expect(splitMachineLabel('Okuma 11'), (name: 'Okuma', number: '11'));
-      expect(splitMachineLabel(''), (name: '', number: ''));
-      expect(splitMachineLabel(null), (name: '', number: ''));
+      expect(splitLineLabel('Fanuc 21'), (name: 'Fanuc', number: '21'));
+      expect(splitLineLabel('Okuma 11'), (name: 'Okuma', number: '11'));
+      expect(splitLineLabel(''), (name: '', number: ''));
+      expect(splitLineLabel(null), (name: '', number: ''));
     });
 
-    test('a machine off the roster still splits, never silently empty', () {
+    test('a line off the roster still splits, never silently empty', () {
       // Retired, or typed straight into the sheet. The name must survive or
-      // the row stops saying which machine it meant.
-      expect(splitMachineLabel('Mazak 99'), (name: 'Mazak', number: '99'));
+      // the row stops saying which line it meant.
+      expect(splitLineLabel('Mazak 99'), (name: 'Mazak', number: '99'));
       // Multi-word names keep the number as the last token.
       expect(
-        splitMachineLabel('Brother Speedio S700'),
+        splitLineLabel('Brother Speedio S700'),
         (name: 'Brother Speedio', number: 'S700'),
       );
       // No number at all: it is all name.
-      expect(splitMachineLabel('Lathe'), (name: 'Lathe', number: ''));
+      expect(splitLineLabel('Lathe'), (name: 'Lathe', number: ''));
     });
 
     test('the two columns rejoin for display', () {
-      expect(machineLabelOf('Fanuc', '21'), 'Fanuc 21');
+      expect(lineLabelOf('Fanuc', '21'), 'Fanuc 21');
       // Either half may be blank on a row predating the columns.
-      expect(machineLabelOf('Fanuc', ''), 'Fanuc');
-      expect(machineLabelOf('', '21'), '21');
-      expect(machineLabelOf('', ''), '');
-      expect(machineLabelOf(null, null), '');
+      expect(lineLabelOf('Fanuc', ''), 'Fanuc');
+      expect(lineLabelOf('', '21'), '21');
+      expect(lineLabelOf('', ''), '');
+      expect(lineLabelOf(null, null), '');
     });
 
-    test('splitting and rejoining a roster machine is lossless', () {
-      for (final machine in machines) {
-        final parts = splitMachineLabel(machine.label);
-        expect(machineLabelOf(parts.name, parts.number), machine.label);
+    test('splitting and rejoining a roster line is lossless', () {
+      for (final line in productionLines) {
+        final parts = splitLineLabel(line.label);
+        expect(lineLabelOf(parts.name, parts.number), line.label);
       }
     });
 
-    test('a retired machine resolves to null rather than throwing', () {
-      // Rows logged against a machine since removed from the roster still
+    test('a retired line resolves to null rather than throwing', () {
+      // Rows logged against a line since removed from the roster still
       // have to read back — the picker shows the value and lets it change.
-      expect(machineFromLabel('Mazak 99'), isNull);
-      expect(machineFromLabel(''), isNull);
-      expect(machineFromLabel(null), isNull);
+      expect(lineFromLabel('Mazak 99'), isNull);
+      expect(lineFromLabel(''), isNull);
+      expect(lineFromLabel(null), isNull);
     });
   });
 

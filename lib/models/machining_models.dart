@@ -10,6 +10,7 @@
 /// sheet. See [RejectionEntry] in models/rejection.dart.
 library;
 
+import 'machine.dart';
 import 'part_code.dart';
 import 'rejection.dart';
 
@@ -164,7 +165,8 @@ class MachiningPartStatus {
     required this.part,
     this.mo,
     this.name,
-    this.machine = '',
+    this.machineName = '',
+    this.machineNo = '',
     this.lastUpdated,
     this.fillPercent = 0,
   });
@@ -173,10 +175,15 @@ class MachiningPartStatus {
   final String part;
   final String? mo;
 
-  /// "Fanuc 21" — which machine this entry runs on. Part of the entry's
-  /// identity, so two cards can share a part code and differ only here.
-  /// Empty on rows configured before the machine was asked for.
-  final String machine;
+  /// Which machine this entry runs on, as the sheet keeps it: name and
+  /// number in their own columns. Part of the entry's identity, so two cards
+  /// can share a part code and differ only here. Both empty on rows
+  /// configured before the machine was asked for.
+  final String machineName;
+  final String machineNo;
+
+  /// "Fanuc 21" — the pair as the picker and the cards show it.
+  String get machine => machineLabelOf(machineName, machineNo);
 
   /// Human-readable part name from the master list.
   final String? name;
@@ -191,7 +198,8 @@ class MachiningPartStatus {
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
       name: cleanCell(json['name']),
-      machine: cleanCell(json['machine']) ?? '',
+      machineName: cleanCell(json['machineName']) ?? '',
+      machineNo: cleanCell(json['machineNo']) ?? '',
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: fill.clamp(0, 100).round(),
     );

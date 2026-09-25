@@ -667,7 +667,10 @@ void main() {
     await tester.tap(find.text('SAVE 2214'));
     await tester.pumpAndSettle();
     expect(result?.name, '2214');
-    expect(result?.machine, 'Fanuc 21');
+    // Split the way the sheet stores it, joined again for display.
+    expect(result?.machineName, 'Fanuc');
+    expect(result?.machineNo, '21');
+    expect(result?.machineLabel, 'Fanuc 21');
   });
 
   testWidgets('part picker: the other modules are never asked for a machine', (
@@ -706,7 +709,8 @@ void main() {
     await tester.tap(find.text('SAVE 1145'));
     await tester.pumpAndSettle();
     expect(result?.name, '1145');
-    expect(result?.machine, '');
+    expect(result?.machineName, '');
+    expect(result?.machineNo, '');
   });
 
   testWidgets('part picker: a code missing from the list can be typed in', (
@@ -1188,6 +1192,42 @@ void main() {
       // Case is how someone typed it, not part of the identity.
       expect(machineFromLabel('fanuc 21')?.label, 'Fanuc 21');
       expect(machineFromLabel('  Fanuc 21  ')?.label, 'Fanuc 21');
+    });
+
+    test('a label splits into the two columns the sheet keeps', () {
+      expect(splitMachineLabel('Fanuc 21'), (name: 'Fanuc', number: '21'));
+      expect(splitMachineLabel('Okuma 11'), (name: 'Okuma', number: '11'));
+      expect(splitMachineLabel(''), (name: '', number: ''));
+      expect(splitMachineLabel(null), (name: '', number: ''));
+    });
+
+    test('a machine off the roster still splits, never silently empty', () {
+      // Retired, or typed straight into the sheet. The name must survive or
+      // the row stops saying which machine it meant.
+      expect(splitMachineLabel('Mazak 99'), (name: 'Mazak', number: '99'));
+      // Multi-word names keep the number as the last token.
+      expect(
+        splitMachineLabel('Brother Speedio S700'),
+        (name: 'Brother Speedio', number: 'S700'),
+      );
+      // No number at all: it is all name.
+      expect(splitMachineLabel('Lathe'), (name: 'Lathe', number: ''));
+    });
+
+    test('the two columns rejoin for display', () {
+      expect(machineLabelOf('Fanuc', '21'), 'Fanuc 21');
+      // Either half may be blank on a row predating the columns.
+      expect(machineLabelOf('Fanuc', ''), 'Fanuc');
+      expect(machineLabelOf('', '21'), '21');
+      expect(machineLabelOf('', ''), '');
+      expect(machineLabelOf(null, null), '');
+    });
+
+    test('splitting and rejoining a roster machine is lossless', () {
+      for (final machine in machines) {
+        final parts = splitMachineLabel(machine.label);
+        expect(machineLabelOf(parts.name, parts.number), machine.label);
+      }
     });
 
     test('a retired machine resolves to null rather than throwing', () {

@@ -373,19 +373,22 @@ class SheetsService {
     required String part,
     required String operation,
     required String shift,
-    String machine = '',
+    String machineName = '',
+    String machineNo = '',
   }) async {
     // Omitted rather than sent blank when the entry has no machine: the
     // backend reads an absent machine as "any", which is what a pre-machine
     // entry needs, and an empty parameter would say the same thing louder.
-    final scoped = machine.trim();
+    final name = machineName.trim();
+    final number = machineNo.trim();
     final decoded = await _getJson(CASTING_WEBHOOK_URL, {
       'action': 'row',
       'module': 'machining',
       'customer': customer,
       'part': part,
       'operation': operation,
-      'machine': ?(scoped.isEmpty ? null : scoped),
+      'machineName': ?(name.isEmpty ? null : name),
+      'machineNo': ?(number.isEmpty ? null : number),
       'shift': shift,
     });
     if (decoded == null) return null;
@@ -415,14 +418,17 @@ class SheetsService {
   /// the operation is part of the part's identity — without it, adding or
   /// deleting under one operation changes the other's list too.
   ///
-  /// [machine] is part of that identity too: the same code running on two
+  /// The machine is part of that identity too: the same code running on two
   /// machines is two entries, which is what stops people encoding the machine
   /// into the part's own name and splitting every per-part figure with it.
+  /// Name and number travel separately because that is how the sheet keeps
+  /// them — one column each, so a pivot can group a whole family.
   Future<void> addMachiningPart({
     required String customer,
     required String part,
     required String operation,
-    required String machine,
+    required String machineName,
+    required String machineNo,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -433,7 +439,8 @@ class SheetsService {
       'group': customer,
       'part': part,
       'operation': operation,
-      'machine': machine,
+      'machineName': machineName,
+      'machineNo': machineNo,
       'mo': ?mo,
     });
   }
@@ -441,15 +448,17 @@ class SheetsService {
   /// Renames a Machining part and/or updates its MO number. Only ever touches
   /// the Config sheet — rows already logged keep the MO snapshotted onto them.
   ///
-  /// [machine] identifies WHICH entry is being edited; [newMachine] moves it
-  /// to another machine, and defaults to staying put.
+  /// [machineName]/[machineNo] identify WHICH entry is being edited; the
+  /// `new` pair moves it to another machine, and default to staying put.
   Future<void> editMachiningPart({
     required String customer,
     required String part,
     required String newPart,
     required String operation,
-    required String machine,
-    String? newMachine,
+    required String machineName,
+    required String machineNo,
+    String? newMachineName,
+    String? newMachineNo,
     String? mo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
@@ -461,8 +470,10 @@ class SheetsService {
       'part': part,
       'newPart': newPart,
       'operation': operation,
-      'machine': machine,
-      'newMachine': newMachine ?? machine,
+      'machineName': machineName,
+      'machineNo': machineNo,
+      'newMachineName': newMachineName ?? machineName,
+      'newMachineNo': newMachineNo ?? machineNo,
       'mo': ?mo,
     });
   }
@@ -576,7 +587,8 @@ class SheetsService {
     String? group,
     required String value,
     String? operation,
-    String? machine,
+    String? machineName,
+    String? machineNo,
   }) => _configMutate(
     'delete',
     module,
@@ -585,7 +597,8 @@ class SheetsService {
     value,
     null,
     operation: operation,
-    machine: machine,
+    machineName: machineName,
+    machineNo: machineNo,
   );
 
   /// Renames a group (cascades to its parts' group reference), a part, or a
@@ -607,7 +620,8 @@ class SheetsService {
     String value,
     String? newValue, {
     String? operation,
-    String? machine,
+    String? machineName,
+    String? machineNo,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -620,7 +634,8 @@ class SheetsService {
       'value': value,
       'newValue': ?newValue,
       'operation': ?operation,
-      'machine': ?machine,
+      'machineName': ?machineName,
+      'machineNo': ?machineNo,
     });
   }
 

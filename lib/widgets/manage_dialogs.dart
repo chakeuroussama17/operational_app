@@ -89,7 +89,8 @@ class PartWithMoInput {
   const PartWithMoInput({
     required this.name,
     required this.mo,
-    this.machine = '',
+    this.machineName = '',
+    this.machineNo = '',
   });
 
   /// The chosen part code.
@@ -98,10 +99,17 @@ class PartWithMoInput {
   /// '' if left blank (no MO set / clearing an existing one).
   final String mo;
 
-  /// "Fanuc 21", or '' for the modules that don't track a machine. Part of
-  /// the part's identity where it is set: the same code on two machines is
-  /// two entries, not one shared between them.
-  final String machine;
+  /// The machine split the way the sheet stores it — "Fanuc" and "21" in
+  /// their own columns, so a pivot can group every Okuma or sort by number.
+  /// Both are '' for the modules that don't track a machine.
+  ///
+  /// Part of the part's identity where it is set: the same code on two
+  /// machines is two entries, not one shared between them.
+  final String machineName;
+  final String machineNo;
+
+  /// The pair as one line, for anything that just wants to show it.
+  String get machineLabel => machineLabelOf(machineName, machineNo);
 }
 
 /// Single-select picker over a fixed list of names — the casting machines.
@@ -388,11 +396,13 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
       });
       return;
     }
+    final machine = splitMachineLabel(_machine);
     Navigator.of(context).pop(
       PartWithMoInput(
         name: _selectedCode,
         mo: _moController.text.trim(),
-        machine: _machine,
+        machineName: machine.name,
+        machineNo: machine.number,
       ),
     );
   }

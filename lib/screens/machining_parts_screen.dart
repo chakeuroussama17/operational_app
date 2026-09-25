@@ -81,7 +81,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               customer: widget.customer,
               part: part.part,
               operation: widget.operation,
-              machine: part.machine,
+              machineName: part.machineName,
+              machineNo: part.machineNo,
               shift: widget.shift,
               mo: part.mo,
             ),
@@ -123,7 +124,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         customer: widget.customer,
         part: input.name,
         operation: widget.operation.value,
-        machine: input.machine,
+        machineName: input.machineName,
+        machineNo: input.machineNo,
         mo: input.mo.isEmpty ? null : input.mo,
       ),
     );
@@ -151,8 +153,10 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         operation: widget.operation.value,
         // Which entry is being edited, and where it ends up — the pair is
         // how a part gets moved from one machine to another.
-        machine: part.machine,
-        newMachine: input.machine,
+        machineName: part.machineName,
+        machineNo: part.machineNo,
+        newMachineName: input.machineName,
+        newMachineNo: input.machineNo,
         mo: input.mo,
       ),
     );
@@ -215,7 +219,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         operation: widget.operation.value,
         // And scoped again by machine, or deleting the part from one machine
         // takes it off every other machine running it.
-        machine: part.machine,
+        machineName: part.machineName,
+        machineNo: part.machineNo,
       ),
     );
   }

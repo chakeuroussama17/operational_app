@@ -44,6 +44,36 @@ const List<Machine> machines = [
   Machine('Okuma', '11'),
 ];
 
+/// Splits a picker label back into the pair the sheet stores.
+///
+/// A label from the roster splits on its own parts. Anything else — a machine
+/// since retired, or a value typed straight into the sheet — splits on the
+/// last space, which is where the number is if there is one at all. Whatever
+/// happens, the name never comes back empty, so a row can always say which
+/// machine it meant.
+({String name, String number}) splitMachineLabel(String? label) {
+  final value = (label ?? '').trim();
+  if (value.isEmpty) return (name: '', number: '');
+  final known = machineFromLabel(value);
+  if (known != null) return (name: known.name, number: known.number);
+  final cut = value.lastIndexOf(' ');
+  if (cut <= 0) return (name: value, number: '');
+  return (
+    name: value.substring(0, cut).trim(),
+    number: value.substring(cut + 1).trim(),
+  );
+}
+
+/// The two stored columns rejoined for display: "Fanuc" + "21" -> "Fanuc 21".
+/// Either half may be blank on a row that predates the columns.
+String machineLabelOf(String? name, String? number) {
+  final parts = [
+    (name ?? '').trim(),
+    (number ?? '').trim(),
+  ]..removeWhere((p) => p.isEmpty);
+  return parts.join(' ');
+}
+
 /// The stored machine matching [label], or null when the sheet holds
 /// something the roster no longer lists.
 ///

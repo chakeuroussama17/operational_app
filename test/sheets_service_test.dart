@@ -569,7 +569,8 @@ void main() {
         customer: 'Mazda',
         part: '9',
         operation: 'assembly',
-        machine: 'Fanuc 21',
+        machineName: 'Fanuc',
+        machineNo: '21',
         mo: 'MACH-09',
       );
 
@@ -580,9 +581,11 @@ void main() {
       expect(sent['mo'], 'MACH-09');
       // Without this the part lands in both operations' lists.
       expect(sent['operation'], 'assembly');
-      // And without this, the same code on a second machine would collide
-      // with the first instead of being its own entry.
-      expect(sent['machine'], 'Fanuc 21');
+      // And without these, the same code on a second machine would collide
+      // with the first instead of being its own entry. Two columns, so the
+      // sheet can group a whole family or sort by number.
+      expect(sent['machineName'], 'Fanuc');
+      expect(sent['machineNo'], '21');
     });
 
     test('editMachiningPart: omits mo when left unset', () async {
@@ -599,7 +602,8 @@ void main() {
         part: '1',
         newPart: '1',
         operation: 'machining',
-        machine: 'Okuma 7',
+        machineName: 'Okuma',
+        machineNo: '7',
       );
 
       expect(sent['op'], 'machiningEditPart');
@@ -964,7 +968,8 @@ void main() {
         customer: 'Mazda',
         part: '9',
         operation: 'machining',
-        machine: 'Fanuc 20',
+        machineName: 'Fanuc',
+        machineNo: '20',
       );
 
       expect(

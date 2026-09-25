@@ -26,7 +26,8 @@ class MachiningEntryScreen extends StatefulWidget {
     required this.part,
     required this.operation,
     required this.shift,
-    this.machine = '',
+    this.machineName = '',
+    this.machineNo = '',
     this.mo,
     this.service,
   });
@@ -36,10 +37,11 @@ class MachiningEntryScreen extends StatefulWidget {
   final MachiningOperation operation;
   final String shift;
 
-  /// "Fanuc 21" — part of this entry's key, so the same part on another
-  /// machine loads and saves its own row. Empty for entries configured
-  /// before the machine was asked for.
-  final String machine;
+  /// Part of this entry's key, so the same part on another machine loads and
+  /// saves its own row. Both empty for entries configured before the machine
+  /// was asked for.
+  final String machineName;
+  final String machineNo;
 
   /// The part's MO (manufacturing order) number — shown as read-only context.
   /// Edit it from the part's Edit action on the Parts screen.
@@ -334,7 +336,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         customer: widget.customer,
         part: widget.part,
         operation: widget.operation.value,
-        machine: widget.machine,
+        machineName: widget.machineName,
+        machineNo: widget.machineNo,
         shift: widget.shift,
       );
       if (!mounted) return;
@@ -463,7 +466,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         'Customer': widget.customer,
         'PartNo': widget.part,
         'Operation': widget.operation.value,
-        'Machine': widget.machine,
+        'MachineName': widget.machineName,
+        'MachineNo': widget.machineNo,
         'Shift': widget.shift,
         ...changed,
       });

@@ -127,6 +127,34 @@ var PARTS_SHEET = 'Parts';
 // assuming row 1 (see getRejectionTypes).
 var REJECTION_TYPES_SHEET = 'RejectionTypes';
 
+// The downtime reasons an operator may pick from — one row per reason. THE SHEET
+// IS THE LIST: adding a row here puts it in every dropdown, removing one takes
+// it out, and nobody can add one from the app. That is the point of moving it
+// off the phone — a stoppage cause typed in free hand is a cause nobody can
+// add up across a month.
+//
+// Seeded from the plant's fifteen codes the first time the tab is needed, then
+// left alone: the sheet, not this file, decides what is on it from then on.
+var DOWNTIME_REASONS_SHEET = 'DowntimeReasons';
+var DOWNTIME_REASON_HEADERS = ['Code', 'Name'];
+var DOWNTIME_REASON_SEED = [
+  ['001', 'TOOL ROOM DOWNTIME'],
+  ['002', 'DIE MAINTENANCE DOWNTIME'],
+  ['003', 'CASTING ENGINEERING DOWNTIME'],
+  ['004', 'CASTING MAINTENANCE DOWNTIME'],
+  ['005', 'CASTING PRODUCTION DOWNTIME'],
+  ['006', 'CASTING OTHERS DOWNTIME'],
+  ['007', 'MACHINING ENGINEERING DOWNTIME'],
+  ['008', 'MACHINING MAINTENANCE DOWNTIME'],
+  ['009', 'PART SUPPLY DOWNTIME'],
+  ['010', 'MACHINING PRODUCTION DOWNTIME'],
+  ['011', 'MACHINING OTHERS DOWNTIME'],
+  ['012', 'TEA BREAK'],
+  ['013', 'LUNCH-DINNER BREAK'],
+  ['014', 'END OF WORK'],
+  ['015', 'COMPANY EVENT'],
+];
+
 // Machining rejections are a LIST per entry (5 POROSITY, 2 COLD SHUT, ...),
 // not one number per time slot, so they get their own fact table: one row per
 // defect type per Customer+Part+Operation+shift+date. That keeps the shape
@@ -290,7 +318,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'TELEGRAM-MULTI-v29';
+var BACKEND_VERSION = 'REASONS-SHEET-v30';
 
 function doGet(e) {
   try {
@@ -301,6 +329,7 @@ function doGet(e) {
     if (action === 'analytics') return jsonResponse(getAnalytics(module, e.parameter.days));
     if (action === 'partcodes') return jsonResponse(getPartMaster(module));
     if (action === 'rejectiontypes') return jsonResponse(getRejectionTypes());
+    if (action === 'downtimereasons') return jsonResponse(getDowntimeReasons());
     if (action === 'user') return jsonResponse(getUserProfile(e.parameter.email));
     if (action === 'rawtab') {
       return jsonResponse(getRawTab(e.parameter.name, e.parameter.limit));
@@ -790,6 +819,121 @@ function getRejectionTypes() {
 
 // A CSV import reads "001" as the number 1 — put the leading zeros back so the
 // code still matches the printed defect list.
+// ---------- Downtime reasons master ----------
+
+// Creates the tab and seeds it if it does not exist yet. Idempotent, and safe
+// to call from a read: two people opening the entry screen on the first day
+// would otherwise both seed it, so creation happens under a lock and re-checks
+// inside it.
+function setupDowntimeReasons() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss.getSheetByName(DOWNTIME_REASONS_SHEET)) {
+    return 'already there: ' + DOWNTIME_REASONS_SHEET;
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    if (ss.getSheetByName(DOWNTIME_REASONS_SHEET)) {
+      return 'already there: ' + DOWNTIME_REASONS_SHEET;
+    }
+    var sheet = ss.insertSheet(DOWNTIME_REASONS_SHEET);
+    sheet.getRange(1, 1, 1, DOWNTIME_REASON_HEADERS.length)
+      .setValues([DOWNTIME_REASON_HEADERS]);
+    sheet.setFrozenRows(1);
+    // Plain text BEFORE the codes land. Left as automatic, Sheets reads "001"
+    // as the number 1 and the leading zeros are gone for good — and every row
+    // a super admin adds afterwards would do the same, so the whole column is
+    // formatted, not just the seed.
+    sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('@');
+    sheet.getRange(2, 1, DOWNTIME_REASON_SEED.length, 2).setValues(DOWNTIME_REASON_SEED);
+    sheet.setColumnWidth(2, 320);
+    invalidateCaches();
+    return 'created and seeded ' + DOWNTIME_REASON_SEED.length + ' reasons: ' + DOWNTIME_REASONS_SHEET;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// "008 · MACHINING MAINTENANCE DOWNTIME" — exactly what the app shows and what
+// lands in the row's reason cell, so a reason can be told apart from anything
+// else typed there. The code leads so LEFT(cell, 3) recovers it in a pivot.
+function downtimeReasonLabel(code, name) {
+  return code ? code + ' \u00b7 ' + name : name;
+}
+
+function readDowntimeReasons() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DOWNTIME_REASONS_SHEET);
+  if (!sheet) {
+    setupDowntimeReasons();
+    sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(DOWNTIME_REASONS_SHEET);
+  }
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var rows = getAllRowsAsObjects(sheet);
+  var out = [], seen = {};
+  rows.forEach(function (r) {
+    var name = String(r.Name === undefined || r.Name === null ? '' : r.Name).trim();
+    if (!name) return;
+    // A code typed as 8 comes back as the number 8; put the zeros back the
+    // same way the rejection codes do.
+    var code = padRejectionCode(r.Code);
+    var label = downtimeReasonLabel(code, name);
+    if (seen[label.toLowerCase()]) return;
+    seen[label.toLowerCase()] = true;
+    out.push({ code: code, name: name, label: label });
+  });
+  return out;
+}
+
+function getDowntimeReasons() {
+  return { status: 'success', data: readDowntimeReasons() };
+}
+
+// Decides whether the reasons on an incoming save are allowed, and returns
+// them in canonical form. Pure — the list is passed in — so it can be checked
+// without a spreadsheet.
+//
+// Rules:
+//   - a reason unchanged from what the row already holds always passes, so old
+//     free-text entries stay readable and re-saving one cannot fail;
+//   - anything NEW has to be on the list, matched without regard to case and
+//     written back in the list's own spelling;
+//   - an empty list means nothing has been configured, and blocking every
+//     save over a missing list would put a config problem between the floor
+//     and its logging, so nothing is enforced.
+// Returns { error: message } or { values: { DowntimeReason_12PM: label, ... } }.
+function checkDowntimeReasons(data, existing, slots, reasons) {
+  var canonical = {};
+  var byLower = {};
+  (reasons || []).forEach(function (r) { byLower[r.label.toLowerCase()] = r.label; });
+  var enforce = Object.keys(byLower).length > 0;
+  var values = {};
+  var rejected = [];
+
+  slots.forEach(function (slot) {
+    var key = 'DowntimeReason_' + slot;
+    if (data[key] === undefined || data[key] === null) return;
+    var value = String(data[key]).trim();
+    // '' is a real value here: a reason picked by mistake has to be clearable.
+    if (value === '') { values[key] = ''; return; }
+    var current = existing && existing[key] !== undefined && existing[key] !== null
+      ? String(existing[key]).trim() : '';
+    if (value === current) { values[key] = value; return; }
+    if (!enforce) { values[key] = value; return; }
+    var match = byLower[value.toLowerCase()];
+    if (match === undefined) { rejected.push(value); return; }
+    values[key] = match;
+  });
+
+  if (rejected.length) {
+    return {
+      error: 'Downtime reason "' + rejected[0] + '" is not on the list. ' +
+        'Choose one from the dropdown — a super admin adds new reasons on the ' +
+        DOWNTIME_REASONS_SHEET + ' tab.',
+    };
+  }
+  return { values: values };
+}
+
 function padRejectionCode(raw) {
   if (raw === null || raw === undefined) return '';
   var s = String(raw).trim();
@@ -1127,20 +1271,23 @@ function upsertMachiningRow(data) {
     merged.RejectionSummary = totals.summary;
   }
 
-  // Downtime is typed straight into the row, one box per hour, so it needs no
+  // Minutes are typed straight into the row, one box per hour, so they need no
   // reconciliation — just copy through whatever the app sent.
   slots.forEach(function (slot) {
     var dtKey = 'Downtime_' + slot;
     if (data[dtKey] !== undefined && data[dtKey] !== '') {
       merged[dtKey] = data[dtKey];
     }
-    // Sent whenever the box is touched, INCLUDING when it is cleared — a
-    // reason typed by mistake has to be removable, so '' is a real value
-    // here rather than "leave it alone" the way a blank actual is.
-    var reasonKey = 'DowntimeReason_' + slot;
-    if (data[reasonKey] !== undefined) {
-      merged[reasonKey] = String(data[reasonKey]);
-    }
+  });
+  // The reason is the opposite: it may only be one of the sheet's own. The app
+  // offers nothing else, but the app is not the boundary — an older install
+  // that still lets someone type is refused here, with a message that says
+  // where the list lives. Sent whenever the box is touched, INCLUDING when it
+  // is cleared, so '' is a real value rather than "leave it alone".
+  var reasonCheck = checkDowntimeReasons(data, existing, slots, readDowntimeReasons());
+  if (reasonCheck.error) return { status: 'error', message: reasonCheck.error };
+  Object.keys(reasonCheck.values).forEach(function (key) {
+    merged[key] = reasonCheck.values[key];
   });
 
   // Derived cells. ActualTotal is everything made; GoodTotal is what survived.
@@ -2760,6 +2907,9 @@ function migrateColumnOrder() {
     // Must follow the reorder: the dropdowns are re-set from the header names
     // once the columns have finished moving.
     setupUsersValidation(),
+    // The reasons list lives on its own tab now; create and seed it here so a
+    // super admin finds it waiting rather than after the first entry screen.
+    setupDowntimeReasons(),
   ];
   Logger.log(log.join('\n'));
 }

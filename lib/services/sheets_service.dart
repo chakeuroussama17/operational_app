@@ -9,11 +9,24 @@ import '../models/analytics_models.dart';
 import '../models/app_user.dart';
 import '../models/casting_models.dart';
 import '../models/config_models.dart';
+import '../models/downtime_reason.dart';
 import '../models/machining_models.dart';
 import '../models/part_code.dart';
 import '../models/raw_table.dart';
 import '../models/rejection.dart';
 import '../models/secondary_models.dart';
+
+/// A fetched master list and when it arrived.
+class _Cached<T> {
+  _Cached(this.value) : fetchedAt = SheetsService.masterClock();
+
+  final T value;
+  final DateTime fetchedAt;
+
+  bool get isFresh =>
+      SheetsService.masterClock().difference(fetchedAt) <
+      SheetsService._masterMaxAge;
+}
 
 /// Thrown when a request to the Sheets backend fails.
 class SheetsSubmissionException implements Exception {
@@ -501,48 +514,127 @@ class SheetsService {
     throw const SheetsSubmissionException('Unexpected server response.');
   }
 
-  Future<List<PartCode>> fetchPartCodes(String module) async {
-    final cached = _partCodeCache[module];
-    if (cached != null) return cached;
-
-    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
-      'action': 'partcodes',
-      'module': module,
-    });
-    final codes = _asList(
-      decoded,
-    ).whereType<Map<String, dynamic>>().map(PartCode.fromJson).toList();
-    _partCodeCache[module] = codes;
-    return codes;
+  /// The Parts master for [module]. [forceRefresh] skips the cache — the
+  /// pickers that add or edit a part pass it, because the person opening one
+  /// has very often just typed a new row into the sheet and is checking that
+  /// it arrived.
+  Future<List<PartCode>> fetchPartCodes(
+    String module, {
+    bool forceRefresh = false,
+  }) {
+    return _master<PartCode>(
+      cached: _partCodeCache[module],
+      forceRefresh: forceRefresh,
+      store: (entry) => _partCodeCache[module] = entry,
+      load: () async {
+        final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+          'action': 'partcodes',
+          'module': module,
+        });
+        return _asList(
+          decoded,
+        ).whereType<Map<String, dynamic>>().map(PartCode.fromJson).toList();
+      },
+    );
   }
 
   /// The full rejection-code master (~230 defect types), for the Machining
-  /// entry screen's defect picker. Cached like the parts master.
-  Future<List<RejectionType>> fetchRejectionTypes() async {
-    final cached = _rejectionTypeCache;
-    if (cached != null) return cached;
-
-    final decoded = await _getJson(CASTING_WEBHOOK_URL, {
-      'action': 'rejectiontypes',
-    });
-    final types = _asList(
-      decoded,
-    ).whereType<Map<String, dynamic>>().map(RejectionType.fromJson).toList();
-    _rejectionTypeCache = types;
-    return types;
+  /// entry screen's defect picker.
+  Future<List<RejectionType>> fetchRejectionTypes({bool forceRefresh = false}) {
+    return _master<RejectionType>(
+      cached: _rejectionTypeCache,
+      forceRefresh: forceRefresh,
+      store: (entry) => _rejectionTypeCache = entry,
+      load: () async {
+        final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+          'action': 'rejectiontypes',
+        });
+        return _asList(
+          decoded,
+        ).whereType<Map<String, dynamic>>().map(RejectionType.fromJson).toList();
+      },
+    );
   }
 
-  /// The parts and rejection masters are imported CSVs that change rarely,
-  /// while their pickers are opened constantly — so each is fetched once and
-  /// reused for the rest of the session. Static because every screen builds
-  /// its own [SheetsService]. (Re-imported a CSV? Restart the app.)
-  static final Map<String, List<PartCode>> _partCodeCache = {};
-  static List<RejectionType>? _rejectionTypeCache;
+  /// The downtime reasons a super admin has put on the DowntimeReasons tab.
+  ///
+  /// Falls back to [bundledDowntimeReasons] when the backend cannot answer —
+  /// an app installed before the backend was deployed, or a bad connection —
+  /// or answers with nothing, since an empty list would leave the picker with
+  /// no way to record why a machine stopped. The backend refuses a reason that
+  /// is not on the sheet, so the fallback cannot smuggle one in.
+  Future<List<DowntimeReason>> fetchDowntimeReasons({
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final reasons = await _master<DowntimeReason>(
+        cached: _downtimeReasonCache,
+        forceRefresh: forceRefresh,
+        store: (entry) => _downtimeReasonCache = entry,
+        load: () async {
+          final decoded = await _getJson(CASTING_WEBHOOK_URL, {
+            'action': 'downtimereasons',
+          });
+          return _asList(decoded)
+              .whereType<Map<String, dynamic>>()
+              .map(DowntimeReason.fromJson)
+              .where((reason) => reason.name.isNotEmpty)
+              .toList();
+        },
+      );
+      return reasons.isEmpty ? bundledDowntimeReasons : reasons;
+    } on SheetsSubmissionException {
+      return bundledDowntimeReasons;
+    }
+  }
+
+  /// The masters are edited on the sheet by a super admin and read by every
+  /// operator's dropdown. They used to be fetched once and kept for the whole
+  /// session, which meant a row added to the sheet stayed invisible until the
+  /// app was fully restarted — and on a phone that is left running, that is
+  /// days. They now expire after [_masterMaxAge].
+  ///
+  /// A failed refresh returns the stale copy rather than nothing: an operator
+  /// with a flaky connection is better served by a list that is a few minutes
+  /// old than by an empty picker.
+  Future<List<T>> _master<T>({
+    required _Cached<List<T>>? cached,
+    required bool forceRefresh,
+    required void Function(_Cached<List<T>> entry) store,
+    required Future<List<T>> Function() load,
+  }) async {
+    if (cached != null && !forceRefresh && cached.isFresh) return cached.value;
+    try {
+      final value = await load();
+      store(_Cached(value));
+      return value;
+    } on SheetsSubmissionException {
+      if (cached != null) return cached.value;
+      rethrow;
+    }
+  }
+
+  /// How long a master list is trusted before it is fetched again. Long
+  /// enough that opening the picker constantly costs nothing, short enough
+  /// that a row added on the sheet is on every phone within a few minutes.
+  static const Duration _masterMaxAge = Duration(minutes: 5);
+
+  /// The clock the caches read. A field so tests can move time instead of
+  /// waiting five minutes for it.
+  @visibleForTesting
+  static DateTime Function() masterClock = DateTime.now;
+
+  // Static because every screen builds its own [SheetsService].
+  static final Map<String, _Cached<List<PartCode>>> _partCodeCache = {};
+  static _Cached<List<RejectionType>>? _rejectionTypeCache;
+  static _Cached<List<DowntimeReason>>? _downtimeReasonCache;
 
   @visibleForTesting
   static void clearMasterCaches() {
     _partCodeCache.clear();
     _rejectionTypeCache = null;
+    _downtimeReasonCache = null;
+    masterClock = DateTime.now;
   }
 
   // ---------- Config: manage groups/parts/lines ----------

@@ -143,7 +143,12 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   /// user why the picker can't open.
   Future<List<PartCode>?> _availableCodes() async {
     try {
-      final codes = await _sheetsService.fetchPartCodes('casting');
+      // Fresh, not cached: whoever opens this has usually just typed the
+      // row into the Parts sheet and is checking that it arrived.
+      final codes = await _sheetsService.fetchPartCodes(
+        'casting',
+        forceRefresh: true,
+      );
       if (!mounted) return null;
       if (codes.isEmpty) {
         _snack('No Casting part codes found — import the Parts sheet first.');

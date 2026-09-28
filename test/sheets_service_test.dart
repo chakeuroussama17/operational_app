@@ -1005,6 +1005,163 @@ void main() {
     });
   });
 
+  group('master lists pick up what is added on the sheet', () {
+    /// A backend whose Parts answer can be changed between calls, standing in
+    /// for a super admin typing a row into the sheet.
+    ({SheetsService service, List<String> calls, void Function(List<String>) set})
+        harness() {
+      var parts = ['A1'];
+      final calls = <String>[];
+      final service = SheetsService(
+        client: MockClient((request) async {
+          final action = request.url.queryParameters['action'];
+          calls.add(action ?? '');
+          if (action == 'partcodes') {
+            return http.Response(
+              jsonEncode({
+                'status': 'success',
+                'data': [
+                  for (final code in parts)
+                    {'code': code, 'barcode': '$code-M', 'name': '$code-MACH'},
+                ],
+              }),
+              200,
+            );
+          }
+          if (action == 'downtimereasons') {
+            return http.Response(
+              jsonEncode({
+                'status': 'success',
+                'data': [
+                  for (final code in parts)
+                    {'code': code, 'name': 'REASON $code'},
+                ],
+              }),
+              200,
+            );
+          }
+          return http.Response('{"status":"error","message":"boom"}', 500);
+        }),
+      );
+      return (
+        service: service,
+        calls: calls,
+        set: (next) => parts = next,
+      );
+    }
+
+    setUp(SheetsService.clearMasterCaches);
+    tearDown(SheetsService.clearMasterCaches);
+
+    test('a list is reused within its lifetime, not fetched every time', () async {
+      final h = harness();
+      await h.service.fetchPartCodes('machining');
+      await h.service.fetchPartCodes('machining');
+      await h.service.fetchPartCodes('machining');
+      expect(h.calls.where((a) => a == 'partcodes').length, 1);
+    });
+
+    test('...but a row added on the sheet is there once that lifetime is up', () async {
+      final h = harness();
+      var now = DateTime(2026, 9, 28, 9);
+      SheetsService.masterClock = () => now;
+
+      expect((await h.service.fetchPartCodes('machining')).map((c) => c.code), ['A1']);
+
+      h.set(['A1', 'B2']);
+      // Still inside the window: the old list, on purpose.
+      now = now.add(const Duration(minutes: 4));
+      expect((await h.service.fetchPartCodes('machining')).length, 1);
+
+      // Past it: the new row has arrived, with no restart of anything.
+      now = now.add(const Duration(minutes: 2));
+      expect(
+        (await h.service.fetchPartCodes('machining')).map((c) => c.code),
+        ['A1', 'B2'],
+      );
+    });
+
+    test('forceRefresh skips the cache, for whoever just typed the row', () async {
+      final h = harness();
+      await h.service.fetchPartCodes('machining');
+      h.set(['A1', 'B2']);
+      // No time has passed at all, and it is still there.
+      final codes = await h.service.fetchPartCodes('machining', forceRefresh: true);
+      expect(codes.map((c) => c.code), ['A1', 'B2']);
+    });
+
+    test('each module keeps its own list', () async {
+      final h = harness();
+      await h.service.fetchPartCodes('machining');
+      await h.service.fetchPartCodes('casting');
+      expect(h.calls.where((a) => a == 'partcodes').length, 2);
+    });
+
+    test('a failed refresh returns the stale list, not an empty picker', () async {
+      var now = DateTime(2026, 9, 28, 9);
+      SheetsService.masterClock = () => now;
+      var down = false;
+      final service = SheetsService(
+        client: MockClient((request) async {
+          if (down) return http.Response('nope', 500);
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': [
+                {'code': 'A1', 'barcode': 'A1-M', 'name': 'A1-MACH'},
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      await service.fetchPartCodes('machining');
+
+      down = true;
+      now = now.add(const Duration(minutes: 30));
+      final codes = await service.fetchPartCodes('machining');
+      expect(codes.map((c) => c.code), ['A1']);
+    });
+
+    test('with nothing cached, a failure still surfaces', () async {
+      final service = SheetsService(
+        client: MockClient((_) async => http.Response('nope', 500)),
+      );
+      expect(
+        () => service.fetchPartCodes('machining'),
+        throwsA(isA<SheetsSubmissionException>()),
+      );
+    });
+
+    test('downtime reasons parse, and follow the sheet on a forced refresh', () async {
+      final h = harness();
+      final first = await h.service.fetchDowntimeReasons();
+      expect(first.map((r) => r.label), ['A1 · REASON A1']);
+
+      h.set(['A1', '016']);
+      final second = await h.service.fetchDowntimeReasons(forceRefresh: true);
+      expect(second.map((r) => r.label), ['A1 · REASON A1', '016 · REASON 016']);
+    });
+
+    test('downtime reasons fall back to the bundled list rather than throwing', () async {
+      final service = SheetsService(
+        client: MockClient((_) async => http.Response('nope', 500)),
+      );
+      final reasons = await service.fetchDowntimeReasons();
+      expect(reasons.length, 15);
+      expect(reasons.first.name, 'TOOL ROOM DOWNTIME');
+    });
+
+    test('an EMPTY sheet list also falls back, so a stop can still be explained', () async {
+      final service = SheetsService(
+        client: MockClient(
+          (_) async => http.Response('{"status":"success","data":[]}', 200),
+        ),
+      );
+      expect((await service.fetchDowntimeReasons()).length, 15);
+    });
+  });
+
   group('slow-backend handling', () {
     setUp(SheetsService.clearMasterCaches);
 

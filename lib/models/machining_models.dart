@@ -118,20 +118,27 @@ String machiningOperationLabel(String value) {
 ///
 /// A handful of names describe the step rather than the operation
 /// (`2230-PR2-BRKT-OIL-FILTER-LEAKTEST`). Those fall back to the barcode's own
-/// `-M`/`-A` suffix, which the master carries on every row — without it such a
-/// part would match neither operation and become impossible to add at all.
+/// `-M`/`-A` suffix, which the master carries on every row.
+///
+/// A part that neither says nor implies its operation is offered under BOTH.
+/// It used to be left out of both, which meant a row added to the Parts sheet
+/// with an unfamiliar name simply never appeared in any picker, with nothing
+/// to say why. Appearing in an extra list is a nuisance; being impossible to
+/// add is a fault — and whoever is adding parts knows which list they are in.
 List<PartCode> partCodesForOperation(
   List<PartCode> codes,
   MachiningOperation operation,
 ) {
   return codes
-      .where((code) => _operationOf(code) == operation.value)
+      .where((code) {
+        final own = _operationOf(code);
+        return own == null || own == operation.value;
+      })
       .toList(growable: false);
 }
 
 /// Which operation a master entry belongs to, or null when nothing identifies
-/// it — an unclassifiable part is left out of both lists rather than guessed
-/// into one.
+/// it — in which case [partCodesForOperation] offers it under both.
 String? _operationOf(PartCode code) {
   final name = (code.name ?? '').trim().toUpperCase();
   if (name.endsWith('MACH')) return 'machining';

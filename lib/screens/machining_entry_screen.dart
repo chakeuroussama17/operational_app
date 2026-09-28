@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -81,10 +82,10 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     for (final slot in _slots) slot.downtimeReasonKey: TextEditingController(),
   };
 
-  /// Slots whose reason is being typed rather than picked. Needed because an
-  /// empty controller can't tell "Other, nothing typed yet" apart from
-  /// "nothing chosen at all", and those show different fields.
-  final Set<String> _reasonIsOther = {};
+  /// What the reason dropdown offers: the sheet's DowntimeReasons list, loaded
+  /// with the row. Starts as the bundled copy so the field is never empty while
+  /// the request is in flight; [_load] replaces it with the sheet's own.
+  List<DowntimeReason> _reasons = bundledDowntimeReasons;
 
   /// Backend-computed LOR% labels, keyed by lorKey. Only a fallback: with a
   /// Plan on the row the badge shows a live cumulative figure instead, so a
@@ -331,17 +332,36 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       _loading = true;
       _loadError = null;
     });
+    // Warm the defect-type list while the operator is still typing counts, so
+    // opening the picker is instant and — because the cache expires — never
+    // shows a list older than a few minutes. Best effort: a failure here is
+    // not worth a message, the picker fetches again when it is opened.
+    unawaited(
+      _sheetsService
+          .fetchRejectionTypes(forceRefresh: true)
+          .then<void>((_) {})
+          .catchError((_) {}),
+    );
     try {
-      final row = await _sheetsService.fetchMachiningRow(
-        customer: widget.customer,
-        part: widget.part,
-        operation: widget.operation.value,
-        lineName: widget.lineName,
-        lineNo: widget.lineNo,
-        shift: widget.shift,
-      );
+      // Always fresh: the list is edited on the sheet, and this is the moment
+      // an operator opens a part and expects to see what is on it today. It
+      // never throws — it falls back to the bundled copy.
+      final results = await Future.wait<Object?>([
+        _sheetsService.fetchMachiningRow(
+          customer: widget.customer,
+          part: widget.part,
+          operation: widget.operation.value,
+          lineName: widget.lineName,
+          lineNo: widget.lineNo,
+          shift: widget.shift,
+        ),
+        _sheetsService.fetchDowntimeReasons(forceRefresh: true),
+      ]);
+      final row = results[0] as MachiningRow?;
+      final reasons = results[1]! as List<DowntimeReason>;
       if (!mounted) return;
       setState(() {
+        _reasons = reasons;
         final plan = row?.value('Plan') ?? '';
         _planController.text = plan;
         _planLocked = plan.isNotEmpty;
@@ -354,16 +374,15 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
           }
           _downtimeControllers[slot.downtimeKey]!.text =
               row?.value(slot.downtimeKey) ?? '';
-          final reason = row?.value(slot.downtimeReasonKey) ?? '';
-          _reasonControllers[slot.downtimeReasonKey]!.text = reason;
-          // A stored reason that isn't one of the codes was typed by hand —
-          // including anything logged before the codes existed. Reopen it on
-          // "Other" so it stays editable instead of being silently dropped.
-          if (reason.isNotEmpty && downtimeReasonFromCell(reason) == null) {
-            _reasonIsOther.add(slot.downtimeReasonKey);
-          } else {
-            _reasonIsOther.remove(slot.downtimeReasonKey);
-          }
+          // Stored in the list's own spelling when it matches one — a cell
+          // written as a bare code, or in different case, reads back as the
+          // canonical label so the dropdown can show it. Anything that matches
+          // nothing (an old free-text reason, or one a super admin has since
+          // removed) is kept exactly as saved: the dropdown lists it as "not
+          // in the list" so it is visible and can be replaced, never dropped.
+          final stored = row?.value(slot.downtimeReasonKey) ?? '';
+          _reasonControllers[slot.downtimeReasonKey]!.text =
+              downtimeReasonFromCell(stored, reasons)?.label ?? stored;
           _lors[slot.lorKey] = row?.lorLabel(slot.lorKey);
         }
         _logMeta = _parseLogMeta(row?.raw['LogMeta']);
@@ -486,33 +505,16 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
     }
   }
 
-  /// Opens the defect-type picker for one rejection row. The master list
-  /// (~230 types) is fetched once per session by the service.
   /// Records the reason chosen for a slot. The controller always holds what
-  /// the cell will hold, so picking a code writes its full label straight in;
-  /// choosing Other empties it and hands the slot over to the text field.
-  void _pickReason(String reasonKey, String? code) {
-    setState(() {
-      final controller = _reasonControllers[reasonKey]!;
-      if (code == null) {
-        _reasonIsOther.remove(reasonKey);
-        controller.text = '';
-        return;
-      }
-      if (code == otherDowntimeReasonCode) {
-        _reasonIsOther.add(reasonKey);
-        // A code's label is the app's text, not the operator's — carrying it
-        // into the box they're about to type in would only be in the way.
-        controller.text = '';
-        return;
-      }
-      _reasonIsOther.remove(reasonKey);
-      controller.text = downtimeReasons
-          .firstWhere((reason) => reason.code == code)
-          .label;
-    });
+  /// the cell will hold, so a pick writes the list's own label straight in.
+  /// There is no other way to set it: nothing here accepts typed text.
+  void _pickReason(String reasonKey, String? label) {
+    setState(() => _reasonControllers[reasonKey]!.text = label ?? '');
   }
 
+  /// Opens the defect-type picker for one rejection row. The master list
+  /// (~230 types) is cached by the service for a few minutes, and refreshed
+  /// each time a part is opened — see [_load].
   Future<void> _pickType(_RejectionRow row) async {
     List<RejectionType> types;
     try {
@@ -604,11 +606,9 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                             _downtimeControllers[slot.downtimeKey]!,
                         reasonController:
                             _reasonControllers[slot.downtimeReasonKey]!,
-                        reasonIsOther: _reasonIsOther.contains(
-                          slot.downtimeReasonKey,
-                        ),
-                        onReasonPicked: (code) =>
-                            _pickReason(slot.downtimeReasonKey, code),
+                        reasons: _reasons,
+                        onReasonPicked: (label) =>
+                            _pickReason(slot.downtimeReasonKey, label),
                         lorLabel: _lorLabel(slot),
                         locked: _lockedOutputs.contains(slot.outputKey),
                         stamp: _logMeta[slot.slotKey] as Map?,
@@ -805,7 +805,7 @@ class _SlotBlock extends StatelessWidget {
     required this.outputController,
     required this.downtimeController,
     required this.reasonController,
-    required this.reasonIsOther,
+    required this.reasons,
     required this.onReasonPicked,
     required this.lorLabel,
     required this.locked,
@@ -824,11 +824,12 @@ class _SlotBlock extends StatelessWidget {
   final TextEditingController downtimeController;
   final TextEditingController reasonController;
 
-  /// True when the reason is being typed instead of picked from the codes.
-  final bool reasonIsOther;
+  /// The choices, as the sheet lists them. The dropdown offers these and
+  /// nothing else.
+  final List<DowntimeReason> reasons;
 
-  /// Called with a reason code, [otherDowntimeReasonCode], or null to clear.
-  final void Function(String? code) onReasonPicked;
+  /// Called with the chosen reason's label.
+  final void Function(String? label) onReasonPicked;
   final String? lorLabel;
 
   /// True when this hour's output is already saved to the sheet.
@@ -1108,16 +1109,53 @@ class _SlotBlock extends StatelessWidget {
     );
   }
 
-  /// Which dropdown entry is showing, derived from the cell's own contents so
-  /// the picker and the value that will be saved can never disagree.
-  String? get _reasonCode {
-    if (reasonIsOther) return otherDowntimeReasonCode;
-    return downtimeReasonFromCell(reasonController.text)?.code;
+  /// The reason for the stop: a dropdown of the sheet's list, and nothing
+  /// else. There is no free-text box and no "Other" — a cause typed in free
+  /// hand is a cause nobody can add up across a month, and one the list lacks
+  /// is added on the DowntimeReasons tab by a super admin, not from here.
+  Widget _reasonField() {
+    final current = reasonController.text.trim();
+    // The stored reason may be one the list no longer has: an old free-text
+    // entry, or one a super admin has since removed. It is shown as it was
+    // saved, marked, so the field never appears blank over a value that is
+    // still on the sheet, and so it can be replaced rather than silently lost.
+    final stray =
+        current.isNotEmpty && downtimeReasonFromCell(current, reasons) == null;
+    return DropdownButtonFormField<String>(
+      // Keyed on the value: the field holds its own selection once built, and
+      // this is what makes it follow a reload instead of showing a stale one.
+      key: ValueKey('reason:${slot.slotKey}:$current'),
+      initialValue: current.isEmpty ? null : current,
+      isExpanded: true,
+      onChanged: onReasonPicked,
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: 'Reason for the stop',
+        prefixIcon: Icon(
+          Icons.edit_note_rounded,
+          size: 20,
+          color: AppColors.textSecondary,
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      items: [
+        for (final reason in reasons)
+          DropdownMenuItem(
+            value: reason.label,
+            child: _reasonItem(reason.code, reason.name),
+          ),
+        if (stray)
+          DropdownMenuItem(
+            value: current,
+            child: _reasonItem(null, '$current (not in the list)'),
+          ),
+      ],
+    );
   }
 
-  /// One dropdown line: the code in a fixed-width column so fifteen of them
-  /// read as a list rather than ragged text. "Other" has no code, and the gap
-  /// is what marks it out as the odd one.
+  /// One dropdown line: the code in a fixed-width column so a long list reads
+  /// as a list rather than ragged text. A reason with no code leaves the gap.
   Widget _reasonItem(String? code, String name) {
     return Row(
       children: [
@@ -1200,76 +1238,7 @@ class _SlotBlock extends StatelessWidget {
           // nothing went wrong, and there are three of these on the form.
           if (downtimeController.text.trim().isNotEmpty) ...[
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              // The whole point of the codes is that a month of stoppages can
-              // be added up by cause, so picking is the default path and
-              // typing is the exception.
-              initialValue: _reasonCode,
-              isExpanded: true,
-              onChanged: onReasonPicked,
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: 'Reason for the stop',
-                prefixIcon: Icon(
-                  Icons.edit_note_rounded,
-                  size: 20,
-                  color: AppColors.textSecondary,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              items: [
-                for (final reason in downtimeReasons)
-                  DropdownMenuItem(
-                    value: reason.code,
-                    child: _reasonItem(reason.code, reason.name),
-                  ),
-                DropdownMenuItem(
-                  value: otherDowntimeReasonCode,
-                  child: _reasonItem(null, otherDowntimeReason.name),
-                ),
-              ],
-            ),
-          ],
-          if (downtimeController.text.trim().isNotEmpty && reasonIsOther) ...[
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: reasonController,
-              textCapitalization: TextCapitalization.sentences,
-              // As long as they like: a cause the code list doesn't cover is
-              // exactly the one that needs explaining.
-              maxLines: null,
-              minLines: 1,
-              keyboardType: TextInputType.multiline,
-              autofocus: true,
-              onChanged: (_) => onDowntimeChanged(),
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: 'What happened?',
-                hintText: 'e.g. mould change, no operator, tool broken',
-                hintStyle: TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textSecondary,
-                ),
-                prefixIcon: Icon(
-                  Icons.drive_file_rename_outline,
-                  size: 20,
-                  color: AppColors.textSecondary,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
+            _reasonField(),
           ],
       ],
     );

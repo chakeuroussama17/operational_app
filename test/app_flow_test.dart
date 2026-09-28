@@ -599,20 +599,46 @@ void main() {
 
     test('machining takes the MACH names', () {
       final codes = partCodesForOperation(master, machiningOperation);
-      expect(codes.map((c) => c.code), ['2244', '2266']);
+      // 9999 is the unclassifiable one, covered below — every other part is
+      // in exactly one list.
+      expect(
+        codes.map((c) => c.code).where((c) => c != '9999'),
+        ['2244', '2266'],
+      );
     });
 
     test('assembly takes the ASSY names', () {
       final codes = partCodesForOperation(master, assemblyOperation);
-      expect(codes.map((c) => c.code), ['2215', '2230']);
+      expect(
+        codes.map((c) => c.code).where((c) => c != '9999'),
+        ['2215', '2230'],
+      );
     });
 
-    test('a part with nothing to classify it lands in neither list', () {
-      final everything = [
-        ...partCodesForOperation(master, machiningOperation),
-        ...partCodesForOperation(master, assemblyOperation),
-      ];
-      expect(everything.map((c) => c.code), isNot(contains('9999')));
+    test('a part with nothing to classify it is offered under BOTH', () {
+      // A row added to the Parts sheet with a name that says nothing about
+      // its operation used to appear in neither picker, with no hint why.
+      // Showing it twice is a nuisance; never showing it is a fault.
+      expect(
+        partCodesForOperation(master, machiningOperation).map((c) => c.code),
+        contains('9999'),
+      );
+      expect(
+        partCodesForOperation(master, assemblyOperation).map((c) => c.code),
+        contains('9999'),
+      );
+    });
+
+    test('a classified part is never offered to the other operation', () {
+      // The fallback above must not leak: 2244 is machining, full stop.
+      expect(
+        partCodesForOperation(master, assemblyOperation).map((c) => c.code),
+        isNot(contains('2244')),
+      );
+      expect(
+        partCodesForOperation(master, machiningOperation).map((c) => c.code),
+        isNot(contains('2215')),
+      );
     });
   });
 
@@ -1370,47 +1396,90 @@ void main() {
   });
 
   group('downtime reason codes', () {
-    test('the plant list ships whole, in the plant order', () {
-      expect(downtimeReasons.length, 15);
-      expect(downtimeReasons.first.code, '001');
-      expect(downtimeReasons.first.name, 'TOOL ROOM DOWNTIME');
-      expect(downtimeReasons.last.code, '015');
-      expect(downtimeReasons.last.name, 'COMPANY EVENT');
-      // Codes are zero-padded and unique — they are the identity.
-      final codes = downtimeReasons.map((r) => r.code).toList();
+    test('the bundled fallback is the plant list, whole and in order', () {
+      expect(bundledDowntimeReasons.length, 15);
+      expect(bundledDowntimeReasons.first.code, '001');
+      expect(bundledDowntimeReasons.first.name, 'TOOL ROOM DOWNTIME');
+      expect(bundledDowntimeReasons.last.code, '015');
+      expect(bundledDowntimeReasons.last.name, 'COMPANY EVENT');
+      final codes = bundledDowntimeReasons.map((r) => r.code).toList();
       expect(codes.toSet().length, codes.length);
       expect(codes.every((c) => c.length == 3), isTrue);
     });
 
     test('the label leads with the code so a sheet can split it back out', () {
-      final reason = downtimeReasons[7];
+      final reason = bundledDowntimeReasons[7];
       expect(reason.label, '008 · MACHINING MAINTENANCE DOWNTIME');
       expect(reason.label.substring(0, 3), '008');
     });
 
-    test('a stored cell resolves back to the code it was saved from', () {
-      for (final reason in downtimeReasons) {
-        expect(downtimeReasonFromCell(reason.label)?.code, reason.code);
+    test('a reason with no code is just its name', () {
+      expect(const DowntimeReason('', 'CRANE FAILURE').label, 'CRANE FAILURE');
+    });
+
+    test('a reason parses from what the sheet sends', () {
+      final reason = DowntimeReason.fromJson(const {
+        'code': ' 016 ',
+        'name': ' CRANE FAILURE ',
+      });
+      expect(reason.code, '016');
+      expect(reason.name, 'CRANE FAILURE');
+      expect(reason.label, '016 · CRANE FAILURE');
+    });
+
+    test('a stored cell resolves back to the reason it was saved from', () {
+      for (final reason in bundledDowntimeReasons) {
+        expect(
+          downtimeReasonFromCell(reason.label, bundledDowntimeReasons)?.code,
+          reason.code,
+        );
       }
-      // Hand-typed in the sheet as just the code.
-      expect(downtimeReasonFromCell('012')?.name, 'TEA BREAK');
-    });
-
-    test('free text stays free text rather than snapping to a code', () {
-      // An Other reason, and anything logged before the codes existed, has
-      // to come back as null so the form reopens it on Other.
-      expect(downtimeReasonFromCell('waiting on the crane'), isNull);
-      expect(downtimeReasonFromCell('TOOL ROOM DOWNTIME extended'), isNull);
-      expect(downtimeReasonFromCell(''), isNull);
-      expect(downtimeReasonFromCell(null), isNull);
-    });
-
-    test('the Other sentinel cannot collide with a real code', () {
-      expect(otherDowntimeReasonCode.length, isNot(3));
+      // Case is how someone typed it, not part of the identity.
       expect(
-        downtimeReasons.any((r) => r.code == otherDowntimeReasonCode),
-        isFalse,
+        downtimeReasonFromCell(
+          '012 · tea break',
+          bundledDowntimeReasons,
+        )?.name,
+        'TEA BREAK',
       );
+      // Hand-typed in the sheet as just the code.
+      expect(
+        downtimeReasonFromCell('012', bundledDowntimeReasons)?.name,
+        'TEA BREAK',
+      );
+    });
+
+    test('it resolves against the list it is GIVEN, not a built-in one', () {
+      // The list is edited on the sheet, so a reason a super admin added has
+      // to resolve and one they removed has to stop resolving.
+      const sheet = [DowntimeReason('016', 'CRANE FAILURE')];
+      expect(
+        downtimeReasonFromCell('016 · CRANE FAILURE', sheet)?.name,
+        'CRANE FAILURE',
+      );
+      expect(
+        downtimeReasonFromCell('012 · TEA BREAK', sheet),
+        isNull,
+        reason: 'removed from the sheet, so no longer a choice',
+      );
+    });
+
+    test('anything not on the list resolves to null, never a near match', () {
+      // An old free-text reason must come back null so the field can show it
+      // marked "not in the list" instead of snapping it to the wrong code.
+      expect(
+        downtimeReasonFromCell('waiting on the crane', bundledDowntimeReasons),
+        isNull,
+      );
+      expect(
+        downtimeReasonFromCell(
+          'TOOL ROOM DOWNTIME extended',
+          bundledDowntimeReasons,
+        ),
+        isNull,
+      );
+      expect(downtimeReasonFromCell('', bundledDowntimeReasons), isNull);
+      expect(downtimeReasonFromCell(null, bundledDowntimeReasons), isNull);
     });
   });
 
@@ -1526,22 +1595,201 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('machining entry: Other opens a box and saves what is typed', (
+  testWidgets('machining entry: the reasons come from the sheet, and only those', (
     tester,
   ) async {
-    // Other is the sixteenth entry, and the open menu is only as tall as the
-    // screen — on the default 600px surface it isn't laid out to be tapped.
-    tester.view.physicalSize = const Size(800, 1400);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-
     Map<String, dynamic>? posted;
+    var reasonRequests = 0;
     final mock = MockClient((request) async {
+      final action = request.url.queryParameters['action'];
       if (request.method == 'POST') {
         posted =
             (jsonDecode(request.body) as Map<String, dynamic>)['data']
                 as Map<String, dynamic>;
         return http.Response('{"status":"success"}', 200);
+      }
+      if (action == 'downtimereasons') {
+        reasonRequests++;
+        // A super admin has trimmed the list and added one of their own.
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': [
+              {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
+              {'code': '016', 'name': 'CRANE FAILURE'},
+            ],
+          }),
+          200,
+        );
+      }
+      if (action == 'rejectiontypes') {
+        return http.Response('{"status":"success","data":[]}', 200);
+      }
+      return http.Response('{"status":"success","data":null}', 200);
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reasonRequests, 1, reason: 'asked the sheet when the part opened');
+
+    await tester.enterText(find.byType(TextFormField).at(3), '40'); // 12PM min
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+
+    // What the sheet lists is offered — including the one added there...
+    expect(find.text('CRANE FAILURE'), findsWidgets);
+    expect(find.text('MACHINING MAINTENANCE DOWNTIME'), findsWidgets);
+    // ...and nothing else. TEA BREAK is in the app's bundled copy but not on
+    // this sheet, so it is not a choice.
+    expect(find.text('TEA BREAK'), findsNothing);
+
+    // No escape hatch: no "Other", and no box to type a cause into.
+    expect(find.textContaining('Other'), findsNothing);
+    expect(find.text('What happened?'), findsNothing);
+
+    await tester.tap(find.text('CRANE FAILURE').last);
+    await tester.pumpAndSettle();
+    expect(find.text('What happened?'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+
+    // A reason nobody in the app could have known about is what got saved.
+    expect(posted!['DowntimeReason_12PM'], '016 · CRANE FAILURE');
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: a saved reason that is off the list is shown, and replaceable', (
+    tester,
+  ) async {
+    Map<String, dynamic>? posted;
+    final mock = MockClient((request) async {
+      final action = request.url.queryParameters['action'];
+      if (request.method == 'POST') {
+        posted =
+            (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                as Map<String, dynamic>;
+        return http.Response('{"status":"success"}', 200);
+      }
+      if (action == 'downtimereasons') {
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': [
+              {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
+              {'code': '012', 'name': 'TEA BREAK'},
+            ],
+          }),
+          200,
+        );
+      }
+      if (action == 'row') {
+        // Logged back when the reason was a free-text box.
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'data': {
+              'Plan': '',
+              'Downtime_12PM': '30',
+              'DowntimeReason_12PM': 'Crane operator off sick',
+            },
+          }),
+          200,
+        );
+      }
+      if (action == 'rejectiontypes') {
+        return http.Response('{"status":"success","data":[]}', 200);
+      }
+      return http.Response('{"status":"success","data":null}', 200);
+    });
+
+    SheetsService.clearMasterCaches();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2244',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(client: mock),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.byType(DropdownButtonFormField<String>),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
+    );
+
+    // Not blanked, and not snapped to a near match: it reads as it was saved,
+    // marked, so nobody mistakes it for one of the choices.
+    expect(
+      find.text('Crane operator off sick (not in the list)'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('TEA BREAK').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('not in the list'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.byType(SubmitButton),
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.tap(find.byType(SubmitButton));
+    await tester.pumpAndSettle();
+    expect(posted!['DowntimeReason_12PM'], '012 · TEA BREAK');
+
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('machining entry: an unread sheet falls back to the bundled list', (
+    tester,
+  ) async {
+    // The open menu is only as tall as the screen, and its items are built as
+    // they scroll into view — on the default 600px surface the twelfth is not
+    // there to be found.
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // What an app installed ahead of the backend deploy sees: the reasons
+    // action does not exist yet, so the answer is the version ping.
+    final mock = MockClient((request) async {
+      if (request.url.queryParameters['action'] == 'downtimereasons') {
+        return http.Response(
+          '{"status":"ok","version":"OLD","message":"running"}',
+          200,
+        );
       }
       if (request.url.queryParameters['action'] == 'rejectiontypes') {
         return http.Response('{"status":"success","data":[]}', 200);
@@ -1562,10 +1810,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextFormField).at(3), '40'); // 12PM min
+    await tester.enterText(find.byType(TextFormField).at(3), '25');
     await tester.pumpAndSettle();
-
     await tester.dragUntilVisible(
       find.byType(DropdownButtonFormField<String>),
       find.byType(SingleChildScrollView),
@@ -1573,33 +1819,10 @@ void main() {
     );
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Other — type it in').last);
-    await tester.pumpAndSettle();
 
-    // Picking Other is what reveals the box; a code never does.
-    expect(find.text('What happened?'), findsOneWidget);
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'What happened?'),
-      'Crane operator off sick, waited for a replacement',
-    );
-    await tester.pumpAndSettle();
-
-    await tester.dragUntilVisible(
-      find.byType(SubmitButton),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -300),
-    );
-    await tester.tap(find.byType(SubmitButton));
-    await tester.pumpAndSettle();
-
-    // Stored verbatim — no code invented for it.
-    expect(
-      posted!['DowntimeReason_12PM'],
-      'Crane operator off sick, waited for a replacement',
-    );
-
-    await tester.pump(const Duration(seconds: 7));
-    await tester.pumpAndSettle();
+    // Logging a stop is never blocked by a backend that has not caught up.
+    expect(find.text('TEA BREAK'), findsWidgets);
+    expect(find.textContaining('Other'), findsNothing);
   });
 
   testWidgets('machining entry: a phone-width card lays out without overflow', (

@@ -148,7 +148,12 @@ class _SecondaryPartsScreenState extends State<SecondaryPartsScreen> {
   /// the user why the picker can't open.
   Future<List<PartCode>?> _availableCodes() async {
     try {
-      final codes = await _sheetsService.fetchPartCodes('secondary');
+      // Fresh, not cached: whoever opens this has usually just typed the
+      // row into the Parts sheet and is checking that it arrived.
+      final codes = await _sheetsService.fetchPartCodes(
+        'secondary',
+        forceRefresh: true,
+      );
       if (!mounted) return null;
       if (codes.isEmpty) {
         _snack('No Secondary part codes found — import the Parts sheet first.');

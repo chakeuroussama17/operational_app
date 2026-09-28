@@ -173,7 +173,12 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
   /// cached) once, then split by suffix — so switching operation costs nothing.
   Future<List<PartCode>?> _availableCodes() async {
     try {
-      final all = await _sheetsService.fetchPartCodes('machining');
+      // Fresh, not cached: whoever opens this has usually just typed the
+      // row into the Parts sheet and is checking that it arrived.
+      final all = await _sheetsService.fetchPartCodes(
+        'machining',
+        forceRefresh: true,
+      );
       if (!mounted) return null;
       if (all.isEmpty) {
         _snack('No Machining part codes found — import the Parts sheet first.');

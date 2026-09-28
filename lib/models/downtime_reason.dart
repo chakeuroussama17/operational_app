@@ -1,39 +1,40 @@
-/// The plant's downtime reason codes.
+/// The downtime reasons an operator can pick from.
 ///
-/// Fifteen of them, stable enough to ship with the app rather than be
-/// configured — the same call [MachiningOperation] makes. The list is short on
-/// purpose: it exists so a month of stoppages can be added up by cause, which
-/// only works if everyone picks from the same words. [otherDowntimeReason] is
-/// the escape hatch for a cause nobody anticipated, and what gets typed there
-/// is stored verbatim.
+/// THE LIST LIVES ON THE SHEET (the `DowntimeReasons` tab), not here. A super
+/// admin adds a reason by adding a row; it reaches every dropdown the next time
+/// one opens. Nobody can add one from the app — the picker offers the list and
+/// nothing else, because a cause typed in free hand is a cause nobody can add
+/// up across a month.
+///
+/// [bundledDowntimeReasons] is the same fifteen codes the sheet is seeded with.
+/// It exists only so the picker still works when the sheet cannot be read — an
+/// app installed ahead of the backend deploy, or a bad connection — and is
+/// never what a working system shows. The sheet wins whenever it answers.
 library;
 
 class DowntimeReason {
   const DowntimeReason(this.code, this.name);
 
-  /// Zero-padded, as the plant writes it ("001", not "1").
+  /// Zero-padded, as the plant writes it ("001", not "1"). May be blank on a
+  /// reason a super admin added without one.
   final String code;
   final String name;
 
-  /// "008 · MACHINING MAINTENANCE DOWNTIME" — what the dropdown shows and,
-  /// for a chosen reason, exactly what lands in the sheet cell. The code
-  /// leads so `LEFT(cell, 3)` pulls it back out for a pivot.
-  String get label => '$code · $name';
+  factory DowntimeReason.fromJson(Map<String, dynamic> json) => DowntimeReason(
+    (json['code'] ?? '').toString().trim(),
+    (json['name'] ?? '').toString().trim(),
+  );
+
+  /// "008 · MACHINING MAINTENANCE DOWNTIME" — what the dropdown shows and, for
+  /// a chosen reason, exactly what lands in the sheet cell. The code leads so
+  /// `LEFT(cell, 3)` pulls it back out for a pivot. The backend builds the
+  /// same string, and matches incoming reasons against it.
+  String get label => code.isEmpty ? name : '$code · $name';
 }
 
-/// Not a real code — the sentinel the dropdown uses for "none of these".
-/// Deliberately not three digits, so it can never collide with a real one.
-const String otherDowntimeReasonCode = 'OTHER';
-
-const DowntimeReason otherDowntimeReason = DowntimeReason(
-  otherDowntimeReasonCode,
-  'Other — type it in',
-);
-
 /// Ordered as the plant's own list is: casting causes, then machining, then
-/// the scheduled non-production stops. Kept in that order rather than sorted,
-/// because that's the order the people picking from it already know.
-const List<DowntimeReason> downtimeReasons = [
+/// the scheduled non-production stops.
+const List<DowntimeReason> bundledDowntimeReasons = [
   DowntimeReason('001', 'TOOL ROOM DOWNTIME'),
   DowntimeReason('002', 'DIE MAINTENANCE DOWNTIME'),
   DowntimeReason('003', 'CASTING ENGINEERING DOWNTIME'),
@@ -51,21 +52,23 @@ const List<DowntimeReason> downtimeReasons = [
   DowntimeReason('015', 'COMPANY EVENT'),
 ];
 
-/// The coded reason a stored cell holds, or null when it holds free text
-/// (an "Other" reason, or anything written before the codes existed).
+/// The entry in [reasons] that a stored cell refers to, or null when the cell
+/// holds something the list does not — an old free-text reason, or one a super
+/// admin has since removed.
 ///
-/// Matches on the whole label so a cell reading "001 · TOOL ROOM DOWNTIME"
-/// comes back as a chosen code, while "waiting on the crane" doesn't.
-DowntimeReason? downtimeReasonFromCell(String? cell) {
+/// Matches on the whole label without regard to case, then on the bare code,
+/// which is how someone editing the sheet by hand would most likely write it.
+DowntimeReason? downtimeReasonFromCell(
+  String? cell,
+  List<DowntimeReason> reasons,
+) {
   final value = (cell ?? '').trim();
   if (value.isEmpty) return null;
-  for (final reason in downtimeReasons) {
+  for (final reason in reasons) {
     if (reason.label.toLowerCase() == value.toLowerCase()) return reason;
   }
-  // Tolerate a cell holding only the code, which is how someone editing the
-  // sheet by hand would most likely write it.
-  for (final reason in downtimeReasons) {
-    if (reason.code == value) return reason;
+  for (final reason in reasons) {
+    if (reason.code.isNotEmpty && reason.code == value) return reason;
   }
   return null;
 }

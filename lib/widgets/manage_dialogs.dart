@@ -83,12 +83,13 @@ class _PromptTextDialogState extends State<_PromptTextDialog> {
 }
 
 /// Result of [promptPartCode]: [name] holds the chosen part CODE (from the
-/// master list), plus its MO (manufacturing order) number and — for
+/// master list), plus its MO (manufacturing order) and Rep numbers and — for
 /// Machining — the line it runs on.
 class PartWithMoInput {
   const PartWithMoInput({
     required this.name,
     required this.mo,
+    required this.rep,
     this.lineName = '',
     this.lineNo = '',
   });
@@ -96,8 +97,12 @@ class PartWithMoInput {
   /// The chosen part code.
   final String name;
 
-  /// '' if left blank (no MO set / clearing an existing one).
+  /// Never blank — the dialog will not return until it is filled in.
   final String mo;
+
+  /// Never blank, same as [mo]. Stored beside it on the part's Config row
+  /// and snapshotted onto every row logged against the part.
+  final String rep;
 
   /// The line split the way the sheet stores it — "Fanuc" and "21" in
   /// their own columns, so a pivot can group every Okuma or sort by number.
@@ -258,6 +263,7 @@ Future<PartWithMoInput?> promptPartCode(
   List<PartCode> codes = const [],
   String? initialCode,
   String? initialMo,
+  String? initialRep,
   bool pickLine = false,
   String? initialLine,
 }) {
@@ -269,6 +275,7 @@ Future<PartWithMoInput?> promptPartCode(
       codes: codes,
       initialCode: initialCode,
       initialMo: initialMo,
+      initialRep: initialRep,
       pickLine: pickLine,
       initialLine: initialLine,
     ),
@@ -282,6 +289,7 @@ class _PartCodeDialog extends StatefulWidget {
     required this.codes,
     this.initialCode,
     this.initialMo,
+    this.initialRep,
     this.pickLine = false,
     this.initialLine,
   });
@@ -291,6 +299,7 @@ class _PartCodeDialog extends StatefulWidget {
   final List<PartCode> codes;
   final String? initialCode;
   final String? initialMo;
+  final String? initialRep;
 
   /// Machining only — the other modules log one line per group already,
   /// so asking again there would be asking twice.
@@ -309,7 +318,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   /// Measured, not estimated: at 340 the dialog overflowed a 600px-tall
   /// viewport by 74px with the list at its 260 maximum. Only short screens
   /// feel this number — anywhere taller, `room` exceeds the 260 cap anyway.
-  static const double _dialogChromeHeight = 420;
+  static const double _dialogChromeHeight = 490;
 
   /// The line row adds a field and its gap. Measured the same way as
   /// [_dialogChromeHeight]: without this the open list keeps its old height
@@ -320,6 +329,9 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
   );
+  late final _repController = TextEditingController(
+    text: widget.initialRep ?? '',
+  );
   late String _selectedCode = widget.initialCode ?? '';
   late String _line = (widget.initialLine ?? '').trim();
 
@@ -329,11 +341,14 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   bool _open = false;
   String? _error;
   String? _lineError;
+  String? _moError;
+  String? _repError;
 
   @override
   void dispose() {
     _searchController.dispose();
     _moController.dispose();
+    _repController.dispose();
     super.dispose();
   }
 
@@ -396,11 +411,25 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
       });
       return;
     }
+    // Both numbers are required. Checked together rather than one at a time,
+    // so a supervisor who skipped both is told about both at once instead of
+    // fixing one, pressing Save, and meeting the second.
+    final mo = _moController.text.trim();
+    final rep = _repController.text.trim();
+    if (mo.isEmpty || rep.isEmpty) {
+      setState(() {
+        _moError = mo.isEmpty ? 'Enter the MO number' : null;
+        _repError = rep.isEmpty ? 'Enter the Rep number' : null;
+        _open = false;
+      });
+      return;
+    }
     final line = splitLineLabel(_line);
     Navigator.of(context).pop(
       PartWithMoInput(
         name: _selectedCode,
-        mo: _moController.text.trim(),
+        mo: mo,
+        rep: rep,
         lineName: line.name,
         lineNo: line.number,
       ),
@@ -439,6 +468,13 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     final listHeight = room.clamp(120.0, 260.0);
 
     return AlertDialog(
+      // Part code, line, MO and Rep plus their error lines no longer fit a
+      // short phone — least of all with the keyboard up for the Rep field,
+      // which is exactly when it is being filled in. Scrolling is the honest
+      // answer: the alternative is a Save button pushed off the bottom. The
+      // part list inside keeps its own fixed height, so the two scrolls never
+      // fight over the same drag.
+      scrollable: true,
       title: Text(widget.title),
       content: SizedBox(
         // Roomy on a tablet/desktop, never wider than a phone screen.
@@ -600,14 +636,36 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
             TextField(
               controller: _moController,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                labelText: 'MO number (optional)',
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'MO number',
                 isDense: true,
+                errorText: _moError,
               ),
               // Tapping into MO shuts the list, so the two never contend for
               // the same space.
               onTap: () {
                 if (_open) setState(() => _open = false);
+              },
+              onChanged: (_) {
+                if (_moError != null) setState(() => _moError = null);
+              },
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _repController,
+              textCapitalization: TextCapitalization.characters,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Rep number',
+                isDense: true,
+                errorText: _repError,
+              ),
+              onTap: () {
+                if (_open) setState(() => _open = false);
+              },
+              onChanged: (_) {
+                if (_repError != null) setState(() => _repError = null);
               },
               onSubmitted: (_) => _save(),
             ),

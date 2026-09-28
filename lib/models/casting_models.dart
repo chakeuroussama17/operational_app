@@ -64,6 +64,7 @@ class PartStatus {
   const PartStatus({
     required this.part,
     this.mo,
+    this.rep,
     this.name,
     this.lastUpdated,
     required this.fillPercent,
@@ -72,6 +73,9 @@ class PartStatus {
   /// The part CODE (chosen from the master list) — this card's title.
   final String part;
   final String? mo;
+
+  /// The part's Rep number, carried beside [mo] on its Config row.
+  final String? rep;
 
   /// Human-readable part name from the master list (e.g. "…-CRANKCASE-1-CAST").
   final String? name;
@@ -85,6 +89,7 @@ class PartStatus {
     return PartStatus(
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
+      rep: cleanCell(json['rep']),
       name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),

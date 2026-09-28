@@ -74,6 +74,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
               part: part.part,
               shift: widget.shift,
               mo: part.mo,
+              rep: part.rep,
             ),
           ),
         )
@@ -112,7 +113,8 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
       () => _sheetsService.addCastingPart(
         dcm: widget.dcm,
         part: input.name,
-        mo: input.mo.isEmpty ? null : input.mo,
+        mo: input.mo,
+        rep: input.rep,
       ),
     );
   }
@@ -127,6 +129,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
+      initialRep: part.rep,
     );
     if (input == null) return;
     await _mutate(
@@ -135,6 +138,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         part: part.part,
         newPart: input.name,
         mo: input.mo,
+        rep: input.rep,
       ),
     );
   }
@@ -191,7 +195,11 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
 
   String _subtitleFor(PartStatus part) {
     final name = part.name;
-    final mo = part.mo;
+    // "MO 2214 / Rep 07": the two numbers travel together, so they read
+    // together — and a part added before Rep existed still shows its MO.
+    final mo = part.mo == null
+        ? null
+        : (part.rep == null ? part.mo : '${part.mo} / Rep ${part.rep}');
     final updated = part.lastUpdated;
     if (name != null) return mo != null ? 'MO $mo · $name' : name;
     if (mo != null && updated != null) return 'MO $mo · $updated';

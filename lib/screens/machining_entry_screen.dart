@@ -30,6 +30,7 @@ class MachiningEntryScreen extends StatefulWidget {
     this.lineName = '',
     this.lineNo = '',
     this.mo,
+    this.rep,
     this.service,
   });
 
@@ -47,6 +48,7 @@ class MachiningEntryScreen extends StatefulWidget {
   /// The part's MO (manufacturing order) number — shown as read-only context.
   /// Edit it from the part's Edit action on the Parts screen.
   final String? mo;
+  final String? rep;
 
   /// Test seam: the screen normally builds its own [SheetsService] against the
   /// real backend; widget tests inject one backed by a mock client instead.
@@ -582,6 +584,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                       operation: widget.operation,
                       shift: widget.shift,
                       mo: widget.mo,
+                      rep: widget.rep,
                     ),
                     if (_loadError != null) ...[
                       const SizedBox(height: 14),
@@ -661,6 +664,7 @@ class _ContextHeader extends StatelessWidget {
     required this.operation,
     required this.shift,
     this.mo,
+    this.rep,
   });
 
   final String customer;
@@ -668,6 +672,7 @@ class _ContextHeader extends StatelessWidget {
   final MachiningOperation operation;
   final String shift;
   final String? mo;
+  final String? rep;
 
   @override
   Widget build(BuildContext context) {
@@ -706,6 +711,7 @@ class _ContextHeader extends StatelessWidget {
           '$shift shift',
         ),
         if (mo != null) chip(Icons.description_outlined, 'MO $mo'),
+        if (rep != null) chip(Icons.tag_outlined, 'Rep $rep'),
       ],
     );
   }

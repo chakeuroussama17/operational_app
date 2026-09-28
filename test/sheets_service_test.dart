@@ -572,6 +572,7 @@ void main() {
         lineName: 'Fanuc',
         lineNo: '21',
         mo: 'MACH-09',
+        rep: '07',
       );
 
       expect(sent['action'], 'config');
@@ -579,6 +580,7 @@ void main() {
       expect(sent['group'], 'Mazda');
       expect(sent['part'], '9');
       expect(sent['mo'], 'MACH-09');
+      expect(sent['rep'], '07');
       // Without this the part lands in both operations' lists.
       expect(sent['operation'], 'assembly');
       // And without these, the same code on a second line would collide

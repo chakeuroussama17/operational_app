@@ -61,6 +61,7 @@ class SecondaryPartStatus {
   const SecondaryPartStatus({
     required this.part,
     this.mo,
+    this.rep,
     this.name,
     this.lastUpdated,
     required this.fillPercent,
@@ -69,6 +70,9 @@ class SecondaryPartStatus {
   /// The part CODE (chosen from the master list) — this card's title.
   final String part;
   final String? mo;
+
+  /// The part's Rep number, carried beside [mo] on its Config row.
+  final String? rep;
 
   /// Human-readable part name from the master list.
   final String? name;
@@ -82,6 +86,7 @@ class SecondaryPartStatus {
     return SecondaryPartStatus(
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
+      rep: cleanCell(json['rep']),
       name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),

@@ -18,7 +18,7 @@ class SecondaryEntryScreen extends StatefulWidget {
     required this.part,
     required this.shift,
     this.mo,
-    this.rep,
+    this.report,
   });
 
   final String station;
@@ -29,7 +29,7 @@ class SecondaryEntryScreen extends StatefulWidget {
   /// loaded it — shown as read-only context, not editable here (see the
   /// part's Edit action on the Parts screen for that).
   final String? mo;
-  final String? rep;
+  final String? report;
 
   @override
   State<SecondaryEntryScreen> createState() => _SecondaryEntryScreenState();
@@ -185,7 +185,7 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
                         part: widget.part,
                         shift: widget.shift,
                         mo: widget.mo,
-                        rep: widget.rep,
+                        report: widget.report,
                       ),
                       if (_loadError != null) ...[
                         const SizedBox(height: 14),
@@ -229,14 +229,14 @@ class _ContextHeader extends StatelessWidget {
     required this.part,
     required this.shift,
     this.mo,
-    this.rep,
+    this.report,
   });
 
   final String station;
   final String part;
   final String shift;
   final String? mo;
-  final String? rep;
+  final String? report;
 
   @override
   Widget build(BuildContext context) {
@@ -274,7 +274,7 @@ class _ContextHeader extends StatelessWidget {
           '$shift shift',
         ),
         if (mo != null) chip(Icons.description_outlined, 'MO $mo'),
-        if (rep != null) chip(Icons.tag_outlined, 'Rep $rep'),
+        if (report != null) chip(Icons.tag_outlined, 'Report $report'),
       ],
     );
   }

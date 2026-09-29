@@ -91,7 +91,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
               lineNo: part.lineNo,
               shift: widget.shift,
               mo: part.mo,
-              rep: part.rep,
+              report: part.report,
             ),
           ),
         )
@@ -134,7 +134,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         lineName: input.lineName,
         lineNo: input.lineNo,
         mo: input.mo,
-        rep: input.rep,
+        report: input.report,
       ),
     );
   }
@@ -149,7 +149,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
-      initialRep: part.rep,
+      initialReport: part.report,
       pickLine: true,
       initialLine: part.line,
     );
@@ -167,7 +167,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         newLineName: input.lineName,
         newLineNo: input.lineNo,
         mo: input.mo,
-        rep: input.rep,
+        report: input.report,
       ),
     );
   }
@@ -323,8 +323,8 @@ String _partSubtitle(MachiningPartStatus part) {
   final parts = <String>[
     if (part.line.isNotEmpty) part.lineDisplay,
     if (part.mo != null)
-      part.rep == null ? 'MO ${part.mo}' : 'MO ${part.mo} / Rep ${part.rep}',
-    if (part.mo == null && part.rep != null) 'Rep ${part.rep}',
+      part.report == null ? 'MO ${part.mo}' : 'MO ${part.mo} / Report ${part.report}',
+    if (part.mo == null && part.report != null) 'Report ${part.report}',
     if (part.name != null) part.name!,
   ];
   if (parts.isEmpty) {

@@ -173,11 +173,11 @@ var REJECTION_SUMMARY_SHEET = 'Rejection_Summary';
 
 function machiningRejectionHeaders() {
   // Hour is deliberately LAST: the Rejection_Summary QUERY formulas reference
-  // the other columns by letter, and appending keeps every letter stable. Rep
+  // the other columns by letter, and appending keeps every letter stable. Report
   // is appended after it for the same reason — beside MO, where it belongs by
   // meaning, it would move RejectionType and Qty out from under the formulas.
   return ['Date', 'Shift', 'Customer', 'PartNo', 'Operation', 'Barcode', 'PartName',
-    'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated', 'Hour', 'Rep'];
+    'MO', 'RejectionCode', 'RejectionType', 'Qty', 'LastUpdated', 'Hour', 'Report'];
 }
 
 // Which "Department" value in the Parts master belongs to each app module.
@@ -251,7 +251,7 @@ function getMachiningSheetForShift(shift) {
 // humans reading the sheet — but existing tabs must be physically rearranged
 // to match: run migrateColumnOrder() once (see below).
 function castingHeadersForShift(shift) {
-  var headers = ['Date', 'DCM', 'PartNo', 'Barcode', 'PartName', 'MO', 'Rep', 'Plan'];
+  var headers = ['Date', 'DCM', 'PartNo', 'Barcode', 'PartName', 'MO', 'Report', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
@@ -270,7 +270,7 @@ function machiningHeadersForShift(shift) {
   // of WHICH entry this is, not something measured about it. A part can run on
   // more than one line, and before these columns existed people encoded that
   // by renaming the part ("2214 Fanuc 21"), which split every per-part figure.
-  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Rep', 'Plan'];
+  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Report', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
@@ -288,7 +288,7 @@ function machiningHeadersForShift(shift) {
 // Header frame for a Secondary shift sheet — same shape as Casting but keyed
 // by Station and using the Actual_/LOR_ column prefixes.
 function secondaryHeadersForShift(shift) {
-  var headers = ['Date', 'Station', 'PartNo', 'Barcode', 'PartName', 'MO', 'Rep', 'Plan'];
+  var headers = ['Date', 'Station', 'PartNo', 'Barcode', 'PartName', 'MO', 'Report', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
@@ -300,9 +300,9 @@ function secondaryHeadersForShift(shift) {
 
 // Config's own frame: the part's identity (Value = code, Barcode, PartName)
 // grouped, with the monthly MO last since it's the one that gets edited.
-// Rep sits beside MO: both are numbers issued per part per run, both are
+// Report sits beside MO: both are numbers issued per part per run, both are
 // required when a part is added, and both are snapshotted onto logged rows.
-var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Rep'];
+var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Report'];
 
 // The "business date" a shift row belongs to. Day shift runs from 10AM to
 // 8PM; Night shift takes over at 10PM and continues through the overnight
@@ -322,7 +322,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'REP-v31';
+var BACKEND_VERSION = 'REPORT-v32';
 
 function doGet(e) {
   try {
@@ -461,7 +461,7 @@ function getSecondaryParts(station, shift) {
     return {
       part: part,
       mo: info.mo,
-      rep: info.rep,
+      report: info.report,
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
@@ -525,7 +525,7 @@ function upsertSecondaryRow(data) {
     // creation — later Config MO edits never rewrite already-logged rows.
     var pinfo = getConfigPartInfo('secondary', data.Station, data.PartNo);
     merged.MO = pinfo.mo;
-    merged.Rep = pinfo.rep;
+    merged.Report = pinfo.report;
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
@@ -600,7 +600,7 @@ function getCastingParts(dcm, shift) {
     return {
       part: part,
       mo: info.mo,
-      rep: info.rep,
+      report: info.report,
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
@@ -666,7 +666,7 @@ function upsertCastingRow(data) {
     // later Config edit must never silently rewrite already-logged history.
     var pinfo = getConfigPartInfo('casting', data.DCM, data.PartNo);
     merged.MO = pinfo.mo;
-    merged.Rep = pinfo.rep;
+    merged.Report = pinfo.report;
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
@@ -722,10 +722,10 @@ function getConfigPartInfo(module, group, part, operation, lineName, lineNo) {
   var match = candidates.find(function (r) {
     return String(r.Operation === undefined ? '' : r.Operation).trim() !== '';
   }) || candidates[0];
-  if (!match) return { mo: '', rep: '', barcode: '', name: '' };
+  if (!match) return { mo: '', report: '', barcode: '', name: '' };
   return {
     mo: match.MO ? String(match.MO) : '',
-    rep: match.Rep ? String(match.Rep) : '',
+    report: match.Report ? String(match.Report) : '',
     barcode: match.Barcode ? String(match.Barcode) : '',
     name: match.PartName ? String(match.PartName) : '',
   };
@@ -983,7 +983,9 @@ function addPartWithMo(module, payload) {
   var group = String(payload.group || '');
   var part = String(payload.part || '').trim();   // the chosen Part CODE
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo).trim() : '';
-  var rep = payload.rep !== undefined && payload.rep !== null ? String(payload.rep).trim() : '';
+  // `rep` is what an install from before the rename to Report still sends.
+  var reportRaw = payload.report !== undefined ? payload.report : payload.rep;
+  var report = reportRaw !== undefined && reportRaw !== null ? String(reportRaw).trim() : '';
   // Machining only; blank everywhere else.
   var operation = module === 'machining'
     ? String(payload.operation || '').trim() : '';
@@ -993,12 +995,12 @@ function addPartWithMo(module, payload) {
     ? String(payload.lineNo || '').trim() : '';
   if (!group || !part) return { status: 'error', message: 'group and part are required' };
   // Required, and checked here rather than trusted to the app: an older
-  // install still has MO marked optional and no Rep field at all.
-  if (!mo || !rep) {
+  // install still has MO marked optional and no Report field at all.
+  if (!mo || !report) {
     return {
       status: 'error',
-      message: 'MO number and Rep number are both required. ' +
-        (rep ? '' : 'If there is no Rep field, update the app. '),
+      message: 'MO number and Report number are both required. ' +
+        (report ? '' : 'If there is no Report field, update the app. '),
     };
   }
 
@@ -1019,7 +1021,7 @@ function addPartWithMo(module, payload) {
   writeConfigRow(sheet, {
     Module: module, Kind: 'part', Group: group, Value: part,
     Operation: operation, LineName: lineName, LineNo: lineNo,
-    MO: mo, Rep: rep, Barcode: info.barcode, PartName: info.name,
+    MO: mo, Report: report, Barcode: info.barcode, PartName: info.name,
   });
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
 }
@@ -1028,23 +1030,24 @@ function editPartWithMo(module, payload) {
   var group = String(payload.group || '');
   var part = String(payload.part || '');
   var newPart = payload.newPart !== undefined && payload.newPart !== null ? String(payload.newPart).trim() : part;
-  // Absent means "leave it unchanged" — an older install that sends no Rep
+  // Absent means "leave it unchanged" — an older install that sends no Report
   // must still be able to fix a typo in a part code. Sent but blank means
   // "clear it", and both are required now, so that is refused.
   var mo = payload.mo !== undefined && payload.mo !== null ? String(payload.mo).trim() : null;
-  var rep = payload.rep !== undefined && payload.rep !== null ? String(payload.rep).trim() : null;
+  var reportRaw = payload.report !== undefined ? payload.report : payload.rep;
+  var report = reportRaw !== undefined && reportRaw !== null ? String(reportRaw).trim() : null;
   if (!group || !part || !newPart) {
     return { status: 'error', message: 'group, part and newPart are required' };
   }
-  if (mo === '' || rep === '') {
-    return { status: 'error', message: 'MO number and Rep number cannot be left blank.' };
+  if (mo === '' || report === '') {
+    return { status: 'error', message: 'MO number and Report number cannot be left blank.' };
   }
 
   var sheet = getConfigSheet();
   var headers = getHeaders(sheet);
   var valueCol = headers.indexOf('Value') + 1;
   var moCol = headers.indexOf('MO') + 1;
-  var repCol = headers.indexOf('Rep') + 1;
+  var reportCol = headers.indexOf('Report') + 1;
   var barcodeCol = headers.indexOf('Barcode') + 1;
   var nameCol = headers.indexOf('PartName') + 1;
   var lineNameCol = headers.indexOf('LineName') + 1;
@@ -1081,7 +1084,7 @@ function editPartWithMo(module, payload) {
     if (nameCol > 0) sheet.getRange(match._rowNum, nameCol).setValue(info.name);
   }
   if (mo !== null && moCol > 0) sheet.getRange(match._rowNum, moCol).setValue(mo);
-  if (rep !== null && repCol > 0) sheet.getRange(match._rowNum, repCol).setValue(rep);
+  if (report !== null && reportCol > 0) sheet.getRange(match._rowNum, reportCol).setValue(report);
   if (lineKeyOf(newLineName, newLineNo) !== lineKeyOf(lineName, lineNo)) {
     if (lineNameCol > 0) sheet.getRange(match._rowNum, lineNameCol).setValue(newLineName);
     if (lineNoCol > 0) sheet.getRange(match._rowNum, lineNoCol).setValue(newLineNo);
@@ -1147,7 +1150,7 @@ function getMachiningParts(customer, shift, operation) {
       lineName: mName,
       lineNo: mNo,
       mo: info.mo,
-      rep: info.rep,
+      report: info.report,
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
@@ -1272,7 +1275,7 @@ function upsertMachiningRow(data) {
     var pinfo = getConfigPartInfo('machining', data.Customer, data.PartNo, data.Operation,
       data.LineName, data.LineNo);
     merged.MO = pinfo.mo;
-    merged.Rep = pinfo.rep;
+    merged.Report = pinfo.report;
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
@@ -2045,7 +2048,7 @@ function writeMachiningRejections(list, data, shift, shiftDate, row) {
       Barcode: row.Barcode || '',
       PartName: row.PartName || '',
       MO: row.MO || '',
-      Rep: row.Rep || '',
+      Report: row.Report || '',
       RejectionCode: padRejectionCode(item.code),
       RejectionType: String(item.type).trim(),
       // Written as a NUMBER, not text — the summary tab's QUERY sums this
@@ -2629,7 +2632,7 @@ function configMutate(payload) {
           if (op.toLowerCase() === operation.toLowerCase()) return;
           writeConfigRow(sheet, {
             Module: module, Kind: 'part', Group: group, Value: value,
-            Operation: op, MO: r.MO || '', Rep: r.Rep || '',
+            Operation: op, MO: r.MO || '', Report: r.Report || '',
             Barcode: r.Barcode || '', PartName: r.PartName || '',
           });
         });
@@ -2728,7 +2731,7 @@ function splitMachiningPartsByOperation() {
       writeConfigRow(sheet, {
         Module: 'machining', Kind: 'part',
         Group: r.Group, Value: r.Value, Operation: op,
-        MO: r.MO || '', Rep: r.Rep || '', Barcode: r.Barcode || '', PartName: r.PartName || '',
+        MO: r.MO || '', Report: r.Report || '', Barcode: r.Barcode || '', PartName: r.PartName || '',
       });
       added++;
     });
@@ -2916,6 +2919,16 @@ function migrateColumnOrder() {
     renameHeader(MACHINING_DAY_SHEET, 'Line', 'Operation'),
     renameHeader(MACHINING_NIGHT_SHEET, 'Line', 'Operation'),
     renameHeader(MACHINING_REJECTIONS_SHEET, 'Line', 'Operation'),
+    // "Rep" became "Report" after the column had already reached the sheet.
+    // Same rule as above: retitle in place first, so every value stays put.
+    renameHeader(CONFIG_SHEET, 'Rep', 'Report'),
+    renameHeader(CASTING_DAY_SHEET, 'Rep', 'Report'),
+    renameHeader(CASTING_NIGHT_SHEET, 'Rep', 'Report'),
+    renameHeader(SECONDARY_DAY_SHEET, 'Rep', 'Report'),
+    renameHeader(SECONDARY_NIGHT_SHEET, 'Rep', 'Report'),
+    renameHeader(MACHINING_DAY_SHEET, 'Rep', 'Report'),
+    renameHeader(MACHINING_NIGHT_SHEET, 'Rep', 'Report'),
+    renameHeader(MACHINING_REJECTIONS_SHEET, 'Rep', 'Report'),
     // Same rule, same reason: retitle Output_* to Actual_*/LOR_* before the
     // reorders meet the new names.
     migrateActualColumnNames(CASTING_DAY_SHEET),
@@ -3048,10 +3061,10 @@ function applyColumnFormats(sheet, headers) {
       range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
     } else if (header === 'Date') {
       range.setNumberFormat('yyyy-mm-dd');
-    } else if (header === 'MO' || header === 'Rep') {
+    } else if (header === 'MO' || header === 'Report') {
       // Identifiers, not quantities. Left automatic, Sheets stores "0123" as
       // the number 123 — the live MO column already reads back as 2245.0 —
-      // and a Rep number with a leading zero would lose it the same way.
+      // and a Report number with a leading zero would lose it the same way.
       // Formatted through the sheet's full height rather than just the rows
       // that exist: the format belongs to the cell, and a row appended later
       // has to land in a cell that is already text or the zero is gone before

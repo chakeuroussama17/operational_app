@@ -64,7 +64,7 @@ class PartStatus {
   const PartStatus({
     required this.part,
     this.mo,
-    this.rep,
+    this.report,
     this.name,
     this.lastUpdated,
     required this.fillPercent,
@@ -74,8 +74,8 @@ class PartStatus {
   final String part;
   final String? mo;
 
-  /// The part's Rep number, carried beside [mo] on its Config row.
-  final String? rep;
+  /// The part's Report number, carried beside [mo] on its Config row.
+  final String? report;
 
   /// Human-readable part name from the master list (e.g. "…-CRANKCASE-1-CAST").
   final String? name;
@@ -89,7 +89,7 @@ class PartStatus {
     return PartStatus(
       part: cleanCell(json['part']) ?? '',
       mo: cleanCell(json['mo']),
-      rep: cleanCell(json['rep']),
+      report: cleanCell(json['report']),
       name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),

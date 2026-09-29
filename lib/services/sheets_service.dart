@@ -202,7 +202,7 @@ class SheetsService {
     required String dcm,
     required String part,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -212,7 +212,7 @@ class SheetsService {
       'group': dcm,
       'part': part,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 
@@ -224,7 +224,7 @@ class SheetsService {
     required String part,
     required String newPart,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -235,7 +235,7 @@ class SheetsService {
       'part': part,
       'newPart': newPart,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 
@@ -311,7 +311,7 @@ class SheetsService {
     required String station,
     required String part,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -321,7 +321,7 @@ class SheetsService {
       'group': station,
       'part': part,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 
@@ -333,7 +333,7 @@ class SheetsService {
     required String part,
     required String newPart,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -344,7 +344,7 @@ class SheetsService {
       'part': part,
       'newPart': newPart,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 
@@ -451,7 +451,7 @@ class SheetsService {
     required String lineName,
     required String lineNo,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -464,7 +464,7 @@ class SheetsService {
       'lineName': lineName,
       'lineNo': lineNo,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 
@@ -483,7 +483,7 @@ class SheetsService {
     String? newLineName,
     String? newLineNo,
     String? mo,
-    String? rep,
+    String? report,
   }) async {
     await _postJson(CASTING_WEBHOOK_URL, {
       'secret': SHEETS_SHARED_SECRET,
@@ -499,7 +499,7 @@ class SheetsService {
       'newLineName': newLineName ?? lineName,
       'newLineNo': newLineNo ?? lineNo,
       'mo': ?mo,
-      'rep': ?rep,
+      'report': ?report,
     });
   }
 

@@ -74,7 +74,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
               part: part.part,
               shift: widget.shift,
               mo: part.mo,
-              rep: part.rep,
+              report: part.report,
             ),
           ),
         )
@@ -114,7 +114,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         dcm: widget.dcm,
         part: input.name,
         mo: input.mo,
-        rep: input.rep,
+        report: input.report,
       ),
     );
   }
@@ -129,7 +129,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
       codes: codes,
       initialCode: part.part,
       initialMo: part.mo,
-      initialRep: part.rep,
+      initialReport: part.report,
     );
     if (input == null) return;
     await _mutate(
@@ -138,7 +138,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         part: part.part,
         newPart: input.name,
         mo: input.mo,
-        rep: input.rep,
+        report: input.report,
       ),
     );
   }
@@ -195,11 +195,11 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
 
   String _subtitleFor(PartStatus part) {
     final name = part.name;
-    // "MO 2214 / Rep 07": the two numbers travel together, so they read
-    // together — and a part added before Rep existed still shows its MO.
+    // "MO 2214 / Report 07": the two numbers travel together, so they read
+    // together — and a part added before Report existed still shows its MO.
     final mo = part.mo == null
         ? null
-        : (part.rep == null ? part.mo : '${part.mo} / Rep ${part.rep}');
+        : (part.report == null ? part.mo : '${part.mo} / Report ${part.report}');
     final updated = part.lastUpdated;
     if (name != null) return mo != null ? 'MO $mo · $name' : name;
     if (mo != null && updated != null) return 'MO $mo · $updated';

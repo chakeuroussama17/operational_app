@@ -32,16 +32,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 // NOTE: inside widget tests all real HTTP is stubbed to return 400, so the
 // casting screens (which fetch on load) are asserted in their error state.
-/// MO and Rep are both required on a part now, so a dialog test that is about
+/// MO and Report are both required on a part now, so a dialog test that is about
 /// something else — picking a code, picking a line — has to fill them in
 /// before its save is allowed through.
 Future<void> _fillPartNumbers(
   WidgetTester tester, {
   String mo = 'MO-2214',
-  String rep = '07',
+  String report = '07',
 }) async {
   await tester.enterText(find.widgetWithText(TextField, 'MO number'), mo);
-  await tester.enterText(find.widgetWithText(TextField, 'Rep number'), rep);
+  await tester.enterText(find.widgetWithText(TextField, 'Report number'), report);
   await tester.pumpAndSettle();
 }
 
@@ -655,7 +655,7 @@ void main() {
     });
   });
 
-  testWidgets('part picker: MO and Rep are both required, and reported together', (
+  testWidgets('part picker: MO and Report are both required, and reported together', (
     tester,
   ) async {
     PartWithMoInput? result;
@@ -685,7 +685,7 @@ void main() {
 
     // Neither label says optional any more.
     expect(find.text('MO number'), findsOneWidget);
-    expect(find.text('Rep number'), findsOneWidget);
+    expect(find.text('Report number'), findsOneWidget);
     expect(find.textContaining('optional'), findsNothing);
 
     await tester.tap(find.text('Choose part code'));
@@ -698,25 +698,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(returned, isFalse);
     expect(find.text('Enter the MO number'), findsOneWidget);
-    expect(find.text('Enter the Rep number'), findsOneWidget);
+    expect(find.text('Enter the Report number'), findsOneWidget);
 
     // Whitespace is not a number.
-    await _fillPartNumbers(tester, mo: '   ', rep: '07');
+    await _fillPartNumbers(tester, mo: '   ', report: '07');
     await tester.tap(find.text('SAVE 1145'));
     await tester.pumpAndSettle();
     expect(returned, isFalse);
     expect(find.text('Enter the MO number'), findsOneWidget);
-    expect(find.text('Enter the Rep number'), findsNothing);
+    expect(find.text('Enter the Report number'), findsNothing);
 
-    await _fillPartNumbers(tester, mo: ' MO-2214 ', rep: ' 07 ');
+    await _fillPartNumbers(tester, mo: ' MO-2214 ', report: ' 07 ');
     await tester.tap(find.text('SAVE 1145'));
     await tester.pumpAndSettle();
     expect(result?.mo, 'MO-2214');
     // Kept as typed — a leading zero is part of the number, not padding.
-    expect(result?.rep, '07');
+    expect(result?.report, '07');
   });
 
-  testWidgets('part picker: editing a part prefills its MO and Rep', (
+  testWidgets('part picker: editing a part prefills its MO and Report', (
     tester,
   ) async {
     PartWithMoInput? result;
@@ -733,7 +733,7 @@ void main() {
                   codes: const [PartCode(code: '1145', barcode: '', name: '')],
                   initialCode: '1145',
                   initialMo: 'MO-2214',
-                  initialRep: '07',
+                  initialReport: '07',
                 );
               },
               child: const Text('open'),
@@ -751,13 +751,13 @@ void main() {
     await tester.tap(find.text('SAVE 1145'));
     await tester.pumpAndSettle();
     expect(result?.mo, 'MO-2214');
-    expect(result?.rep, '07');
+    expect(result?.report, '07');
   });
 
   testWidgets('part picker: fits a phone with the keyboard up, Save still reachable', (
     tester,
   ) async {
-    // 360x640 with a 300px keyboard: what is left while typing a Rep number.
+    // 360x640 with a 300px keyboard: what is left while typing a Report number.
     // Five fields and their error lines do not fit that, and before the
     // dialog scrolled the bottom of it — Save included — was simply cut off.
     tester.view.physicalSize = const Size(360, 640);
@@ -783,7 +783,7 @@ void main() {
                   initialCode: '2214',
                   initialLine: productionLines.first.label,
                   initialMo: 'MO-2214',
-                  initialRep: '07',
+                  initialReport: '07',
                 );
               },
               child: const Text('open'),
@@ -800,7 +800,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('SAVE 2214'));
     await tester.pumpAndSettle();
-    expect(result?.rep, '07');
+    expect(result?.report, '07');
   });
 
   testWidgets('part picker: machining asks which line, and will not skip it', (

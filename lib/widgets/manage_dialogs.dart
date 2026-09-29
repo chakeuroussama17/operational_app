@@ -83,13 +83,13 @@ class _PromptTextDialogState extends State<_PromptTextDialog> {
 }
 
 /// Result of [promptPartCode]: [name] holds the chosen part CODE (from the
-/// master list), plus its MO (manufacturing order) and Rep numbers and — for
+/// master list), plus its MO (manufacturing order) and Report numbers and — for
 /// Machining — the line it runs on.
 class PartWithMoInput {
   const PartWithMoInput({
     required this.name,
     required this.mo,
-    required this.rep,
+    required this.report,
     this.lineName = '',
     this.lineNo = '',
   });
@@ -102,7 +102,7 @@ class PartWithMoInput {
 
   /// Never blank, same as [mo]. Stored beside it on the part's Config row
   /// and snapshotted onto every row logged against the part.
-  final String rep;
+  final String report;
 
   /// The line split the way the sheet stores it — "Fanuc" and "21" in
   /// their own columns, so a pivot can group every Okuma or sort by number.
@@ -263,7 +263,7 @@ Future<PartWithMoInput?> promptPartCode(
   List<PartCode> codes = const [],
   String? initialCode,
   String? initialMo,
-  String? initialRep,
+  String? initialReport,
   bool pickLine = false,
   String? initialLine,
 }) {
@@ -275,7 +275,7 @@ Future<PartWithMoInput?> promptPartCode(
       codes: codes,
       initialCode: initialCode,
       initialMo: initialMo,
-      initialRep: initialRep,
+      initialReport: initialReport,
       pickLine: pickLine,
       initialLine: initialLine,
     ),
@@ -289,7 +289,7 @@ class _PartCodeDialog extends StatefulWidget {
     required this.codes,
     this.initialCode,
     this.initialMo,
-    this.initialRep,
+    this.initialReport,
     this.pickLine = false,
     this.initialLine,
   });
@@ -299,7 +299,7 @@ class _PartCodeDialog extends StatefulWidget {
   final List<PartCode> codes;
   final String? initialCode;
   final String? initialMo;
-  final String? initialRep;
+  final String? initialReport;
 
   /// Machining only — the other modules log one line per group already,
   /// so asking again there would be asking twice.
@@ -329,8 +329,8 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   late final _moController = TextEditingController(
     text: widget.initialMo ?? '',
   );
-  late final _repController = TextEditingController(
-    text: widget.initialRep ?? '',
+  late final _reportController = TextEditingController(
+    text: widget.initialReport ?? '',
   );
   late String _selectedCode = widget.initialCode ?? '';
   late String _line = (widget.initialLine ?? '').trim();
@@ -342,13 +342,13 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
   String? _error;
   String? _lineError;
   String? _moError;
-  String? _repError;
+  String? _reportError;
 
   @override
   void dispose() {
     _searchController.dispose();
     _moController.dispose();
-    _repController.dispose();
+    _reportController.dispose();
     super.dispose();
   }
 
@@ -415,11 +415,11 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     // so a supervisor who skipped both is told about both at once instead of
     // fixing one, pressing Save, and meeting the second.
     final mo = _moController.text.trim();
-    final rep = _repController.text.trim();
-    if (mo.isEmpty || rep.isEmpty) {
+    final report = _reportController.text.trim();
+    if (mo.isEmpty || report.isEmpty) {
       setState(() {
         _moError = mo.isEmpty ? 'Enter the MO number' : null;
-        _repError = rep.isEmpty ? 'Enter the Rep number' : null;
+        _reportError = report.isEmpty ? 'Enter the Report number' : null;
         _open = false;
       });
       return;
@@ -429,7 +429,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
       PartWithMoInput(
         name: _selectedCode,
         mo: mo,
-        rep: rep,
+        report: report,
         lineName: line.name,
         lineNo: line.number,
       ),
@@ -468,8 +468,8 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     final listHeight = room.clamp(120.0, 260.0);
 
     return AlertDialog(
-      // Part code, line, MO and Rep plus their error lines no longer fit a
-      // short phone — least of all with the keyboard up for the Rep field,
+      // Part code, line, MO and Report plus their error lines no longer fit a
+      // short phone — least of all with the keyboard up for the Report field,
       // which is exactly when it is being filled in. Scrolling is the honest
       // answer: the alternative is a Save button pushed off the bottom. The
       // part list inside keeps its own fixed height, so the two scrolls never
@@ -653,19 +653,19 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
             ),
             const SizedBox(height: 14),
             TextField(
-              controller: _repController,
+              controller: _reportController,
               textCapitalization: TextCapitalization.characters,
               textInputAction: TextInputAction.done,
               decoration: InputDecoration(
-                labelText: 'Rep number',
+                labelText: 'Report number',
                 isDense: true,
-                errorText: _repError,
+                errorText: _reportError,
               ),
               onTap: () {
                 if (_open) setState(() => _open = false);
               },
               onChanged: (_) {
-                if (_repError != null) setState(() => _repError = null);
+                if (_reportError != null) setState(() => _reportError = null);
               },
               onSubmitted: (_) => _save(),
             ),

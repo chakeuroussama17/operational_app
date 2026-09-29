@@ -196,6 +196,9 @@ class MachiningPartStatus {
   /// "Fanuc 21" — the pair as the picker and the cards show it.
   String get line => lineLabelOf(lineName, lineNo);
 
+  /// The line as a person reads it, code first — see [lineDisplayOf].
+  String get lineDisplay => lineDisplayOf(lineName, lineNo);
+
   /// Human-readable part name from the master list.
   final String? name;
   final String? lastUpdated;

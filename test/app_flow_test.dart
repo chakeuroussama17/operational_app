@@ -852,7 +852,9 @@ void main() {
     final line = productionLines.first;
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(line.label).last);
+    // Rows are drawn code first, as separate pieces, so a line is tapped by
+    // its code — the way someone on the floor picks it.
+    await tester.tap(find.text(line.number).last);
     await tester.pumpAndSettle();
 
     await _fillPartNumbers(tester);
@@ -1494,6 +1496,25 @@ void main() {
       expect(const ProductionLine('Fanuc', '21').label, 'Fanuc 21');
       // Numbers stay strings — they are identifiers, and "07" must survive.
       expect(const ProductionLine('Okuma', '07').label, 'Okuma 07');
+    });
+
+    test('a line reads code first, the way the floor picks it', () {
+      expect(lineDisplayOf('MACH-2214', 'M-2214-2'), 'M-2214-2 · MACH-2214');
+      expect(
+        const ProductionLine('WASHING MACHINE', 'WASH-DRY').display,
+        'WASH-DRY · WASHING MACHINE',
+      );
+      // A row predating the columns may have only one half.
+      expect(lineDisplayOf('MACH-2214', ''), 'MACH-2214');
+      expect(lineDisplayOf('', 'M-2214-2'), 'M-2214-2');
+      expect(lineDisplayOf(null, null), '');
+    });
+
+    test('Line 1 to 3 are kept, at the top of the list', () {
+      expect(
+        productionLines.take(3).map((l) => l.label),
+        ['Line 1 001', 'Line 2 002', 'Line 3 003'],
+      );
     });
 
     test('every line in the roster is distinct', () {

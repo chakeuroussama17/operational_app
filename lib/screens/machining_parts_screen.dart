@@ -218,7 +218,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       context,
       title: part.line.isEmpty
           ? 'Delete Part ${part.part}?'
-          : 'Delete ${part.part} on ${part.line}?',
+          : 'Delete ${part.part} on ${part.lineDisplay}?',
       message:
           'Historical logs already saved are not affected. '
           'This cannot be undone.',
@@ -321,7 +321,7 @@ Widget _body() {
 /// that share a part code — which is the whole reason it is asked for.
 String _partSubtitle(MachiningPartStatus part) {
   final parts = <String>[
-    if (part.line.isNotEmpty) part.line,
+    if (part.line.isNotEmpty) part.lineDisplay,
     if (part.mo != null)
       part.rep == null ? 'MO ${part.mo}' : 'MO ${part.mo} / Rep ${part.rep}',
     if (part.mo == null && part.rep != null) 'Rep ${part.rep}',

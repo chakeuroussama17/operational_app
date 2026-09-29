@@ -29,12 +29,20 @@ class ProductionLine {
   /// sharing a name apart. A string: these are identifiers, never numbers.
   final String number;
 
-  /// "MACH-2214 M-2214-2" — what the picker shows. The sheet keeps the two
-  /// halves apart in LineName and LineNo.
+  /// "MACH-2214 M-2214-2" — the key the picker uses internally, and what
+  /// [splitLineLabel] turns back into the sheet's LineName and LineNo.
+  /// Not what a person reads: see [display].
   String get label => '$name $number';
+
+  /// "M-2214-2 · MACH-2214" — code first, because the code is what the floor
+  /// picks a line by. The name follows to say what the line is.
+  String get display => lineDisplayOf(name, number);
 }
 
 const List<ProductionLine> productionLines = [
+  ProductionLine('Line 1', '001'),
+  ProductionLine('Line 2', '002'),
+  ProductionLine('Line 3', '003'),
   ProductionLine('WASHING MACHINE', 'WASHING'),
   ProductionLine('ENGRAVING', 'ENGRAVE'),
   ProductionLine('LASER MARKING', 'LASER.M'),
@@ -124,7 +132,19 @@ const List<ProductionLine> productionLines = [
   );
 }
 
-/// The two stored columns rejoined for display: "Fanuc" + "21" -> "Fanuc 21".
+/// The two stored columns as a person reads them: the code first, then the
+/// name — "M-2214-2 · MACH-2214". Either half may be blank on a row that
+/// predates the columns, in which case the other stands alone.
+String lineDisplayOf(String? name, String? number) {
+  final n = (name ?? '').trim();
+  final c = (number ?? '').trim();
+  if (c.isEmpty) return n;
+  if (n.isEmpty) return c;
+  return '$c · $n';
+}
+
+/// The two stored columns rejoined as the picker's key: "Fanuc" + "21" ->
+/// "Fanuc 21". Kept name-first to match [ProductionLine.label].
 /// Either half may be blank on a row that predates the columns.
 String lineLabelOf(String? name, String? number) {
   final parts = [

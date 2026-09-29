@@ -611,7 +611,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                   for (final line in productionLines)
                     DropdownMenuItem(
                       value: line.label,
-                      child: Text(line.label),
+                      child: _LineItem(code: line.number, name: line.name),
                     ),
                   // A line the roster no longer lists still has to be
                   // selectable, or editing that part would silently move it
@@ -681,6 +681,35 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
           onPressed: _save,
           child: Text(_selectedCode.isEmpty ? 'SAVE' : 'SAVE $_selectedCode'),
         ),
+      ],
+    );
+  }
+}
+
+/// One Line dropdown row: the code first and bold, because the code is what a
+/// line is picked by; the name after it, quieter, to say what the line is.
+class _LineItem extends StatelessWidget {
+  const _LineItem({required this.code, required this.name});
+
+  final String code;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(code, style: const TextStyle(fontWeight: FontWeight.w700)),
+        if (name.isNotEmpty) ...[
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+          ),
+        ],
       ],
     );
   }

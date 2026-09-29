@@ -1,16 +1,14 @@
 /// The production lines a machining part can be made on.
 ///
 /// ─────────────────────────────────────────────────────────────────────────
-///  PLACEHOLDER ROSTER — REPLACE WITH THE PLANT'S REAL LIST.
+///  THE PLANT'S LINE ROSTER. Editing [productionLines] below is the whole
+///  job of adding, renaming or retiring a line — nothing else in the app
+///  hard-codes one.
 ///
-///  Seeded from names already appearing in the plant's own data: the part
-///  renames on the Parts screen ("2214 Fanuc 21") and the downtime notes
-///  people typed before the reason codes shipped ("Okuma 7 Atc system
-///  condition", "Tool life end okuma 7 & 11"). They are the right shape and
-///  probably the right names, but they are not a roster anyone confirmed.
-///
-///  Editing [productionLines] below is the whole job — nothing else in the
-///  app hard-codes a line.
+///  Each entry is a name and a code, in the plant's own order. The name says
+///  what the line is ("MACH-2214", "WASHING MACHINE"); the code is unique and
+///  is what tells two lines with the same name apart ("M-2214-1" and
+///  "M-2214-2"). The sheet stores them in LineName and LineNo.
 /// ─────────────────────────────────────────────────────────────────────────
 ///
 /// Why this exists: a part can run on more than one line, and supervisors
@@ -23,22 +21,87 @@ library;
 class ProductionLine {
   const ProductionLine(this.name, this.number);
 
-  /// The line family as the floor says it — "Fanuc", "Okuma".
+  /// What the line is, as the floor says it — "MACH-2214", "CURING".
+  /// Not unique: MACH-2214 is three lines.
   final String name;
 
-  /// Its number within that family. A string, not an int: these are
-  /// identifiers, never arithmetic, and a leading zero would be lost.
+  /// The line's code — "M-2214-2". Unique, and the thing that tells two lines
+  /// sharing a name apart. A string: these are identifiers, never numbers.
   final String number;
 
-  /// "Fanuc 21" — what the picker shows. The sheet keeps the two halves
-  /// apart in LineName and LineNo; this is how the floor says it.
+  /// "MACH-2214 M-2214-2" — what the picker shows. The sheet keeps the two
+  /// halves apart in LineName and LineNo.
   String get label => '$name $number';
 }
 
 const List<ProductionLine> productionLines = [
-  ProductionLine('Line 1', '001'),
-  ProductionLine('Line 2', '002'),
-  ProductionLine('Line 3', '003'),
+  ProductionLine('WASHING MACHINE', 'WASHING'),
+  ProductionLine('ENGRAVING', 'ENGRAVE'),
+  ProductionLine('LASER MARKING', 'LASER.M'),
+  ProductionLine('WASHING MACHINE', 'WASH-DRY'),
+  ProductionLine('CURING', 'CURING'),
+  ProductionLine('MACH-2190', 'M-2190-1'),
+  ProductionLine('ASSY-2190', 'A-2190-1'),
+  ProductionLine('MACH-2190', 'M-2190-2'),
+  ProductionLine('ASSY-2220', 'A-2220-1'),
+  ProductionLine('MACH-2073', 'M-2073-1'),
+  ProductionLine('MACH-2183', 'A-2183-1'),
+  ProductionLine('MACH-2231', 'M-2231-1'),
+  ProductionLine('ASSY-2231', 'A-2231-1'),
+  ProductionLine('MACH-2232', 'M-2232-1'),
+  ProductionLine('ASSY-2232', 'A-2232-1'),
+  ProductionLine('MACH-2242', 'M-2242-1'),
+  ProductionLine('ASSY-2242', 'A-2242-1'),
+  ProductionLine('MACH-2243', 'M-2243-1'),
+  ProductionLine('ASSY-2243', 'A-2243-1'),
+  ProductionLine('MACH-2224', 'M-2224-1'),
+  ProductionLine('ASSY-2224', 'A-2224-1'),
+  ProductionLine('MACH-2230', 'M-2230-1'),
+  ProductionLine('ASSY-2230', 'A-2230-1'),
+  ProductionLine('MACH-2241', 'M-2241-1'),
+  ProductionLine('MACH-2236', 'M-2236-1'),
+  ProductionLine('ASSY-2236', 'A-2236-1'),
+  ProductionLine('MACH-2237', 'M-2237-1'),
+  ProductionLine('ASSY-2237', 'A-2237-1'),
+  ProductionLine('MACH-2238', 'M-2238-1'),
+  ProductionLine('ASSY-2238', 'A-2238-1'),
+  ProductionLine('MACH-2245', 'M-2245-1'),
+  ProductionLine('ASSY-2245', 'A-2245-1'),
+  ProductionLine('MACH-2246', 'M-2246-1'),
+  ProductionLine('ASSY-2246', 'A-2246-1'),
+  ProductionLine('MACH-2247', 'M-2247-1'),
+  ProductionLine('ASSY-2247', 'A-2247-1'),
+  ProductionLine('MACH-2248', 'M-2248-1'),
+  ProductionLine('ASSY-2248', 'A-2248-1'),
+  ProductionLine('MACH-2213', 'M-2213-1'),
+  ProductionLine('MACH-2214', 'M-2214-1'),
+  ProductionLine('MACH-2214', 'M-2214-2'),
+  ProductionLine('MACH-2214', 'M-2214-3'),
+  ProductionLine('MACH-2215', 'M-2215-1'),
+  ProductionLine('ASSY-2215', 'A-2215-1'),
+  ProductionLine('MACH-2216', 'M-2216-1'),
+  ProductionLine('ASSY-2216', 'A-2216-1'),
+  ProductionLine('MACH-2217', 'M-2217-1'),
+  ProductionLine('MACH-2217', 'M-2217-2'),
+  ProductionLine('MACH-2218', 'M-2218-1'),
+  ProductionLine('MACH-2219', 'M-2219-1'),
+  ProductionLine('MACH-2226', 'M-2226-1'),
+  ProductionLine('MACH-2228', 'M-2228-1'),
+  ProductionLine('MACH-2249', 'M-2249-1'),
+  ProductionLine('MACH-2250', 'M-2250-1'),
+  ProductionLine('MACH-2234', 'M-2234-1'),
+  ProductionLine('MACH-2234', 'M-2234-2'),
+  ProductionLine('ASSY-2234', 'A-2234-1'),
+  ProductionLine('MACH-2206', 'M-2206-1'),
+  ProductionLine('MACH-2206', 'M-2206-2'),
+  ProductionLine('MACH-2206', 'M-2206-3'),
+  ProductionLine('MACH-2206', 'M-2206-4'),
+  ProductionLine('MACH-2206', 'M-2206-5'),
+  ProductionLine('LEAK-TEST-2206', 'A-2206-1'),
+  ProductionLine('MACH-2251', 'M-2251-1'),
+  ProductionLine('MACH-2251', 'M-2251-2'),
+  ProductionLine('ASSY-2251', 'A-2251-1'),
+  ProductionLine('ASSY-2251', 'A-2251-2'),
 ];
 
 /// Splits a picker label back into the pair the sheet stores.

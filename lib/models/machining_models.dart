@@ -10,6 +10,7 @@
 /// sheet. See [RejectionEntry] in models/rejection.dart.
 library;
 
+import 'shift_progress.dart';
 import 'production_line.dart';
 import 'part_code.dart';
 import 'rejection.dart';
@@ -177,6 +178,7 @@ class MachiningPartStatus {
     this.lineNo = '',
     this.lastUpdated,
     this.fillPercent = 0,
+    this.progress,
   });
 
   /// The part CODE (chosen from the master list) — this card's title.
@@ -206,6 +208,10 @@ class MachiningPartStatus {
   /// 0-100: how many of the three checkpoints are filled this shift.
   final int fillPercent;
 
+  /// Plan, output and checkpoints for the card's on-pace ring. Null against
+  /// a backend that predates it — the card then shows its plain bar.
+  final ShiftProgress? progress;
+
   factory MachiningPartStatus.fromJson(Map<String, dynamic> json) {
     final fill = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
     return MachiningPartStatus(
@@ -217,6 +223,7 @@ class MachiningPartStatus {
       lineNo: cleanCell(json['lineNo']) ?? '',
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: fill.clamp(0, 100).round(),
+      progress: ShiftProgress.fromJson(json),
     );
   }
 }

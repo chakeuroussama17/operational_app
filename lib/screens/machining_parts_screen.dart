@@ -84,6 +84,8 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
         .push(
           MaterialPageRoute<void>(
             builder: (_) => MachiningEntryScreen(
+              heroTag:
+                  'part:machining:${widget.operation.value}:${widget.customer}:${part.part}:${part.lineNo}',
               customer: widget.customer,
               part: part.part,
               operation: widget.operation,
@@ -240,7 +242,6 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
     );
   }
 
-
   /// Whether the signed-in person may change what the plant makes. Operators
   /// log production; adding or removing a part or a customer decides what
   /// everyone else logs against for months, so it is a super admin's act.
@@ -252,7 +253,7 @@ class _MachiningPartsScreenState extends State<MachiningPartsScreen> {
       AuthScope.maybeOf(context)?.user.canManageConfig ?? true;
 
   @override
-Widget build(BuildContext context) {
+  Widget build(BuildContext context) {
     return ModuleScaffold(
       subtitle:
           'Machining — ${widget.operation.label} · ${widget.customer} · '
@@ -263,7 +264,7 @@ Widget build(BuildContext context) {
     );
   }
 
-Widget _body() {
+  Widget _body() {
     if (_loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.steelBlue),
@@ -302,12 +303,15 @@ Widget _body() {
             icon: Icons.tag_rounded,
             onTap: () => _openPart(part),
             fillPercent: part.fillPercent,
+            progress: part.progress,
+            heroTag:
+                'part:machining:${widget.operation.value}:${widget.customer}:${part.part}:${part.lineNo}',
             trailing: !_canManage
                 ? null
                 : CardMenuButton(
-              onEdit: () => _editPart(part),
-              onDelete: () => _deletePart(part),
-            ),
+                    onEdit: () => _editPart(part),
+                    onDelete: () => _deletePart(part),
+                  ),
           );
         },
       ),
@@ -323,7 +327,9 @@ String _partSubtitle(MachiningPartStatus part) {
   final parts = <String>[
     if (part.line.isNotEmpty) part.lineDisplay,
     if (part.mo != null)
-      part.report == null ? 'MO ${part.mo}' : 'MO ${part.mo} / Report ${part.report}',
+      part.report == null
+          ? 'MO ${part.mo}'
+          : 'MO ${part.mo} / Report ${part.report}',
     if (part.mo == null && part.report != null) 'Report ${part.report}',
     if (part.name != null) part.name!,
   ];

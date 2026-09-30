@@ -4,6 +4,7 @@ import '../config/constants.dart';
 import '../models/casting_models.dart';
 import '../services/sheets_service.dart';
 import '../widgets/app_text_field.dart';
+import '../widgets/checkpoint_timeline.dart';
 import '../widgets/module_shell.dart';
 import '../widgets/submission_feedback.dart';
 import '../widgets/submit_button.dart';
@@ -19,6 +20,7 @@ class CastingEntryScreen extends StatefulWidget {
     required this.shift,
     this.mo,
     this.report,
+    this.heroTag,
   });
 
   final String dcm;
@@ -30,6 +32,10 @@ class CastingEntryScreen extends StatefulWidget {
   /// the part's Edit action on the Parts screen for that).
   final String? mo;
   final String? report;
+
+  /// Matches the tag on the card that opened this form, so its icon chip
+  /// flies into the title here rather than the page simply cutting in.
+  final Object? heroTag;
 
   @override
   State<CastingEntryScreen> createState() => _CastingEntryScreenState();
@@ -170,52 +176,71 @@ class _CastingEntryScreenState extends State<CastingEntryScreen> {
           'Casting — DCM ${widget.dcm} · Part ${widget.part} · '
           '${widget.shift} shift',
       child: _loading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppColors.steelBlue),
-              )
-            : Form(
-                key: _formKey,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(AppDimens.screenPadding),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _ContextHeader(
-                        dcm: widget.dcm,
-                        part: widget.part,
-                        shift: widget.shift,
-                        mo: widget.mo,
-                        report: widget.report,
-                      ),
-                      if (_loadError != null) ...[
-                        const SizedBox(height: 14),
-                        _LoadErrorBanner(message: _loadError!, onRetry: _load),
-                      ],
-                      const SizedBox(height: AppDimens.fieldSpacing),
-                      AppNumberField(
-                        label: 'Plan',
-                        controller: _planController,
-                        required: false,
-                      ),
-                      for (final slot in _slots) ...[
-                        const SizedBox(height: AppDimens.fieldSpacing),
-                        _SlotRow(
-                          slot: slot,
-                          controller: _slotControllers[slot.outputKey]!,
-                          lorLabel: _lors[slot.lorKey],
-                        ),
-                      ],
-                      const SizedBox(height: 28),
-                      SubmitButton(
-                        onPressed: _submit,
-                        busy: _submitting,
-                        label: 'SAVE LOG',
-                      ),
-                      const SizedBox(height: 24),
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.steelBlue),
+            )
+          : Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppDimens.screenPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    EntryTitle(
+                      title: 'Part ${widget.part}',
+                      subtitle: widget.dcm,
+                      heroTag: widget.heroTag,
+                    ),
+                    const SizedBox(height: 14),
+                    _ContextHeader(
+                      dcm: widget.dcm,
+                      part: widget.part,
+                      shift: widget.shift,
+                      mo: widget.mo,
+                      report: widget.report,
+                    ),
+                    if (_loadError != null) ...[
+                      const SizedBox(height: 14),
+                      _LoadErrorBanner(message: _loadError!, onRetry: _load),
                     ],
-                  ),
+                    const SizedBox(height: 14),
+                    // What is logged, what is due and when, what was missed.
+                    CheckpointTimeline(
+                      shift: widget.shift,
+                      checkpoints: [
+                        for (final slot in _slots)
+                          TimelineCheckpoint(
+                            label: slot.label,
+                            slotKey: slot.outputKey.replaceFirst('Actual_', ''),
+                            logged: (_initial[slot.outputKey] ?? '').isNotEmpty,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppDimens.fieldSpacing),
+                    AppNumberField(
+                      label: 'Plan',
+                      controller: _planController,
+                      required: false,
+                    ),
+                    for (final slot in _slots) ...[
+                      const SizedBox(height: AppDimens.fieldSpacing),
+                      _SlotRow(
+                        slot: slot,
+                        controller: _slotControllers[slot.outputKey]!,
+                        lorLabel: _lors[slot.lorKey],
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+                    SubmitButton(
+                      onPressed: _submit,
+                      busy: _submitting,
+                      label: 'SAVE LOG',
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
               ),
+            ),
     );
   }
 }
@@ -268,7 +293,6 @@ class _ContextHeader extends StatelessWidget {
       runSpacing: 10,
       children: [
         chip(Icons.local_fire_department_rounded, 'DCM $dcm'),
-        chip(Icons.tag_rounded, 'Part $part'),
         chip(
           shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
           '$shift shift',

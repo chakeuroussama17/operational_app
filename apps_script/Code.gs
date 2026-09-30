@@ -325,7 +325,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'WORKCENTER-v33';
+var BACKEND_VERSION = 'PROGRESS-v34';
 
 function doGet(e) {
   try {
@@ -468,6 +468,14 @@ function getSecondaryParts(station, shift) {
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
+      // What the card needs to say whether this part is on pace, not just
+      // how many boxes are filled: the plan, what has been made against it,
+      // and how many of the shift's checkpoints that covers.
+      plan: shiftNumber(match, 'Plan'),
+      actual: shiftSum(match, 'Actual_', slots),
+      downtime: shiftSum(match, 'Downtime_', slots),
+      slotsFilled: filled,
+      slotsTotal: slots.length,
     };
   });
   return { status: 'success', data: result };
@@ -607,6 +615,14 @@ function getCastingParts(dcm, shift) {
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
+      // What the card needs to say whether this part is on pace, not just
+      // how many boxes are filled: the plan, what has been made against it,
+      // and how many of the shift's checkpoints that covers.
+      plan: shiftNumber(match, 'Plan'),
+      actual: shiftSum(match, 'Actual_', slots),
+      downtime: shiftSum(match, 'Downtime_', slots),
+      slotsFilled: filled,
+      slotsTotal: slots.length,
     };
   });
   return { status: 'success', data: result };
@@ -1157,9 +1173,37 @@ function getMachiningParts(customer, shift, operation) {
       name: info.name,
       lastUpdated: match && match.LastUpdated ? hhmm(match.LastUpdated) : null,
       fillPercent: match ? Math.round((filled / slots.length) * 100) : 0,
+      // What the card needs to say whether this part is on pace, not just
+      // how many boxes are filled: the plan, what has been made against it,
+      // and how many of the shift's checkpoints that covers.
+      plan: shiftNumber(match, 'Plan'),
+      actual: shiftSum(match, 'Actual_', slots),
+      downtime: shiftSum(match, 'Downtime_', slots),
+      slotsFilled: filled,
+      slotsTotal: slots.length,
     };
   });
   return { status: 'success', data: result };
+}
+
+// A number cell from a logged row, or null when the row or the cell is
+// missing — "no plan set" is a different fact from a plan of zero.
+function shiftNumber(row, key) {
+  if (!row) return null;
+  var n = parseFloat(row[key]);
+  return isNaN(n) ? null : n;
+}
+
+// The total across one shift's checkpoints for a column family
+// ("Actual_", "Downtime_"). Zero when there is no row yet.
+function shiftSum(row, prefix, slots) {
+  if (!row) return 0;
+  var total = 0;
+  slots.forEach(function (slot) {
+    var n = parseFloat(row[prefix + slot]);
+    if (!isNaN(n)) total += n;
+  });
+  return total;
 }
 
 function getMachiningRow(customer, part, operation, shift, lineName, lineNo) {
@@ -2299,7 +2343,7 @@ function getAnalytics(module, days) {
   var downtimeReasonKeys = timeSlots.map(function (s) { return 'DowntimeReason_' + s; });
   var byDate = {};
   dateKeys.forEach(function (dk) {
-    byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0, downtime: 0 };
+    byDate[dk] = { output: 0, lorSum: 0, lorCount: 0, rejection: 0, downtime: 0, plan: 0 };
   });
   // Same window as byDate, sliced by group instead of by day — feeds the
   // "output by machine/station/customer" ranking bar chart.
@@ -2350,6 +2394,11 @@ function getAnalytics(module, days) {
     var partBucket = part ? byGroupPart[partKey] : null;
 
     var shift = r._shift === 'Night' ? 'Night' : 'Day';
+
+    // Planned pieces, so home can say "4,200 of 5,000" rather than a bare
+    // total. A row with no plan simply adds nothing.
+    var rowPlan = parseFloat(r.Plan);
+    if (!isNaN(rowPlan)) bucket.plan += rowPlan;
 
     var rowOutput = 0;
     outputKeys.forEach(function (k) {
@@ -2467,12 +2516,14 @@ function getAnalytics(module, days) {
   var lorPercent = [];
   var rejection = [];
   var downtime = [];
+  var plan = [];
   dateKeys.forEach(function (dk) {
     var b = byDate[dk];
     output.push(Math.round(b.output * 10) / 10);
     lorPercent.push(b.lorCount > 0 ? Math.round((b.lorSum / b.lorCount) * 10) / 10 : null);
     rejection.push(Math.round(b.rejection * 10) / 10);
     downtime.push(Math.round((b.downtime || 0) * 10) / 10);
+    plan.push(Math.round((b.plan || 0) * 10) / 10);
   });
 
   var round1 = function (v) { return Math.round(v * 10) / 10; };
@@ -2521,6 +2572,7 @@ function getAnalytics(module, days) {
   var result = {
     dates: dateKeys,
     output: output,
+    plan: plan,
     lorPercent: lorPercent,
     byGroup: byGroupArr,
     parts: partsArr,

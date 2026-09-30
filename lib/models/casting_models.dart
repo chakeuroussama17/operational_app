@@ -9,6 +9,8 @@
 ///   POST {secret, module:'casting', data: {DCM, PartNo, Shift, ...changed}}
 library;
 
+import 'shift_progress.dart';
+
 /// One of the six checkpoints logged for a given shift.
 class CastingSlot {
   const CastingSlot(this.label, this.outputKey, this.lorKey);
@@ -68,6 +70,7 @@ class PartStatus {
     this.name,
     this.lastUpdated,
     required this.fillPercent,
+    this.progress,
   });
 
   /// The part CODE (chosen from the master list) — this card's title.
@@ -84,6 +87,10 @@ class PartStatus {
   /// 0-100: how many of this shift's three checkpoints are filled today.
   final int fillPercent;
 
+  /// Plan, output and checkpoints for the card's on-pace ring. Null against
+  /// a backend that predates it — the card then shows its plain bar.
+  final ShiftProgress? progress;
+
   factory PartStatus.fromJson(Map<String, dynamic> json) {
     final raw = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
     return PartStatus(
@@ -93,6 +100,7 @@ class PartStatus {
       name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),
+      progress: ShiftProgress.fromJson(json),
     );
   }
 }

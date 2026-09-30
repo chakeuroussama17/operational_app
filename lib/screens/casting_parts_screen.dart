@@ -70,6 +70,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
         .push(
           MaterialPageRoute<void>(
             builder: (_) => CastingEntryScreen(
+              heroTag: 'part:casting:${widget.dcm}:${part.part}',
               dcm: widget.dcm,
               part: part.part,
               shift: widget.shift,
@@ -199,7 +200,9 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     // together — and a part added before Report existed still shows its MO.
     final mo = part.mo == null
         ? null
-        : (part.report == null ? part.mo : '${part.mo} / Report ${part.report}');
+        : (part.report == null
+              ? part.mo
+              : '${part.mo} / Report ${part.report}');
     final updated = part.lastUpdated;
     if (name != null) return mo != null ? 'MO $mo · $name' : name;
     if (mo != null && updated != null) return 'MO $mo · $updated';
@@ -207,7 +210,6 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
     if (updated != null) return 'Last updated: $updated';
     return 'No entries yet · ${widget.shift.toLowerCase()} shift';
   }
-
 
   /// Whether the signed-in person may change what the plant makes. Operators
   /// log production; adding or removing a part or a customer decides what
@@ -220,7 +222,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
       AuthScope.maybeOf(context)?.user.canManageConfig ?? true;
 
   @override
-Widget build(BuildContext context) {
+  Widget build(BuildContext context) {
     return ModuleScaffold(
       subtitle: 'Casting — ${widget.dcm} · ${widget.shift} shift',
       headline: 'Select part',
@@ -229,7 +231,7 @@ Widget build(BuildContext context) {
     );
   }
 
-Widget _body() {
+  Widget _body() {
     if (_loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.steelBlue),
@@ -268,12 +270,14 @@ Widget _body() {
             icon: Icons.tag_rounded,
             onTap: () => _openPart(part),
             fillPercent: part.fillPercent,
+            progress: part.progress,
+            heroTag: 'part:casting:${widget.dcm}:${part.part}',
             trailing: !_canManage
                 ? null
                 : CardMenuButton(
-              onEdit: () => _editPart(part),
-              onDelete: () => _deletePart(part),
-            ),
+                    onEdit: () => _editPart(part),
+                    onDelete: () => _deletePart(part),
+                  ),
           );
         },
       ),

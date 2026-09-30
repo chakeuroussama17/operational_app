@@ -10,6 +10,7 @@ import '../models/machining_models.dart';
 import '../models/rejection.dart';
 import '../services/sheets_service.dart';
 import '../widgets/app_text_field.dart';
+import '../widgets/checkpoint_timeline.dart';
 import '../widgets/module_shell.dart';
 import '../widgets/rejection_type_picker.dart';
 import '../widgets/submission_feedback.dart';
@@ -32,6 +33,7 @@ class MachiningEntryScreen extends StatefulWidget {
     this.mo,
     this.report,
     this.service,
+    this.heroTag,
   });
 
   final String customer;
@@ -53,6 +55,10 @@ class MachiningEntryScreen extends StatefulWidget {
   /// Test seam: the screen normally builds its own [SheetsService] against the
   /// real backend; widget tests inject one backed by a mock client instead.
   final SheetsService? service;
+
+  /// Matches the tag on the card that opened this form, so its icon chip
+  /// flies into the title here rather than the page simply cutting in.
+  final Object? heroTag;
 
   @override
   State<MachiningEntryScreen> createState() => _MachiningEntryScreenState();
@@ -578,6 +584,13 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    EntryTitle(
+                      title: 'Part ${widget.part}',
+                      subtitle:
+                          '${widget.customer} · ${widget.operation.label}',
+                      heroTag: widget.heroTag,
+                    ),
+                    const SizedBox(height: 14),
                     _ContextHeader(
                       customer: widget.customer,
                       part: widget.part,
@@ -590,6 +603,19 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                       const SizedBox(height: 14),
                       _LoadErrorBanner(message: _loadError!, onRetry: _load),
                     ],
+                    const SizedBox(height: 14),
+                    // What is logged, what is due and when, what was missed.
+                    CheckpointTimeline(
+                      shift: widget.shift,
+                      checkpoints: [
+                        for (final slot in _slots)
+                          TimelineCheckpoint(
+                            label: slot.label,
+                            slotKey: slot.slotKey,
+                            logged: _lockedOutputs.contains(slot.outputKey),
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: AppDimens.fieldSpacing),
                     if (_planLocked)
                       _LockedField(label: 'Plan', value: _planController.text)
@@ -705,7 +731,6 @@ class _ContextHeader extends StatelessWidget {
       children: [
         chip(Icons.settings_rounded, operation.label),
         chip(Icons.precision_manufacturing_rounded, customer),
-        chip(Icons.tag_rounded, 'Part $part'),
         chip(
           shift == 'Night' ? Icons.nightlight_round : Icons.wb_sunny_rounded,
           '$shift shift',
@@ -1099,18 +1124,11 @@ class _SlotBlock extends StatelessWidget {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       textAlign: TextAlign.center,
       onChanged: (_) => onQtyChanged(),
-      style: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        color: color,
-      ),
+      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color),
       decoration: InputDecoration(
         hintText: hint,
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 8,
-          vertical: 14,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
       ),
     );
   }
@@ -1142,7 +1160,10 @@ class _SlotBlock extends StatelessWidget {
           size: 20,
           color: AppColors.textSecondary,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       ),
       items: [
@@ -1216,36 +1237,36 @@ class _SlotBlock extends StatelessWidget {
             SizedBox(
               width: 112,
               child: TextFormField(
-                  controller: downtimeController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  textAlign: TextAlign.end,
-                  onChanged: (_) => onDowntimeChanged(),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '0',
-                    // Named in the box, so the sheet's "20min" needs no
-                    // explaining.
-                    suffixText: 'min',
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                controller: downtimeController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                textAlign: TextAlign.end,
+                onChanged: (_) => onDowntimeChanged(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: '0',
+                  // Named in the box, so the sheet's "20min" needs no
+                  // explaining.
+                  suffixText: 'min',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
               ),
-            ],
-          ),
-          // The reason appears only once minutes have been entered. Asking
-          // "why did it stop?" beside a blank box is noise on the hours
-          // nothing went wrong, and there are three of these on the form.
-          if (downtimeController.text.trim().isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _reasonField(),
+            ),
           ],
+        ),
+        // The reason appears only once minutes have been entered. Asking
+        // "why did it stop?" beside a blank box is noise on the hours
+        // nothing went wrong, and there are three of these on the form.
+        if (downtimeController.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _reasonField(),
+        ],
       ],
     );
   }

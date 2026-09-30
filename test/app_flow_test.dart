@@ -10,6 +10,7 @@ import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/casting_home_screen.dart';
 import 'package:hicom_ops/widgets/card_menu_button.dart';
+import 'package:hicom_ops/widgets/checkpoint_timeline.dart';
 import 'package:hicom_ops/config/constants.dart';
 import 'package:hicom_ops/widgets/manage_dialogs.dart';
 import 'package:hicom_ops/models/casting_models.dart';
@@ -272,8 +273,11 @@ void main() {
     expect(find.text('Plan'), findsOneWidget);
     // Day slots run 12 PM - 7:30 PM, each with its own rejection line beneath
     // it, and one overall summary at the bottom.
-    expect(find.text('12 PM'), findsOneWidget);
-    expect(find.text('7:30 PM'), findsOneWidget);
+    // Each checkpoint is named twice now: on its card, and on the timeline
+    // strip across the top that shows what is logged and what is due.
+    expect(find.text('12 PM'), findsNWidgets(2));
+    expect(find.text('7:30 PM'), findsNWidgets(2));
+    expect(find.byType(CheckpointTimeline), findsOneWidget);
     expect(find.text('Actual'), findsNWidgets(3));
     expect(find.text('LOR'), findsNWidgets(3));
     expect(find.text('Select type'), findsNWidgets(3));

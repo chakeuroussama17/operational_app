@@ -6,6 +6,8 @@
 ///   three modules.
 library;
 
+import 'shift_progress.dart';
+
 /// One of the six checkpoints logged for a given shift.
 class SecondarySlot {
   const SecondarySlot(this.label, this.actualKey, this.lorKey);
@@ -65,6 +67,7 @@ class SecondaryPartStatus {
     this.name,
     this.lastUpdated,
     required this.fillPercent,
+    this.progress,
   });
 
   /// The part CODE (chosen from the master list) — this card's title.
@@ -81,6 +84,10 @@ class SecondaryPartStatus {
   /// 0-100: how many of this shift's three checkpoints are filled today.
   final int fillPercent;
 
+  /// Plan, output and checkpoints for the card's on-pace ring. Null against
+  /// a backend that predates it — the card then shows its plain bar.
+  final ShiftProgress? progress;
+
   factory SecondaryPartStatus.fromJson(Map<String, dynamic> json) {
     final raw = num.tryParse(json['fillPercent']?.toString() ?? '') ?? 0;
     return SecondaryPartStatus(
@@ -90,6 +97,7 @@ class SecondaryPartStatus {
       name: cleanCell(json['name']),
       lastUpdated: cleanCell(json['lastUpdated']),
       fillPercent: raw.clamp(0, 100).round(),
+      progress: ShiftProgress.fromJson(json),
     );
   }
 }

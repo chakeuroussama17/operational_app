@@ -1,5 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hicom_ops/models/machining_models.dart';
+import 'package:hicom_ops/screens/machining_entry_screen.dart';
+import 'package:hicom_ops/screens/machining_parts_screen.dart';
+import 'package:hicom_ops/services/sheets_service.dart';
+import 'package:hicom_ops/widgets/submission_feedback.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:hicom_ops/models/shift_progress.dart';
 import 'package:hicom_ops/widgets/checkpoint_timeline.dart';
 import 'package:hicom_ops/widgets/module_shell.dart';
@@ -230,6 +240,115 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('33% logged'), findsOneWidget);
       expect(find.byType(PaceRing), findsNothing);
+    });
+  });
+
+  group('motion', () {
+    testWidgets('a list that is loading shows its shape, not a spinner', (
+      tester,
+    ) async {
+      final gate = Completer<http.Response>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningPartsScreen(
+            customer: 'Mazda',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: MockClient((_) => gate.future)),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(SkeletonList), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      gate.complete(http.Response('{"status":"success","data":[]}', 200));
+      await tester.pumpAndSettle();
+      expect(find.byType(SkeletonList), findsNothing);
+    });
+
+    testWidgets('a save is felt as well as seen', (tester) async {
+      final calls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          calls.add('${call.method}:${call.arguments}');
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showSaveSuccessSnack(context),
+                child: const Text('save'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('save'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('HapticFeedback.vibrate:HapticFeedbackType.mediumImpact'));
+      expect(find.text('Saved successfully'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 4));
+    });
+
+    testWidgets('a part card and the form it opens share a hero tag', (
+      tester,
+    ) async {
+      final mock = MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'parts') {
+          return http.Response(
+            '{"status":"success","data":[{"part":"2214","lineNo":"M-2214-1",'
+            '"lineName":"MACH-2214","fillPercent":0}]}',
+            200,
+          );
+        }
+        return http.Response('{"status":"success","data":null}', 200);
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningPartsScreen(
+            customer: 'Mazda',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      const tag = 'part:machining:machining:Mazda:2214:M-2214-1';
+      expect(
+        find.byWidgetPredicate((w) => w is Hero && w.tag == tag),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningEntryScreen(
+            customer: 'Mazda',
+            part: '2214',
+            operation: machiningOperation,
+            shift: 'Day',
+            heroTag: tag,
+            service: SheetsService(client: mock),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byWidgetPredicate((w) => w is Hero && w.tag == tag),
+        findsOneWidget,
+        reason: 'the landing spot for the chip on the card',
+      );
     });
   });
 }

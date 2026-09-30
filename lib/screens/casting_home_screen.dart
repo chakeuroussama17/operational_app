@@ -169,6 +169,8 @@ class _CastingHomeScreenState extends State<CastingHomeScreen> {
 Widget build(BuildContext context) {
     return ModuleScaffold(
       subtitle: 'Casting — Machines',
+      icon: Icons.local_fire_department_rounded,
+      heroTag: 'module:casting',
       leading: _ShiftToggle(shift: _shift, onChanged: _setShift),
       headline: 'Select machine (DCM)',
       hint: 'Tap to log · ⋮ to rename or delete',
@@ -177,11 +179,7 @@ Widget build(BuildContext context) {
   }
 
 Widget _body() {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppColors.steelBlue),
-      );
-    }
+    if (_loading) return const SkeletonList();
     if (_error != null) {
       return ErrorRetry(message: _error!, onRetry: _load);
     }

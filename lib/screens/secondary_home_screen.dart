@@ -170,6 +170,8 @@ class _SecondaryHomeScreenState extends State<SecondaryHomeScreen> {
 Widget build(BuildContext context) {
     return ModuleScaffold(
       subtitle: 'Secondary — Stations',
+      icon: Icons.handyman_rounded,
+      heroTag: 'module:secondary',
       leading: _ShiftToggle(shift: _shift, onChanged: _setShift),
       headline: 'Select station',
       hint: 'Tap to log · ⋮ to rename or delete',
@@ -178,11 +180,7 @@ Widget build(BuildContext context) {
   }
 
 Widget _body() {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppColors.steelBlue),
-      );
-    }
+    if (_loading) return const SkeletonList();
     if (_error != null) {
       return ErrorRetry(message: _error!, onRetry: _load);
     }

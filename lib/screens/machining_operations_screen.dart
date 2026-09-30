@@ -41,6 +41,8 @@ class _MachiningOperationsScreenState extends State<MachiningOperationsScreen> {
 Widget build(BuildContext context) {
     return ModuleScaffold(
       subtitle: 'Machining — Operation',
+      icon: Icons.precision_manufacturing_rounded,
+      heroTag: 'module:machining',
       leading: ShiftToggle(
         shift: _shift,
         onChanged: (shift) => setState(() => _shift = shift),

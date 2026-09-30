@@ -1274,13 +1274,28 @@ class _SlotBlock extends StatelessWidget {
   /// The hour's count, across the card's full width — the LOR badge that used
   /// to sit beside it now lives in the card header.
   Widget _outputRow() {
-    return locked
-        ? _lockedOutput()
-        : AppNumberField(
-            label: 'Actual',
-            controller: outputController,
-            required: false,
-          );
+    // After a save the hour becomes history, and that change should be seen
+    // happening: the field eases into its locked form instead of swapping.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 380),
+      switchInCurve: Curves.easeOutCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SizeTransition(
+          sizeFactor: animation,
+          alignment: Alignment.topCenter,
+          child: child,
+        ),
+      ),
+      child: locked
+          ? KeyedSubtree(key: const ValueKey('locked'), child: _lockedOutput())
+          : AppNumberField(
+              key: const ValueKey('open'),
+              label: 'Actual',
+              controller: outputController,
+              required: false,
+            ),
+    );
   }
 
   /// An hour that's already on the sheet: the value is shown, not editable.

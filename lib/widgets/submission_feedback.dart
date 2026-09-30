@@ -1,10 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../config/constants.dart';
+
+/// A check mark that springs in rather than simply appearing — the moment of
+/// "it saved" is the one the whole form exists for, and it should register.
+class _PoppingCheck extends StatelessWidget {
+  const _PoppingCheck({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.elasticOut,
+      builder: (context, v, child) => Transform.scale(scale: v, child: child),
+      child: Icon(Icons.check_circle_rounded, color: color, size: size),
+    );
+  }
+}
 
 /// Success confirmation shown after a row is logged: a checkmark dialog that
 /// auto-dismisses, after which the caller returns to the home screen.
 Future<void> showSubmissionSuccess(BuildContext context) async {
+  // Felt as well as seen: gloves, noise and a glance away from the screen
+  // all make a visual-only confirmation easy to miss on the floor.
+  HapticFeedback.mediumImpact();
   await showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -24,11 +48,7 @@ Future<void> showSubmissionSuccess(BuildContext context) async {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.check_circle_rounded,
-                color: AppColors.success,
-                size: 84,
-              ),
+              const _PoppingCheck(size: 84, color: AppColors.success),
               const SizedBox(height: 16),
               Text(
                 'Logged successfully',
@@ -53,6 +73,7 @@ void showSaveSuccessSnack(
   BuildContext context, {
   String message = 'Saved successfully',
 }) {
+  HapticFeedback.mediumImpact();
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(
@@ -62,7 +83,7 @@ void showSaveSuccessSnack(
         duration: const Duration(seconds: 3),
         content: Row(
           children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white),
+            const _PoppingCheck(size: 24, color: Colors.white),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -86,6 +107,9 @@ void showSubmissionError(
   required String message,
   required VoidCallback onRetry,
 }) {
+  // A different, heavier buzz than success, so the two can't be confused
+  // by feel alone.
+  HapticFeedback.heavyImpact();
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(

@@ -251,6 +251,26 @@ class HomeKpiTile extends StatelessWidget {
 /// colours, with the brand gradient carried by the icon chip so the accent
 /// reads the same in both modes.
 class HomeModuleTile extends StatelessWidget {
+  Widget _heroChip() {
+    final chip = Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        gradient: AppColors.authGradient,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.authPink.withValues(alpha: 0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Icon(icon, color: Colors.white, size: 24),
+    );
+    return heroTag == null ? chip : Hero(tag: heroTag!, child: chip);
+  }
+
   const HomeModuleTile({
     super.key,
     required this.title,
@@ -258,7 +278,11 @@ class HomeModuleTile extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.actionLabel = 'View Area',
+    this.heroTag,
   });
+
+  /// Flies this tile's icon chip into the module screen it opens.
+  final Object? heroTag;
 
   /// The pill on the right. Names what the tap does, so the tile reads as a
   /// door rather than as a status card you might be able to edit in place.
@@ -297,22 +321,7 @@ class HomeModuleTile extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  gradient: AppColors.authGradient,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.authPink.withValues(alpha: 0.35),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Icon(icon, color: Colors.white, size: 24),
-              ),
+              _heroChip(),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(

@@ -26,7 +26,14 @@ class ModuleScaffold extends StatelessWidget {
     this.hint,
     this.leading,
     this.actions,
+    this.icon,
+    this.heroTag,
   });
+
+  /// The module's icon chip beside the headline. With [heroTag] set it is
+  /// where the home tile's chip lands when this screen opens.
+  final IconData? icon;
+  final Object? heroTag;
 
   /// Shown in the app bar under the wordmark.
   final String subtitle;
@@ -70,14 +77,29 @@ class ModuleScaffold extends StatelessWidget {
                       leading!,
                       const SizedBox(height: 16),
                     ],
-                    Text(
-                      headline,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        color: AppColors.textPrimary,
-                      ),
+                    Row(
+                      children: [
+                        if (icon != null) ...[
+                          heroTag == null
+                              ? IconChip(icon: icon!, size: 38)
+                              : Hero(
+                                  tag: heroTag!,
+                                  child: IconChip(icon: icon!, size: 38),
+                                ),
+                          const SizedBox(width: 12),
+                        ],
+                        Expanded(
+                          child: Text(
+                            headline,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     if (hint != null) ...[
                       const SizedBox(height: 3),
@@ -269,6 +291,101 @@ class SelectorCard extends StatelessWidget {
                 const SizedBox(height: 12),
                 _ProgressBar(percent: percent),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Placeholder cards in the shape of the list that is on its way, with a
+/// soft shimmer across them. A spinner says "wait"; this says "wait, and here
+/// is roughly what you are about to see", so the list arriving does not jolt
+/// the page.
+class SkeletonList extends StatefulWidget {
+  const SkeletonList({super.key, this.count = 5});
+
+  final int count;
+
+  @override
+  State<SkeletonList> createState() => _SkeletonListState();
+}
+
+class _SkeletonListState extends State<SkeletonList>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmer = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _shimmer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = AppColors.surfaceTint;
+    final shine = AppColors.surface;
+    Widget bar(double width, double height) => Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: base,
+        borderRadius: BorderRadius.circular(6),
+      ),
+    );
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppDimens.screenPadding,
+        4,
+        AppDimens.screenPadding,
+        28,
+      ),
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: widget.count,
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (context, i) => AnimatedBuilder(
+        animation: _shimmer,
+        builder: (context, child) => ShaderMask(
+          blendMode: BlendMode.srcATop,
+          shaderCallback: (rect) => LinearGradient(
+            begin: Alignment(-1.5 + 3 * _shimmer.value, 0),
+            end: Alignment(-0.5 + 3 * _shimmer.value, 0),
+            colors: [base, shine, base],
+          ).createShader(rect),
+          child: child,
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: base,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    bar(110, 14),
+                    const SizedBox(height: 8),
+                    bar(170, 10),
+                  ],
+                ),
+              ),
             ],
           ),
         ),

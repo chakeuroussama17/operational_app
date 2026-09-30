@@ -430,18 +430,21 @@ class _LogTabState extends State<_LogTab> {
       title: 'Casting',
       subtitle: 'Die-casting machines · hourly output by DCM & part',
       icon: Icons.local_fire_department_rounded,
+      heroTag: 'module:casting',
       onTap: () => _open(context, const CastingHomeScreen()),
     ),
     'secondary' => HomeModuleTile(
       title: 'Secondary',
       subtitle: 'Finishing stations · actual output & LOR%',
       icon: Icons.handyman_rounded,
+      heroTag: 'module:secondary',
       onTap: () => _open(context, const SecondaryHomeScreen()),
     ),
     _ => HomeModuleTile(
       title: 'Machining',
       subtitle: 'Machining & assembly · output & rejection',
       icon: Icons.precision_manufacturing_rounded,
+      heroTag: 'module:machining',
       onTap: () => _open(context, const MachiningOperationsScreen()),
     ),
   };

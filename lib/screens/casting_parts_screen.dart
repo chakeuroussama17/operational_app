@@ -232,11 +232,7 @@ class _CastingPartsScreenState extends State<CastingPartsScreen> {
   }
 
   Widget _body() {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppColors.steelBlue),
-      );
-    }
+    if (_loading) return const SkeletonList();
     if (_error != null) {
       return ErrorRetry(message: _error!, onRetry: _load);
     }

@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hicom_ops/models/analytics_models.dart';
 import 'package:hicom_ops/models/machining_models.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_parts_screen.dart';
 import 'package:hicom_ops/services/sheets_service.dart';
 import 'package:hicom_ops/widgets/submission_feedback.dart';
+import 'package:hicom_ops/widgets/today_scoreboard.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:hicom_ops/models/shift_progress.dart';
@@ -349,6 +351,82 @@ void main() {
         findsOneWidget,
         reason: 'the landing spot for the chip on the card',
       );
+    });
+  });
+
+  group('today scoreboard', () {
+    AnalyticsSeries week(List<double> output, {List<double> plan = const []}) =>
+        AnalyticsSeries(
+          dates: [for (var i = 0; i < output.length; i++) '2026-09-2$i'],
+          output: output,
+          lorPercent: [for (final _ in output) 80.0],
+          plan: plan,
+        );
+
+    test('big numbers are grouped so they read at a glance', () {
+      expect(groupThousands(0), '0');
+      expect(groupThousands(999), '999');
+      expect(groupThousands(12480), '12,480');
+      expect(groupThousands(1234567), '1,234,567');
+    });
+
+    testWidgets('today is the last day of the week, summed across modules', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodayScoreboard(
+              modules: const ['casting', 'machining'],
+              loading: false,
+              series: {
+                'casting': week([900, 1000, 4000], plan: [0, 0, 5000]),
+                'machining': week([100, 200, 2000], plan: [0, 0, 2500]),
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // 4,000 + 2,000 today — not the week's total.
+      expect(find.text('6,000'), findsOneWidget);
+      expect(find.text('of 7,500 planned · 80%'), findsOneWidget);
+    });
+
+    testWidgets('no plan says so rather than drawing a bar against zero', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodayScoreboard(
+              modules: const ['casting'],
+              loading: false,
+              series: {'casting': week([10, 20, 30])},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No plan set for today yet'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+    });
+
+    testWidgets('while loading it shows a dash, not a zero', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: TodayScoreboard(
+              modules: ['casting'],
+              loading: true,
+              series: {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('—'), findsWidgets);
+      expect(find.text('0'), findsNothing);
     });
   });
 }

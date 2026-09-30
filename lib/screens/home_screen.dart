@@ -6,6 +6,7 @@ import '../models/app_user.dart';
 import '../services/sheets_service.dart';
 import '../widgets/hicom_app_bar.dart';
 import '../widgets/home_widgets.dart';
+import '../widgets/today_scoreboard.dart';
 import 'auth_gate.dart';
 import 'casting_home_screen.dart';
 import 'dashboard_screen.dart';
@@ -233,7 +234,9 @@ class _LogTabState extends State<_LogTab> {
       final modules = widget.modules;
       final results = await Future.wait([
         for (final module in modules)
-          _service.fetchAnalytics(module: module, days: 1),
+          // A week, not a day: today is the last point, and the six before
+          // it are the sparkline that says whether today is up or down.
+          _service.fetchAnalytics(module: module, days: 7),
       ]);
       if (!mounted) return;
       setState(() {
@@ -257,54 +260,12 @@ class _LogTabState extends State<_LogTab> {
     return '${now.day} ${_months[now.month - 1]} ${now.year}';
   }
 
-  static String _fmt(double v) =>
-      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
-
   void _open(BuildContext context, Widget screen) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
   }
 
-  double get _todayOutput {
-    var total = 0.0;
-    for (final s in _series.values) {
-      if (s.output.isNotEmpty) total += s.output.last;
-    }
-    return total;
-  }
-
-  double? get _todayLor {
-    final values = [
-      for (final s in _series.values)
-        if (s.lorPercent.isNotEmpty && s.lorPercent.last != null)
-          s.lorPercent.last!,
-    ];
-    if (values.isEmpty) return null;
-    return values.reduce((a, b) => a + b) / values.length;
-  }
-
-  double get _todayRejections {
-    var total = 0.0;
-    for (final s in _series.values) {
-      if (s.rejection.isNotEmpty) total += s.rejection.last;
-    }
-    return total;
-  }
-
-  /// How many machines/stations/customers reported anything today — the
-  /// stand-in third KPI for departments that don't track rejections.
-  int get _reportingCount {
-    var count = 0;
-    for (final s in _series.values) {
-      count += s.byGroup.length;
-    }
-    return count;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final showRejections = widget.modules.contains('machining');
-    final hasData = _series.isNotEmpty;
-    final lor = _todayLor;
 
     // The wash is painted once, behind the whole IndexedStack.
     return RefreshIndicator(
@@ -350,43 +311,10 @@ class _LogTabState extends State<_LogTab> {
             ),
           ),
           const SizedBox(height: 22),
-          Row(
-            children: [
-              Expanded(
-                child: HomeKpiTile(
-                  label: 'Output',
-                  value: _loading || !hasData ? '—' : _fmt(_todayOutput),
-                  unit: _loading || !hasData ? null : 'pcs',
-                  accent: AppColors.success,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: HomeKpiTile(
-                  label: 'Avg LOR',
-                  value: lor == null ? '—' : lor.toStringAsFixed(1),
-                  unit: lor == null ? null : '%',
-                  accent: AppColors.steelBlue,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: showRejections
-                    ? HomeKpiTile(
-                        label: 'Rejects',
-                        accent: AppColors.amber,
-                        value: _loading || !hasData
-                            ? '—'
-                            : _fmt(_todayRejections),
-                        unit: _loading || !hasData ? null : 'pcs',
-                      )
-                    : HomeKpiTile(
-                        label: 'Reporting',
-                        accent: AppColors.amber,
-                        value: _loading || !hasData ? '—' : '$_reportingCount',
-                      ),
-              ),
-            ],
+          TodayScoreboard(
+            modules: widget.modules,
+            series: _series,
+            loading: _loading,
           ),
           const SizedBox(height: 26),
           Text(
@@ -419,6 +347,12 @@ class _LogTabState extends State<_LogTab> {
     );
   }
 
+  /// Today's pieces for one module, once its figures have arrived.
+  double? _todayFor(String module) {
+    final output = _series[module]?.output;
+    return output == null || output.isEmpty ? null : output.last;
+  }
+
   static String _titleFor(String module) => switch (module) {
     'casting' => 'Casting',
     'secondary' => 'Secondary',
@@ -431,6 +365,8 @@ class _LogTabState extends State<_LogTab> {
       subtitle: 'Die-casting machines · hourly output by DCM & part',
       icon: Icons.local_fire_department_rounded,
       heroTag: 'module:casting',
+      today: _todayFor('casting'),
+      week: _series['casting']?.output,
       onTap: () => _open(context, const CastingHomeScreen()),
     ),
     'secondary' => HomeModuleTile(
@@ -438,6 +374,8 @@ class _LogTabState extends State<_LogTab> {
       subtitle: 'Finishing stations · actual output & LOR%',
       icon: Icons.handyman_rounded,
       heroTag: 'module:secondary',
+      today: _todayFor('secondary'),
+      week: _series['secondary']?.output,
       onTap: () => _open(context, const SecondaryHomeScreen()),
     ),
     _ => HomeModuleTile(
@@ -445,6 +383,8 @@ class _LogTabState extends State<_LogTab> {
       subtitle: 'Machining & assembly · output & rejection',
       icon: Icons.precision_manufacturing_rounded,
       heroTag: 'module:machining',
+      today: _todayFor('machining'),
+      week: _series['machining']?.output,
       onTap: () => _open(context, const MachiningOperationsScreen()),
     ),
   };

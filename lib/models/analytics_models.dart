@@ -22,6 +22,7 @@ class AnalyticsSeries {
     required this.lorPercent,
     this.rejection = const [],
     this.downtime = const [],
+    this.plan = const [],
     this.byGroup = const [],
     this.rejectionsByType = const [],
     this.downtimeByReason = const [],
@@ -40,6 +41,10 @@ class AnalyticsSeries {
   /// Minutes lost per day. Empty for Casting/Secondary, which don't log
   /// downtime at all — only Machining has the columns.
   final List<double> downtime;
+
+  /// Planned pieces per day, summed across every row. Empty against a
+  /// backend that predates it — home then shows output without a target.
+  final List<double> plan;
 
   /// Output + avg LOR% totalled per DCM/Station/Customer over the window,
   /// sorted highest output first.
@@ -133,6 +138,7 @@ class AnalyticsSeries {
           .map(toDouble)
           .toList(),
       downtime: (json['downtime'] as List? ?? const []).map(toDouble).toList(),
+      plan: (json['plan'] as List? ?? const []).map(toDouble).toList(),
       byGroup: (json['byGroup'] as List? ?? const [])
           .whereType<Map>()
           .map((m) => GroupTotal.fromJson(m.cast<String, dynamic>()))

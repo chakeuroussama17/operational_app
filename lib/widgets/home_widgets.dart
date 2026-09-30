@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
+import 'today_scoreboard.dart';
 
 /// The Log tab's backdrop — a wash in the brand hue that follows the app's
 /// light/dark setting, so day mode is genuinely light rather than a dimmed
@@ -279,7 +280,14 @@ class HomeModuleTile extends StatelessWidget {
     required this.onTap,
     this.actionLabel = 'View Area',
     this.heroTag,
+    this.today,
+    this.week,
   });
+
+  /// Pieces made today in this module, and its last seven days (today last)
+  /// for the sparkline. Both null until the figures arrive.
+  final double? today;
+  final List<double>? week;
 
   /// Flies this tile's icon chip into the module screen it opens.
   final Object? heroTag;
@@ -347,6 +355,37 @@ class HomeModuleTile extends StatelessWidget {
                         color: AppColors.textSecondary,
                       ),
                     ),
+                    if (today != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (week != null && week!.length > 1) ...[
+                            SizedBox(
+                              width: 64,
+                              height: 22,
+                              child: Sparkline(values: week!),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          CountUp(
+                            value: today!,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            ' today',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

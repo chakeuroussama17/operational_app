@@ -406,7 +406,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
     // under no line at all, which is the state this field exists to end.
     if (widget.pickLine && _line.isEmpty) {
       setState(() {
-        _lineError = 'Pick the line this part runs on';
+        _lineError = 'Pick the work center this part runs on';
         _open = false;
       });
       return;
@@ -599,7 +599,7 @@ class _PartCodeDialogState extends State<_PartCodeDialog> {
                 initialValue: _line.isEmpty ? null : _line,
                 isExpanded: true,
                 decoration: InputDecoration(
-                  labelText: 'Line',
+                  labelText: 'Work Center',
                   isDense: true,
                   errorText: _lineError,
                   prefixIcon: const Icon(

@@ -847,7 +847,7 @@ void main() {
     await tester.tap(find.text('SAVE 2214'));
     await tester.pumpAndSettle();
     expect(result, isNull);
-    expect(find.text('Pick the line this part runs on'), findsOneWidget);
+    expect(find.text('Pick the work center this part runs on'), findsOneWidget);
 
     final line = productionLines.first;
     await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -895,7 +895,7 @@ void main() {
     await tester.pumpAndSettle();
     // Casting already logs against a DCM; asking for a line too would be
     // asking the same question twice.
-    expect(find.text('Line'), findsNothing);
+    expect(find.text('Work Center'), findsNothing);
 
     await tester.tap(find.text('Choose part code'));
     await tester.pumpAndSettle();

@@ -8,7 +8,8 @@
 ///  Each entry is a name and a code, in the plant's own order. The name says
 ///  what the line is ("MACH-2214", "WASHING MACHINE"); the code is unique and
 ///  is what tells two lines with the same name apart ("M-2214-1" and
-///  "M-2214-2"). The sheet stores them in LineName and LineNo.
+///  "M-2214-2"). On screen and on the sheet they are the plant's own
+///  WORK CENTER and NAME — the sheet stores them in WorkCenter and Name.
 /// ─────────────────────────────────────────────────────────────────────────
 ///
 /// Why this exists: a part can run on more than one line, and supervisors

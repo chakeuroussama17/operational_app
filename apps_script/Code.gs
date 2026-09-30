@@ -270,7 +270,7 @@ function machiningHeadersForShift(shift) {
   // of WHICH entry this is, not something measured about it. A part can run on
   // more than one line, and before these columns existed people encoded that
   // by renaming the part ("2214 Fanuc 21"), which split every per-part figure.
-  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Report', 'Plan'];
+  var headers = ['Date', 'Customer', 'PartNo', 'Operation', 'WorkCenter', 'Name', 'Barcode', 'PartName', 'MO', 'Report', 'Plan'];
   slotsForShift(shift).forEach(function (slot) {
     headers.push('Actual_' + slot);
     headers.push('LOR_' + slot);
@@ -302,7 +302,10 @@ function secondaryHeadersForShift(shift) {
 // grouped, with the monthly MO last since it's the one that gets edited.
 // Report sits beside MO: both are numbers issued per part per run, both are
 // required when a part is added, and both are snapshotted onto logged rows.
-var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'LineName', 'LineNo', 'Barcode', 'PartName', 'MO', 'Report'];
+// WorkCenter and Name are the plant's own words for them, from the Excel the
+// roster comes from: WorkCenter is the unique code (M-2214-1), Name says what
+// it is (MACH-2214). The app still calls the pair a "line" internally.
+var CONFIG_HEADERS = ['Module', 'Kind', 'Group', 'Value', 'Operation', 'WorkCenter', 'Name', 'Barcode', 'PartName', 'MO', 'Report'];
 
 // The "business date" a shift row belongs to. Day shift runs from 10AM to
 // 8PM; Night shift takes over at 10PM and continues through the overnight
@@ -322,7 +325,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'REPORT-v32';
+var BACKEND_VERSION = 'WORKCENTER-v33';
 
 function doGet(e) {
   try {
@@ -1013,14 +1016,14 @@ function addPartWithMo(module, payload) {
     return String(r.Module).toLowerCase() === module && r.Kind === 'part' &&
       String(r.Group) === group && String(r.Value) === part &&
       partRowMatchesOperation(r, operation) &&
-      lineKeyOf(r.LineName, r.LineNo) === lineKeyOf(lineName, lineNo);
+      lineKeyOf(r.Name, r.WorkCenter) === lineKeyOf(lineName, lineNo);
   });
   if (dup) return { status: 'error', message: 'Already exists' };
 
   var info = lookupMasterPart(module, part);
   writeConfigRow(sheet, {
     Module: module, Kind: 'part', Group: group, Value: part,
-    Operation: operation, LineName: lineName, LineNo: lineNo,
+    Operation: operation, WorkCenter: lineNo, Name: lineName,
     MO: mo, Report: report, Barcode: info.barcode, PartName: info.name,
   });
   return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
@@ -1050,8 +1053,8 @@ function editPartWithMo(module, payload) {
   var reportCol = headers.indexOf('Report') + 1;
   var barcodeCol = headers.indexOf('Barcode') + 1;
   var nameCol = headers.indexOf('PartName') + 1;
-  var lineNameCol = headers.indexOf('LineName') + 1;
-  var lineNoCol = headers.indexOf('LineNo') + 1;
+  var lineNameCol = headers.indexOf('Name') + 1;
+  var lineNoCol = headers.indexOf('WorkCenter') + 1;
   var operation = module === 'machining'
     ? String(payload.operation || '').trim() : '';
   var lineName = module === 'machining'
@@ -1196,7 +1199,7 @@ function lineKeyOf(name, number) {
 // that history reachable instead of orphaning it the day this ships.
 function matchesLine(row, name, number) {
   var wanted = lineKeyOf(name, number);
-  var have = lineKeyOf(row.LineName, row.LineNo);
+  var have = lineKeyOf(row.Name, row.WorkCenter);
   if (!wanted || !have) return true;
   return have === wanted;
 }
@@ -1263,10 +1266,10 @@ function upsertMachiningRow(data) {
   // columns has them blank and matched on that blankness, so this is what
   // fills them in the first time that entry is logged again.
   if (data.LineName !== undefined && data.LineName !== null && String(data.LineName).trim() !== '') {
-    merged.LineName = String(data.LineName).trim();
+    merged.Name = String(data.LineName).trim();
   }
   if (data.LineNo !== undefined && data.LineNo !== null && String(data.LineNo).trim() !== '') {
-    merged.LineNo = String(data.LineNo).trim();
+    merged.WorkCenter = String(data.LineNo).trim();
   }
   if (!existing) {
     // Snapshot the part's currently-configured MO onto the row once, at
@@ -2177,8 +2180,8 @@ function getConfigPartEntries(module, group, operation) {
         partRowMatchesOperation(r, operation)) {
       out.push({
         part: String(r.Value),
-        lineName: String(r.LineName === undefined || r.LineName === null ? '' : r.LineName).trim(),
-        lineNo: String(r.LineNo === undefined || r.LineNo === null ? '' : r.LineNo).trim(),
+        lineName: String(r.Name === undefined || r.Name === null ? '' : r.Name).trim(),
+        lineNo: String(r.WorkCenter === undefined || r.WorkCenter === null ? '' : r.WorkCenter).trim(),
       });
     }
   });
@@ -2597,8 +2600,8 @@ function configMutate(payload) {
     writeConfigRow(sheet, {
       Module: module, Kind: kind, Group: group, Value: value,
       Operation: kind === 'part' ? operation : '',
-      LineName: kind === 'part' ? lineName : '',
-      LineNo: kind === 'part' ? lineNo : '',
+      WorkCenter: kind === 'part' ? lineNo : '',
+      Name: kind === 'part' ? lineName : '',
     });
     return { status: 'success', version: BACKEND_VERSION, message: 'Added' };
   }
@@ -2929,6 +2932,14 @@ function migrateColumnOrder() {
     renameHeader(MACHINING_DAY_SHEET, 'Rep', 'Report'),
     renameHeader(MACHINING_NIGHT_SHEET, 'Rep', 'Report'),
     renameHeader(MACHINING_REJECTIONS_SHEET, 'Rep', 'Report'),
+    // LineName/LineNo became the plant's own WorkCenter/Name after they had
+    // reached the sheet. Retitled in place, so any values stay with them.
+    renameHeader(CONFIG_SHEET, 'LineNo', 'WorkCenter'),
+    renameHeader(CONFIG_SHEET, 'LineName', 'Name'),
+    renameHeader(MACHINING_DAY_SHEET, 'LineNo', 'WorkCenter'),
+    renameHeader(MACHINING_DAY_SHEET, 'LineName', 'Name'),
+    renameHeader(MACHINING_NIGHT_SHEET, 'LineNo', 'WorkCenter'),
+    renameHeader(MACHINING_NIGHT_SHEET, 'LineName', 'Name'),
     // Same rule, same reason: retitle Output_* to Actual_*/LOR_* before the
     // reorders meet the new names.
     migrateActualColumnNames(CASTING_DAY_SHEET),
@@ -3061,7 +3072,7 @@ function applyColumnFormats(sheet, headers) {
       range.setNumberFormat('yyyy-mm-dd hh:mm:ss');
     } else if (header === 'Date') {
       range.setNumberFormat('yyyy-mm-dd');
-    } else if (header === 'MO' || header === 'Report') {
+    } else if (header === 'MO' || header === 'Report' || header === 'WorkCenter') {
       // Identifiers, not quantities. Left automatic, Sheets stores "0123" as
       // the number 123 — the live MO column already reads back as 2245.0 —
       // and a Report number with a leading zero would lose it the same way.

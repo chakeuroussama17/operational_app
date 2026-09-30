@@ -25,20 +25,28 @@ class _ThemeButton extends StatelessWidget {
       listenable: themeController,
       builder: (context, _) {
         final mode = themeController.value;
+        final floor = themeController.floor;
         return IconButton(
           onPressed: themeController.cycle,
           color: Colors.white,
           visualDensity: VisualDensity.compact,
-          icon: Icon(switch (mode) {
-            ThemeMode.system => Icons.brightness_auto_rounded,
-            ThemeMode.light => Icons.light_mode_rounded,
-            ThemeMode.dark => Icons.dark_mode_rounded,
-          }, size: 22),
-          tooltip: switch (mode) {
-            ThemeMode.system => 'Theme: follow system (tap for light)',
-            ThemeMode.light => 'Theme: light (tap for dark)',
-            ThemeMode.dark => 'Theme: dark (tap to follow system)',
-          },
+          icon: Icon(
+            floor
+                ? Icons.contrast_rounded
+                : switch (mode) {
+                    ThemeMode.system => Icons.brightness_auto_rounded,
+                    ThemeMode.light => Icons.light_mode_rounded,
+                    ThemeMode.dark => Icons.dark_mode_rounded,
+                  },
+            size: 22,
+          ),
+          tooltip: floor
+              ? 'Theme: floor mode, high contrast (tap to follow system)'
+              : switch (mode) {
+                  ThemeMode.system => 'Theme: follow system (tap for light)',
+                  ThemeMode.light => 'Theme: light (tap for dark)',
+                  ThemeMode.dark => 'Theme: dark (tap for floor mode)',
+                },
         );
       },
     );

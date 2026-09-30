@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hicom_ops/config/constants.dart';
+import 'package:hicom_ops/config/theme_controller.dart';
+import 'package:hicom_ops/main.dart';
 import 'package:hicom_ops/models/analytics_models.dart';
 import 'package:hicom_ops/models/machining_models.dart';
+import 'package:hicom_ops/screens/casting_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_entry_screen.dart';
 import 'package:hicom_ops/screens/machining_parts_screen.dart';
 import 'package:hicom_ops/services/sheets_service.dart';
@@ -12,6 +16,7 @@ import 'package:hicom_ops/widgets/submission_feedback.dart';
 import 'package:hicom_ops/widgets/today_scoreboard.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hicom_ops/models/shift_progress.dart';
 import 'package:hicom_ops/widgets/checkpoint_timeline.dart';
 import 'package:hicom_ops/widgets/module_shell.dart';
@@ -427,6 +432,146 @@ void main() {
       await tester.pump();
       expect(find.text('—'), findsWidgets);
       expect(find.text('0'), findsNothing);
+    });
+  });
+
+  group('floor mode', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      themeController.value = ThemeMode.system;
+    });
+    tearDown(() => themeController.value = ThemeMode.system);
+
+    test('the toggle goes system, light, dark, floor, and back', () async {
+      await themeController.cycle();
+      expect(themeController.value, ThemeMode.light);
+      await themeController.cycle();
+      expect(themeController.value, ThemeMode.dark);
+      expect(themeController.floor, isFalse);
+      await themeController.cycle();
+      // Dark underneath, with the contrast turned up.
+      expect(themeController.value, ThemeMode.dark);
+      expect(themeController.floor, isTrue);
+      await themeController.cycle();
+      expect(themeController.value, ThemeMode.system);
+      expect(themeController.floor, isFalse);
+    });
+
+    test('it survives a restart', () async {
+      await themeController.setFloor();
+      final restored = ThemeController();
+      await restored.load();
+      expect(restored.floor, isTrue);
+      expect(restored.value, ThemeMode.dark);
+    });
+
+    test('choosing a mode directly always leaves floor mode', () async {
+      await themeController.setFloor();
+      themeController.value = ThemeMode.dark;
+      expect(themeController.floor, isFalse,
+          reason: 'plain dark must not keep the high-contrast palette');
+    });
+
+    testWidgets('it switches the palette to high contrast', (tester) async {
+      await themeController.setFloor();
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      expect(AppColors.textPrimary, const Color(0xFFFFFFFF));
+      expect(AppColors.background, const Color(0xFF000000));
+      expect(find.byIcon(Icons.contrast_rounded), findsOneWidget);
+    });
+
+    testWidgets('text reads larger, on top of the phone setting', (
+      tester,
+    ) async {
+      await themeController.setFloor();
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byType(Scaffold).first);
+      expect(MediaQuery.of(context).textScaler.scale(100), closeTo(115, 0.01));
+    });
+
+    Future<void> atPhoneWidth(WidgetTester tester, Widget page) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await themeController.setFloor();
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      tester.state<NavigatorState>(find.byType(Navigator).first).push(
+        MaterialPageRoute<void>(builder: (_) => page),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the busiest form fits a 360px phone in floor mode', (
+      tester,
+    ) async {
+      await atPhoneWidth(
+        tester,
+        MachiningEntryScreen(
+          customer: 'Mazda',
+          part: '2214',
+          operation: machiningOperation,
+          shift: 'Day',
+          mo: '2214',
+          report: '07',
+          service: SheetsService(
+            client: MockClient(
+              (_) async => http.Response('{"status":"success","data":null}', 200),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+    });
+
+    testWidgets('the casting form fits too', (tester) async {
+      await atPhoneWidth(
+        tester,
+        const CastingEntryScreen(
+          dcm: 'DCM08',
+          part: '1145',
+          shift: 'Day',
+          mo: '2214',
+          report: '07',
+        ),
+      );
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+    });
+
+    testWidgets('home fits too', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await themeController.setFloor();
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+    });
+
+    testWidgets('a parts list with pace cards fits too', (tester) async {
+      await atPhoneWidth(
+        tester,
+        MachiningPartsScreen(
+          customer: 'Mazda',
+          operation: machiningOperation,
+          shift: 'Day',
+          service: SheetsService(
+            client: MockClient(
+              (_) async => http.Response(
+                '{"status":"success","data":[{"part":"2214","mo":"2214",'
+                '"report":"07","lineName":"MACH-2214","lineNo":"M-2214-1",'
+                '"fillPercent":33,"plan":900,"actual":300,"downtime":45,'
+                '"slotsFilled":1,"slotsTotal":3}]}',
+                200,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+      expect(find.text('300 of 900 · on pace'), findsOneWidget);
     });
   });
 }

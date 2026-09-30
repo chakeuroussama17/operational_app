@@ -1480,12 +1480,19 @@ class _OverallSummary extends StatelessWidget {
             children: [
               Icon(Icons.summarize_outlined, size: 20, color: AppColors.navy),
               const SizedBox(width: 8),
-              Text(
-                'Overall summary',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
+              // Allowed to shrink: floor mode and a phone's own large-text
+              // setting multiply, and a heading that cannot give way pushes
+              // the card past the edge of a narrow screen.
+              Expanded(
+                child: Text(
+                  'Overall summary',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
             ],

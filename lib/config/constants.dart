@@ -112,6 +112,11 @@ abstract class AppColors {
   static Brightness brightness = Brightness.light;
   static bool get _dark => brightness == Brightness.dark;
 
+  /// Floor mode: set by the root App alongside [brightness]. Only means
+  /// anything in dark — floor mode is dark with the contrast turned up.
+  static bool highContrast = false;
+  static bool get _floor => _dark && highContrast;
+
   // --- Brand accents (identical in both modes) ---
   static const Color navy = Color(0xFF383287); // primary / header (logo purple)
   static const Color navyDark = Color(0xFF241F5E); // gradients / pressed states
@@ -148,33 +153,52 @@ abstract class AppColors {
   /// The Log tab's backdrop wash. Dark keeps the login's mood; light is the
   /// same hue drained to near-white so day mode is genuinely light rather
   /// than a dimmed dark theme.
-  static List<Color> get homeBackdrop => _dark
+  static List<Color> get homeBackdrop => _floor
+      // Floor mode drops the wash: a gradient is atmosphere, and under
+      // factory lighting atmosphere costs legibility.
+      ? const [Color(0xFF050507), Color(0xFF000000), Color(0xFF000000)]
+      : _dark
       ? const [Color(0xFF1B1430), Color(0xFF120E1F), Color(0xFF0B0913)]
       : const [Color(0xFFF7F5FC), Color(0xFFF1EDFA), Color(0xFFE8E3F5)];
 
   // --- Neutrals (flip with brightness) ---
-  static Color get background =>
-      _dark ? const Color(0xFF131120) : const Color(0xFFF6F5FA);
-  static Color get surface => _dark ? const Color(0xFF211E30) : Colors.white;
-  static Color get surfaceTint =>
-      _dark ? const Color(0xFF2C2842) : const Color(0xFFEDEBF7);
-  static Color get textPrimary =>
-      _dark ? const Color(0xFFECEAF6) : const Color(0xFF211D3D);
-  static Color get textSecondary =>
-      _dark ? const Color(0xFF9E97B8) : const Color(0xFF6E6688);
-  static Color get borderSubtle =>
-      _dark ? const Color(0xFF322D47) : const Color(0xFFE1DEEE);
+  //
+  // Floor mode's values are chosen for contrast, not mood: pure white text,
+  // secondary text that is still clearly readable rather than a muted grey,
+  // and borders bright enough to find a field's edge at arm's length.
+  static Color get background => _floor
+      ? const Color(0xFF000000)
+      : (_dark ? const Color(0xFF131120) : const Color(0xFFF6F5FA));
+  static Color get surface => _floor
+      ? const Color(0xFF111116)
+      : (_dark ? const Color(0xFF211E30) : Colors.white);
+  static Color get surfaceTint => _floor
+      ? const Color(0xFF24242C)
+      : (_dark ? const Color(0xFF2C2842) : const Color(0xFFEDEBF7));
+  static Color get textPrimary => _floor
+      ? const Color(0xFFFFFFFF)
+      : (_dark ? const Color(0xFFECEAF6) : const Color(0xFF211D3D));
+  static Color get textSecondary => _floor
+      ? const Color(0xFFD9D9E3)
+      : (_dark ? const Color(0xFF9E97B8) : const Color(0xFF6E6688));
+  static Color get borderSubtle => _floor
+      ? const Color(0xFF6E6E80)
+      : (_dark ? const Color(0xFF322D47) : const Color(0xFFE1DEEE));
 
   /// Explicit neutral values for a given brightness, used to build the two
   /// ThemeData objects up front (where a single global getter won't do).
-  static Color backgroundOf(Brightness b) =>
-      b == Brightness.dark ? const Color(0xFF131120) : const Color(0xFFF6F5FA);
-  static Color surfaceOf(Brightness b) =>
-      b == Brightness.dark ? const Color(0xFF211E30) : Colors.white;
-  static Color textPrimaryOf(Brightness b) =>
-      b == Brightness.dark ? const Color(0xFFECEAF6) : const Color(0xFF211D3D);
-  static Color borderOf(Brightness b) =>
-      b == Brightness.dark ? const Color(0xFF322D47) : const Color(0xFFC6D0DA);
+  static Color backgroundOf(Brightness b) => b == Brightness.dark
+      ? (highContrast ? const Color(0xFF000000) : const Color(0xFF131120))
+      : const Color(0xFFF6F5FA);
+  static Color surfaceOf(Brightness b) => b == Brightness.dark
+      ? (highContrast ? const Color(0xFF111116) : const Color(0xFF211E30))
+      : Colors.white;
+  static Color textPrimaryOf(Brightness b) => b == Brightness.dark
+      ? (highContrast ? const Color(0xFFFFFFFF) : const Color(0xFFECEAF6))
+      : const Color(0xFF211D3D);
+  static Color borderOf(Brightness b) => b == Brightness.dark
+      ? (highContrast ? const Color(0xFF8A8A99) : const Color(0xFF322D47))
+      : const Color(0xFFC6D0DA);
 
   // --- Dashboard chart chrome ---
   //

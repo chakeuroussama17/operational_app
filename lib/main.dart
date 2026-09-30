@@ -11,6 +11,10 @@ Future<void> main() async {
   runApp(const HicomOpsApp(requireLogin: true));
 }
 
+/// How much larger floor mode makes text. Tested at a 360px phone width
+/// against the busiest screens, so a larger value needs re-checking there.
+const double floorTextScale = 1.15;
+
 /// HICOM Diecastings production shift-log app.
 ///
 /// Listens to [themeController] and to platform-brightness changes so the
@@ -86,6 +90,7 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
     // Keep the hardcoded AppColors getters in sync with what MaterialApp
     // will actually render this frame.
     AppColors.brightness = _effectiveBrightness(mode);
+    AppColors.highContrast = themeController.floor;
 
     return MaterialApp(
       title: 'HDSB Operations',
@@ -100,16 +105,32 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
       home: widget.requireLogin ? AuthGate() : HomeScreen(),
       // Above the Navigator, so every page — not just the first — can find
       // who is signed in. See [AuthSession].
-      builder: (context, child) => ValueListenableBuilder<AuthSession?>(
-        valueListenable: authSession,
-        builder: (context, session, _) => session == null
-            ? child!
-            : AuthScope(
-                user: session.user,
-                signOut: session.signOut,
-                child: child!,
+      builder: (context, child) {
+        Widget page = ValueListenableBuilder<AuthSession?>(
+          valueListenable: authSession,
+          builder: (context, session, _) => session == null
+              ? child!
+              : AuthScope(
+                  user: session.user,
+                  signOut: session.signOut,
+                  child: child!,
+                ),
+        );
+        // Floor mode reads larger, on top of whatever size the phone itself
+        // is set to — someone who already enlarged their text keeps that.
+        if (themeController.floor) {
+          final media = MediaQuery.of(context);
+          page = MediaQuery(
+            data: media.copyWith(
+              textScaler: TextScaler.linear(
+                media.textScaler.scale(100) / 100 * floorTextScale,
               ),
-      ),
+            ),
+            child: page,
+          );
+        }
+        return page;
+      },
     );
   }
 

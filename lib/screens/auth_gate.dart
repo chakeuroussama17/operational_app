@@ -12,6 +12,24 @@ import 'register_screen.dart';
 
 /// Lets screens deeper in the tree (the app bar) offer "sign out" without
 /// being wired to the gate directly.
+/// Who is signed in, and how to sign them out — published app-wide.
+///
+/// The gate is the app's first page, and a page cannot hand an inherited
+/// widget to the pages pushed above it: those are siblings on the Navigator,
+/// not descendants. So the gate publishes the session here, and
+/// [HicomOpsApp] wraps the whole Navigator in an [AuthScope] built from it.
+/// Without that, every page opened from home saw no session at all — no
+/// sign-out button, and the operator/super-admin gate falling back to
+/// "show everything".
+class AuthSession {
+  const AuthSession({required this.user, required this.signOut});
+
+  final AppUser user;
+  final VoidCallback signOut;
+}
+
+final ValueNotifier<AuthSession?> authSession = ValueNotifier(null);
+
 class AuthScope extends InheritedWidget {
   const AuthScope({
     super.key,
@@ -91,6 +109,9 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   void dispose() {
+    // A gate that is gone can no longer sign anyone out, so it must not
+    // leave a session behind that claims it can.
+    if (authSession.value?.signOut == _signOut) authSession.value = null;
     _service.dispose();
     super.dispose();
   }
@@ -166,6 +187,7 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
     SheetsService.currentUserEmail = user.email;
+    authSession.value = AuthSession(user: user, signOut: _signOut);
     setState(() {
       _user = user;
       _state = _GateState.ready;
@@ -174,6 +196,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _signOut() async {
     SheetsService.currentUserEmail = null;
+    authSession.value = null;
     await _backend.signOut();
     if (!mounted) return;
     setState(() {

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
-import '../config/theme_controller.dart';
 import '../models/analytics_models.dart';
 import '../models/app_user.dart';
 import '../services/sheets_service.dart';
@@ -55,74 +54,11 @@ class _HomeScreenState extends State<HomeScreen> {
   /// a gate above it and therefore see every module.
   AppUser? get _user => AuthScope.maybeOf(context)?.user;
 
-  void _showAccount(BuildContext context) {
-    final user = _user;
-    if (user == null) return;
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(user.name.isEmpty ? 'Account' : user.name),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _AccountLine(icon: Icons.alternate_email, text: user.email),
-            if (user.employeeId.isNotEmpty)
-              _AccountLine(
-                icon: Icons.badge_outlined,
-                text: 'Employee ID ${user.employeeId}',
-              ),
-            _AccountLine(
-              icon: user.isAdmin
-                  ? Icons.workspace_premium_rounded
-                  : Icons.factory_rounded,
-              text: user.isAdmin
-                  ? 'Admin — all departments'
-                  : '${user.department} department',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('CLOSE'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  IconData _themeIcon(ThemeMode mode) => switch (mode) {
-    ThemeMode.system => Icons.brightness_auto_rounded,
-    ThemeMode.light => Icons.light_mode_rounded,
-    ThemeMode.dark => Icons.dark_mode_rounded,
-  };
-
-  String _themeTooltip(ThemeMode mode) => switch (mode) {
-    ThemeMode.system => 'Theme: follow system (tap for light)',
-    ThemeMode.light => 'Theme: light (tap for dark)',
-    ThemeMode.dark => 'Theme: dark (tap to follow system)',
-  };
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: HicomAppBar(
-        subtitle: _titles[_tabIndex],
-        actions: [
-          IconButton(
-            icon: Icon(_themeIcon(themeController.value)),
-            tooltip: _themeTooltip(themeController.value),
-            onPressed: () => themeController.cycle(),
-          ),
-          if (_user != null)
-            IconButton(
-              icon: const Icon(Icons.account_circle_rounded),
-              tooltip: 'Account',
-              onPressed: () => _showAccount(context),
-            ),
-        ],
-      ),
+      // Theme, account and sign-out come with the bar, on every page.
+      appBar: HicomAppBar(subtitle: _titles[_tabIndex]),
       body: SafeArea(
         bottom: false,
         // Deliberately NOT const: these must rebuild (and re-read AppColors)
@@ -235,27 +171,6 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 /// One line of the account dialog.
-class _AccountLine extends StatelessWidget {
-  const _AccountLine({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-          const SizedBox(width: 10),
-          Flexible(child: Text(text, style: const TextStyle(fontSize: 14.5))),
-        ],
-      ),
-    );
-  }
-}
-
 /// The home content: today's headline numbers, then the production areas to
 /// log into. Styled to the auth screens rather than the working screens —
 /// this is where you land, not where you work.

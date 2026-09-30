@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/constants.dart';
+import '../config/theme_controller.dart';
 import '../screens/auth_gate.dart';
 
 /// Branded app bar, shown on every screen: the HICOM logo on the magenta→
@@ -13,6 +14,106 @@ import '../screens/auth_gate.dart';
 /// with the logo, the wordmark block and the actions all vertically centred
 /// in it — so the bar looks identical from screen to screen instead of
 /// shifting as the subtitle comes and goes.
+/// Cycles system -> light -> dark. Listens to the controller itself, so its
+/// icon follows the switch on whichever page it was pressed.
+class _ThemeButton extends StatelessWidget {
+  const _ThemeButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: themeController,
+      builder: (context, _) {
+        final mode = themeController.value;
+        return IconButton(
+          onPressed: themeController.cycle,
+          color: Colors.white,
+          visualDensity: VisualDensity.compact,
+          icon: Icon(switch (mode) {
+            ThemeMode.system => Icons.brightness_auto_rounded,
+            ThemeMode.light => Icons.light_mode_rounded,
+            ThemeMode.dark => Icons.dark_mode_rounded,
+          }, size: 22),
+          tooltip: switch (mode) {
+            ThemeMode.system => 'Theme: follow system (tap for light)',
+            ThemeMode.light => 'Theme: light (tap for dark)',
+            ThemeMode.dark => 'Theme: dark (tap to follow system)',
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Who is signed in: name, email, employee ID, department and role.
+void showAccountDialog(BuildContext context) {
+  final user = AuthScope.maybeOf(context)?.user;
+  if (user == null) return;
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(user.name.isEmpty ? 'Account' : user.name),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccountLine(icon: Icons.alternate_email, text: user.email),
+          if (user.employeeId.isNotEmpty)
+            _AccountLine(
+              icon: Icons.badge_outlined,
+              text: 'Employee ID ${user.employeeId}',
+            ),
+          _AccountLine(
+            icon: user.isAdmin
+                ? Icons.workspace_premium_rounded
+                : Icons.factory_rounded,
+            text: user.isAdmin
+                ? 'Admin — all departments'
+                : '${user.department} department',
+          ),
+          // Worth saying out loud: it is the answer to "why can't I add a
+          // part", which is otherwise a button that silently isn't there.
+          _AccountLine(
+            icon: user.isSuperAdmin
+                ? Icons.admin_panel_settings_rounded
+                : Icons.person_outline_rounded,
+            text: user.isSuperAdmin
+                ? 'Super admin — can add parts and customers'
+                : 'Operator — logs production',
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('CLOSE'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AccountLine extends StatelessWidget {
+  const _AccountLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.textSecondary),
+          const SizedBox(width: 10),
+          Flexible(child: Text(text, style: const TextStyle(fontSize: 14.5))),
+        ],
+      ),
+    );
+  }
+}
+
 class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
   const HicomAppBar({super.key, this.subtitle, this.actions});
 
@@ -99,39 +200,59 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
                           // One line, one baseline: the two words share a
                           // baseline and a single letter-spacing rhythm so the
                           // lockup doesn't look assembled from two fonts.
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              const Text(
-                                'HICOM',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.1,
-                                  height: 1.0,
+                          //
+                          // Every page now carries theme, account and sign-out
+                          // beside a back button, and on a 360px phone that
+                          // leaves the lockup too little room for both words.
+                          // DIECASTINGS gives way first — HICOM alone is the
+                          // mark — and scaling down is only the last resort.
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final showTagline = constraints.maxWidth >= 160;
+                              return FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    const Text(
+                                      'HICOM',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.1,
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                    if (showTagline) ...[
+                                      const SizedBox(width: 7),
+                                      // Plain white, NOT the magenta→violet shader it
+                                      // used to wear. The bar itself is that gradient
+                                      // now, so shading the word in the same colours
+                                      // painted it onto its own background and made it
+                                      // disappear. White is the only thing that reads
+                                      // across the whole sweep from pink to violet.
+                                      Text(
+                                        'DIECASTINGS',
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.82,
+                                          ),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 2.2,
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 7),
-                              // Plain white, NOT the magenta→violet shader it
-                              // used to wear. The bar itself is that gradient
-                              // now, so shading the word in the same colours
-                              // painted it onto its own background and made it
-                              // disappear. White is the only thing that reads
-                              // across the whole sweep from pink to violet.
-                              Text(
-                                'DIECASTINGS',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.82),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 2.2,
-                                  height: 1.0,
-                                ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
                           if (subtitle != null) ...[
                             const SizedBox(height: 4),
@@ -160,10 +281,22 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
                           child: action,
                         ),
                       ),
-                    // Present only when the login gate is active (production) —
-                    // widget tests pump screens without an AuthScope and see no
-                    // sign-out button.
-                    if (AuthScope.maybeOf(context) != null)
+                    // The same three on every page, so theme, account and
+                    // sign-out are never more than one tap away — not only
+                    // from home. Theme is always there; account and sign-out
+                    // need a session (widget tests pump screens without one).
+                    const _ThemeButton(),
+                    if (AuthScope.maybeOf(context) != null) ...[
+                      IconButton(
+                        onPressed: () => showAccountDialog(context),
+                        icon: const Icon(
+                          Icons.account_circle_rounded,
+                          size: 22,
+                        ),
+                        color: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'Account',
+                      ),
                       IconButton(
                         onPressed: () => AuthScope.signOutFrom(context),
                         icon: const Icon(Icons.logout_rounded, size: 22),
@@ -172,6 +305,7 @@ class HicomAppBar extends StatelessWidget implements PreferredSizeWidget {
                         tooltip:
                             'Sign out (${AuthScope.maybeOf(context)!.user.name})',
                       ),
+                    ],
                     const SizedBox(width: 4),
                   ],
                 ),

@@ -1420,6 +1420,107 @@ void main() {
     expect(find.byType(CardMenuButton), findsOneWidget);
   });
 
+  group('the bar on every page', () {
+    // Through the REAL app: HicomOpsApp, a page pushed above home, and the
+    // session published the way the login gate publishes it. An earlier test
+    // wrapped a screen directly in AuthScope and passed, while in the app
+    // every pushed page sat outside the session — no sign-out, and the role
+    // gate showing an operator everything.
+    Future<void> openPartsAs(WidgetTester tester, String role) async {
+      SharedPreferences.setMockInitialValues({});
+      themeController.value = ThemeMode.system;
+      authSession.value = AuthSession(
+        user: AppUser(
+          email: 'ahmad@hidsb.com',
+          name: 'Ahmad',
+          employeeId: 'E1',
+          department: 'Machining',
+          role: role,
+          status: 'active',
+        ),
+        signOut: () {},
+      );
+      final mock = MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'parts') {
+          return http.Response(
+            '{"status":"success","data":[{"part":"2214","mo":"2214",'
+            '"lineName":"MACH-2214","lineNo":"M-2214-1","fillPercent":0}]}',
+            200,
+          );
+        }
+        return http.Response('{"status":"success","data":[]}', 200);
+      });
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      tester.state<NavigatorState>(find.byType(Navigator).first).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MachiningPartsScreen(
+            customer: 'Mazda',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    tearDown(() {
+      authSession.value = null;
+      themeController.value = ThemeMode.system;
+    });
+
+    testWidgets('a pushed page has theme, account and sign-out', (tester) async {
+      await openPartsAs(tester, 'superadmin');
+      expect(find.byIcon(Icons.logout_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.account_circle_rounded), findsOneWidget);
+      expect(find.byTooltip('Theme: follow system (tap for light)'), findsOneWidget);
+      // And the back button, since this page was pushed.
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+    });
+
+    testWidgets('an operator on a pushed page is not offered Add part', (
+      tester,
+    ) async {
+      await openPartsAs(tester, 'operator');
+      expect(find.text('2214'), findsOneWidget);
+      expect(find.text('Add part'), findsNothing);
+      expect(find.byType(CardMenuButton), findsNothing);
+    });
+
+    testWidgets('a super admin on a pushed page is', (tester) async {
+      await openPartsAs(tester, 'superadmin');
+      expect(find.text('Add part'), findsOneWidget);
+      expect(find.byType(CardMenuButton), findsOneWidget);
+    });
+
+    testWidgets('the theme can be switched from a pushed page', (tester) async {
+      await openPartsAs(tester, 'operator');
+      await tester.tap(find.byTooltip('Theme: follow system (tap for light)'));
+      await tester.pumpAndSettle();
+      expect(themeController.value, ThemeMode.light);
+      // The button on this page follows the switch it just made.
+      expect(find.byTooltip('Theme: light (tap for dark)'), findsOneWidget);
+    });
+
+    testWidgets('the account dialog says what the role allows', (tester) async {
+      await openPartsAs(tester, 'operator');
+      await tester.tap(find.byIcon(Icons.account_circle_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text('Operator — logs production'), findsOneWidget);
+    });
+
+    testWidgets('four buttons still fit a 360px phone', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await openPartsAs(tester, 'superadmin');
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+      // The mark survives; the tagline gives way.
+      expect(find.text('HICOM'), findsWidgets);
+    });
+  });
+
   group('who may change what the plant makes', () {
     AppUser user({String role = '', String email = 'ahmad@hidsb.com'}) =>
         AppUser(

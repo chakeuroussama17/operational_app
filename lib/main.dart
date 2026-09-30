@@ -44,11 +44,32 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  void _onThemeChanged() => setState(() {});
+  void _onThemeChanged() {
+    setState(() {});
+    _repaintEveryPage();
+  }
 
   // Fired when the device switches light/dark while mode == system.
   @override
-  void didChangePlatformBrightness() => setState(() {});
+  void didChangePlatformBrightness() {
+    setState(() {});
+    _repaintEveryPage();
+  }
+
+  /// The theme toggle is on every page now, so a switch has to reach every
+  /// page — including ones pushed above home, which a MaterialApp rebuild
+  /// does not rebuild. Much of the app paints from AppColors getters rather
+  /// than Theme.of, so nothing would tell those widgets the colours changed.
+  /// Marking the whole tree dirty once per switch is the blunt, reliable
+  /// answer; a theme switch is rare enough that the cost is irrelevant.
+  void _repaintEveryPage() {
+    void mark(Element element) {
+      element.markNeedsBuild();
+      element.visitChildren(mark);
+    }
+
+    (context as Element).visitChildren(mark);
+  }
 
   Brightness _effectiveBrightness(ThemeMode mode) {
     return switch (mode) {
@@ -77,6 +98,18 @@ class _HicomOpsAppState extends State<HicomOpsApp> with WidgetsBindingObserver {
       // would be canonicalised and skipped.
       // ignore: prefer_const_constructors
       home: widget.requireLogin ? AuthGate() : HomeScreen(),
+      // Above the Navigator, so every page — not just the first — can find
+      // who is signed in. See [AuthSession].
+      builder: (context, child) => ValueListenableBuilder<AuthSession?>(
+        valueListenable: authSession,
+        builder: (context, session, _) => session == null
+            ? child!
+            : AuthScope(
+                user: session.user,
+                signOut: session.signOut,
+                child: child!,
+              ),
+      ),
     );
   }
 

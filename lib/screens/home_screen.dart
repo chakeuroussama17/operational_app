@@ -266,17 +266,26 @@ class _LogTabState extends State<_LogTab> {
 
   @override
   Widget build(BuildContext context) {
-
     // The wash is painted once, behind the whole IndexedStack.
     return RefreshIndicator(
       color: AppColors.authPink,
       backgroundColor: AppColors.surface,
       onRefresh: _loadKpis,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+        // The nav bar floats over the page (extendBody), so the list must end
+        // above it — otherwise the last tile can never scroll fully into
+        // view. The scaffold reports the bar's height as bottom padding.
+        padding: EdgeInsets.fromLTRB(
+          20,
+          0,
+          20,
+          20 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           Center(
             child: HomeHeroBadge(
+              // Smaller on a phone so the module tile shows without scrolling.
+              size: MediaQuery.sizeOf(context).height < 760 ? 100 : 132,
               icon: _icons[widget.modules.first] ?? Icons.factory_rounded,
               // Everyone gets the artwork — it's the company's own plant,
               // not a per-department badge, and a machining supervisor
@@ -310,13 +319,13 @@ class _LogTabState extends State<_LogTab> {
               ),
             ),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 16),
           TodayScoreboard(
             modules: widget.modules,
             series: _series,
             loading: _loading,
           ),
-          const SizedBox(height: 26),
+          const SizedBox(height: 20),
           Text(
             'Select production area',
             style: TextStyle(

@@ -19,6 +19,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hicom_ops/models/shift_progress.dart';
 import 'package:hicom_ops/widgets/checkpoint_timeline.dart';
+import 'package:hicom_ops/widgets/home_widgets.dart';
 import 'package:hicom_ops/widgets/module_shell.dart';
 
 const _day = [
@@ -548,6 +549,23 @@ void main() {
       await tester.pumpWidget(const HicomOpsApp());
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+    });
+
+    testWidgets('the last module tile scrolls clear of the nav bar', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(const HicomOpsApp());
+      await tester.pumpAndSettle();
+      final tiles = find.byType(HomeModuleTile);
+      expect(tiles, findsWidgets);
+      await tester.drag(find.byType(ListView).first, const Offset(0, -2000));
+      await tester.pumpAndSettle();
+      final tileBottom = tester.getRect(tiles.last).bottom;
+      final barTop = tester.getRect(find.byType(NavigationBar)).top;
+      expect(tileBottom, lessThanOrEqualTo(barTop));
     });
 
     testWidgets('a parts list with pace cards fits too', (tester) async {

@@ -42,7 +42,10 @@ Future<void> _fillPartNumbers(
   String report = '07',
 }) async {
   await tester.enterText(find.widgetWithText(TextField, 'MO number'), mo);
-  await tester.enterText(find.widgetWithText(TextField, 'Report number'), report);
+  await tester.enterText(
+    find.widgetWithText(TextField, 'Report number'),
+    report,
+  );
   await tester.pumpAndSettle();
 }
 
@@ -367,127 +370,157 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('machining entry: saved hours lock, rejections stay visible', (
-    tester,
-  ) async {
-    // A stateful stand-in for the backend: Plan 300 and 8 AM = 150 are saved,
-    // with 5 POROSITY logged against that hour. Posted lines are merged by
-    // (hour, type) the way the real reconcile does.
-    var storedRejections = <dynamic>[
-      {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '12PM'},
-    ];
-    final mock = MockClient((request) async {
-      if (request.method == 'POST') {
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        final data = body['data'] as Map<String, dynamic>;
-        if (data['Rejections'] != null) {
-          for (final raw
-              in jsonDecode(data['Rejections'] as String) as List<dynamic>) {
-            final entry = raw as Map<String, dynamic>;
-            final match = storedRejections.cast<Map<String, dynamic>>().where(
-              (r) => r['slot'] == entry['slot'] && r['type'] == entry['type'],
-            );
-            if (match.isEmpty) {
-              storedRejections.add(entry);
-            } else {
-              match.first['qty'] = entry['qty'];
+  testWidgets(
+    'machining entry: saved values stay editable, rejections visible',
+    (tester) async {
+      // A stateful stand-in for the backend: Plan 300 and 8 AM = 150 are saved,
+      // with 5 POROSITY logged against that hour. Posted lines are merged by
+      // (hour, type) the way the real reconcile does.
+      var storedRejections = <dynamic>[
+        {'code': '064', 'type': 'POROSITY', 'qty': '5', 'slot': '12PM'},
+      ];
+      Map<String, dynamic>? posted;
+      final mock = MockClient((request) async {
+        if (request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final data = body['data'] as Map<String, dynamic>;
+          posted = data;
+          if (data['Rejections'] != null) {
+            for (final raw
+                in jsonDecode(data['Rejections'] as String) as List<dynamic>) {
+              final entry = raw as Map<String, dynamic>;
+              final match = storedRejections.cast<Map<String, dynamic>>().where(
+                (r) => r['slot'] == entry['slot'] && r['type'] == entry['type'],
+              );
+              if (match.isEmpty) {
+                storedRejections.add(entry);
+              } else {
+                match.first['qty'] = entry['qty'];
+              }
             }
           }
+          return http.Response('{"status":"success"}', 200);
         }
-        return http.Response('{"status":"success"}', 200);
-      }
-      if (request.url.queryParameters['action'] == 'rejectiontypes') {
+        if (request.url.queryParameters['action'] == 'rejectiontypes') {
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': [
+                {'code': '064', 'type': 'POROSITY'},
+                {'code': '037', 'type': 'FLASHES'},
+              ],
+            }),
+            200,
+          );
+        }
         return http.Response(
           jsonEncode({
             'status': 'success',
-            'data': [
-              {'code': '064', 'type': 'POROSITY'},
-              {'code': '037', 'type': 'FLASHES'},
-            ],
+            'data': {
+              'Customer': 'Mazda',
+              'PartNo': '2244',
+              'Operation': 'machining',
+              'Plan': 400,
+              'Actual_12PM': 150,
+              'LOR_12PM': 0.375,
+              'LogMeta': '{"12PM":{"by":"Ahmad Ali","at":"08:07"}}',
+              'Rejections': storedRejections,
+            },
           }),
           200,
         );
-      }
-      return http.Response(
-        jsonEncode({
-          'status': 'success',
-          'data': {
-            'Customer': 'Mazda',
-            'PartNo': '2244',
-            'Operation': 'machining',
-            'Plan': 400,
-            'Actual_12PM': 150,
-            'LOR_12PM': 0.375,
-            'LogMeta': '{"12PM":{"by":"Ahmad Ali","at":"08:07"}}',
-            'Rejections': storedRejections,
-          },
-        }),
-        200,
-      );
-    });
+      });
 
-    SheetsService.clearMasterCaches();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MachiningEntryScreen(
-          customer: 'Mazda',
-          part: '2244',
-          operation: machiningOperation,
-          shift: 'Day',
-          service: SheetsService(client: mock),
+      SheetsService.clearMasterCaches();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningEntryScreen(
+            customer: 'Mazda',
+            part: '2244',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    // Plan and the saved hour are both read-only boxes, and the hour carries
-    // who logged it. The saved defect sits under its own hour.
-    expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
-    expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
-    // Plan and the saved hour's actual are locked boxes, not fields. Each hour
-    // contributes a downtime box too, and this row already has one locked save.
-    expect(find.byType(TextFormField), findsNWidgets(9));
-    // LOR is cumulative over Plan: 150 of 400.
-    expect(find.text('37.5%'), findsOneWidget);
-    // Actual counts everything made, so good = 150 - 5.
-    expect(find.text('150 / 400'), findsOneWidget);
-    expect(find.text('145'), findsOneWidget, reason: 'good parts');
+      // The saved hour carries who logged it, and the saved defect sits under
+      // its own hour.
+      expect(find.text('Added by Ahmad Ali at 08:07'), findsOneWidget);
+      expect(find.text('064 · POROSITY'), findsNWidgets(2)); // hour + summary
+      // Nothing is read-only: Plan, every hour's actual, defect and downtime
+      // boxes, plus the saved defect's qty, are all fields.
+      expect(find.byType(TextFormField), findsNWidgets(11));
+      expect(find.byIcon(Icons.lock_outline), findsNothing);
+      // LOR is cumulative over Plan: 150 of 400.
+      expect(find.text('37.5%'), findsOneWidget);
+      // Actual counts everything made, so good = 150 - 5.
+      expect(find.text('150 / 400'), findsOneWidget);
+      expect(find.text('145'), findsOneWidget, reason: 'good parts');
 
-    // Correcting the saved 5 down to 3 must NOT move the actual figure —
-    // actual is everything the hour made, and a defect correction only
-    // changes how that total splits between good and scrap.
-    await tester.enterText(find.byType(TextFormField).at(0), '3');
-    await tester.pumpAndSettle();
-    expect(
-      find.text('150 / 400'),
-      findsOneWidget,
-      reason: 'the hour produced 150 either way',
-    );
-    expect(find.text('37.5%'), findsOneWidget, reason: 'LOR follows actual');
-    expect(find.text('147'), findsOneWidget, reason: 'good parts: 150 - 3');
-    // The qty box, the summary's own line, and the rejected-parts total.
-    expect(find.text('3'), findsNWidgets(3));
+      // Correcting the saved 5 down to 3 must NOT move the actual figure —
+      // actual is everything the hour made, and a defect correction only
+      // changes how that total splits between good and scrap.
+      await tester.enterText(find.widgetWithText(TextFormField, '5'), '3');
+      await tester.pumpAndSettle();
+      expect(
+        find.text('150 / 400'),
+        findsOneWidget,
+        reason: 'the hour produced 150 either way',
+      );
+      expect(find.text('37.5%'), findsOneWidget, reason: 'LOR follows actual');
+      expect(find.text('147'), findsOneWidget, reason: 'good parts: 150 - 3');
+      // The qty box, the summary's own line, and the rejected-parts total.
+      expect(find.text('3'), findsNWidgets(3));
 
-    await tester.dragUntilVisible(
-      find.byType(SubmitButton),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -300),
-    );
-    await tester.tap(find.byType(SubmitButton));
-    await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(SubmitButton),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -300),
+      );
+      await tester.tap(find.byType(SubmitButton));
+      await tester.pumpAndSettle();
 
-    // The correction posted with its hour attached.
-    expect(find.text('064 · POROSITY'), findsNWidgets(2));
-    expect(
-      (storedRejections.first as Map)['qty'],
-      '3',
-      reason: 'the corrected quantity reached the sheet',
-    );
-    expect((storedRejections.first as Map)['slot'], '12PM');
+      // The correction posted with its hour attached.
+      expect(find.text('064 · POROSITY'), findsNWidgets(2));
+      expect(
+        (storedRejections.first as Map)['qty'],
+        '3',
+        reason: 'the corrected quantity reached the sheet',
+      );
+      expect((storedRejections.first as Map)['slot'], '12PM');
 
-    await tester.pump(const Duration(seconds: 7));
-    await tester.pumpAndSettle();
-  });
+      // The saved Plan and the saved hour can both be corrected, and emptying
+      // a saved value sends the blank so the sheet clears it.
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.widgetWithText(TextFormField, '400'),
+        find.byType(SingleChildScrollView),
+        const Offset(0, 300),
+      );
+      await tester.enterText(find.widgetWithText(TextFormField, '400'), '350');
+      await tester.enterText(find.widgetWithText(TextFormField, '150'), '');
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(SubmitButton),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -300),
+      );
+      await tester.tap(find.byType(SubmitButton));
+      await tester.pumpAndSettle();
+      expect(posted!['Plan'], '350');
+      expect(
+        posted!['Actual_12PM'],
+        '',
+        reason: 'a cleared hour is sent blank',
+      );
+
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets('machining entry: an untouched saved defect is not re-posted', (
     tester,
@@ -540,10 +573,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Log a fresh 4 PM actual without touching the saved defect. The saved
-    // 12 PM row has its own qty field, then the new defect controls, then the
-    // hour-level actual field for 4 PM.
-    await tester.enterText(find.byType(TextFormField).at(3), '120');
+    // Log a fresh 4 PM actual without touching the saved defect. Fields run
+    // Plan, then 12 PM's actual, saved qty, new defect qty and downtime, then
+    // the 4 PM actual.
+    await tester.enterText(find.byType(TextFormField).at(5), '120');
     await tester.pumpAndSettle();
 
     await tester.dragUntilVisible(
@@ -618,18 +651,18 @@ void main() {
       final codes = partCodesForOperation(master, machiningOperation);
       // 9999 is the unclassifiable one, covered below — every other part is
       // in exactly one list.
-      expect(
-        codes.map((c) => c.code).where((c) => c != '9999'),
-        ['2244', '2266'],
-      );
+      expect(codes.map((c) => c.code).where((c) => c != '9999'), [
+        '2244',
+        '2266',
+      ]);
     });
 
     test('assembly takes the ASSY names', () {
       final codes = partCodesForOperation(master, assemblyOperation);
-      expect(
-        codes.map((c) => c.code).where((c) => c != '9999'),
-        ['2215', '2230'],
-      );
+      expect(codes.map((c) => c.code).where((c) => c != '9999'), [
+        '2215',
+        '2230',
+      ]);
     });
 
     test('a part with nothing to classify it is offered under BOTH', () {
@@ -659,66 +692,69 @@ void main() {
     });
   });
 
-  testWidgets('part picker: MO and Report are both required, and reported together', (
-    tester,
-  ) async {
-    PartWithMoInput? result;
-    var returned = false;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () async {
-                result = await promptPartCode(
-                  context,
-                  title: 'Add Part',
-                  moduleLabel: 'Casting',
-                  codes: const [PartCode(code: '1145', barcode: '', name: '')],
-                );
-                returned = true;
-              },
-              child: const Text('open'),
+  testWidgets(
+    'part picker: MO and Report are both required, and reported together',
+    (tester) async {
+      PartWithMoInput? result;
+      var returned = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  result = await promptPartCode(
+                    context,
+                    title: 'Add Part',
+                    moduleLabel: 'Casting',
+                    codes: const [
+                      PartCode(code: '1145', barcode: '', name: ''),
+                    ],
+                  );
+                  returned = true;
+                },
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
 
-    // Neither label says optional any more.
-    expect(find.text('MO number'), findsOneWidget);
-    expect(find.text('Report number'), findsOneWidget);
-    expect(find.textContaining('optional'), findsNothing);
+      // Neither label says optional any more.
+      expect(find.text('MO number'), findsOneWidget);
+      expect(find.text('Report number'), findsOneWidget);
+      expect(find.textContaining('optional'), findsNothing);
 
-    await tester.tap(find.text('Choose part code'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('1145').last);
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose part code'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1145').last);
+      await tester.pumpAndSettle();
 
-    // Both missing: both reported at once, rather than one per attempt.
-    await tester.tap(find.text('SAVE 1145'));
-    await tester.pumpAndSettle();
-    expect(returned, isFalse);
-    expect(find.text('Enter the MO number'), findsOneWidget);
-    expect(find.text('Enter the Report number'), findsOneWidget);
+      // Both missing: both reported at once, rather than one per attempt.
+      await tester.tap(find.text('SAVE 1145'));
+      await tester.pumpAndSettle();
+      expect(returned, isFalse);
+      expect(find.text('Enter the MO number'), findsOneWidget);
+      expect(find.text('Enter the Report number'), findsOneWidget);
 
-    // Whitespace is not a number.
-    await _fillPartNumbers(tester, mo: '   ', report: '07');
-    await tester.tap(find.text('SAVE 1145'));
-    await tester.pumpAndSettle();
-    expect(returned, isFalse);
-    expect(find.text('Enter the MO number'), findsOneWidget);
-    expect(find.text('Enter the Report number'), findsNothing);
+      // Whitespace is not a number.
+      await _fillPartNumbers(tester, mo: '   ', report: '07');
+      await tester.tap(find.text('SAVE 1145'));
+      await tester.pumpAndSettle();
+      expect(returned, isFalse);
+      expect(find.text('Enter the MO number'), findsOneWidget);
+      expect(find.text('Enter the Report number'), findsNothing);
 
-    await _fillPartNumbers(tester, mo: ' MO-2214 ', report: ' 07 ');
-    await tester.tap(find.text('SAVE 1145'));
-    await tester.pumpAndSettle();
-    expect(result?.mo, 'MO-2214');
-    // Kept as typed — a leading zero is part of the number, not padding.
-    expect(result?.report, '07');
-  });
+      await _fillPartNumbers(tester, mo: ' MO-2214 ', report: ' 07 ');
+      await tester.tap(find.text('SAVE 1145'));
+      await tester.pumpAndSettle();
+      expect(result?.mo, 'MO-2214');
+      // Kept as typed — a leading zero is part of the number, not padding.
+      expect(result?.report, '07');
+    },
+  );
 
   testWidgets('part picker: editing a part prefills its MO and Report', (
     tester,
@@ -758,54 +794,59 @@ void main() {
     expect(result?.report, '07');
   });
 
-  testWidgets('part picker: fits a phone with the keyboard up, Save still reachable', (
-    tester,
-  ) async {
-    // 360x640 with a 300px keyboard: what is left while typing a Report number.
-    // Five fields and their error lines do not fit that, and before the
-    // dialog scrolled the bottom of it — Save included — was simply cut off.
-    tester.view.physicalSize = const Size(360, 640);
-    tester.view.devicePixelRatio = 1.0;
-    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'part picker: fits a phone with the keyboard up, Save still reachable',
+    (tester) async {
+      // 360x640 with a 300px keyboard: what is left while typing a Report number.
+      // Five fields and their error lines do not fit that, and before the
+      // dialog scrolled the bottom of it — Save included — was simply cut off.
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.reset);
 
-    PartWithMoInput? result;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () async {
-                result = await promptPartCode(
-                  context,
-                  title: 'Edit Part',
-                  moduleLabel: 'Machining',
-                  pickLine: true,
-                  codes: const [
-                    PartCode(code: '2214', barcode: '2214-M', name: '2214-MACH'),
-                  ],
-                  initialCode: '2214',
-                  initialLine: productionLines.first.label,
-                  initialMo: 'MO-2214',
-                  initialReport: '07',
-                );
-              },
-              child: const Text('open'),
+      PartWithMoInput? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  result = await promptPartCode(
+                    context,
+                    title: 'Edit Part',
+                    moduleLabel: 'Machining',
+                    pickLine: true,
+                    codes: const [
+                      PartCode(
+                        code: '2214',
+                        barcode: '2214-M',
+                        name: '2214-MACH',
+                      ),
+                    ],
+                    initialCode: '2214',
+                    initialLine: productionLines.first.label,
+                    initialMo: 'MO-2214',
+                    initialReport: '07',
+                  );
+                },
+                child: const Text('open'),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull, reason: 'nothing overflowed');
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'nothing overflowed');
 
-    await tester.ensureVisible(find.text('SAVE 2214'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('SAVE 2214'));
-    await tester.pumpAndSettle();
-    expect(result?.report, '07');
-  });
+      await tester.ensureVisible(find.text('SAVE 2214'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SAVE 2214'));
+      await tester.pumpAndSettle();
+      expect(result?.report, '07');
+    },
+  );
 
   testWidgets('part picker: machining asks which line, and will not skip it', (
     tester,
@@ -1075,7 +1116,14 @@ void main() {
       expect(castingMachines.first, 'DCM08');
       expect(castingMachines.last, 'WELD');
       // Machines that do not exist must never be offered.
-      for (final missing in ['DCM09', 'DCM10', 'DCM13', 'DCM14', 'DCM16', 'DCM22']) {
+      for (final missing in [
+        'DCM09',
+        'DCM10',
+        'DCM13',
+        'DCM14',
+        'DCM16',
+        'DCM22',
+      ]) {
         expect(castingMachines, isNot(contains(missing)));
       }
       expect(castingMachines.toSet(), hasLength(castingMachines.length));
@@ -1132,7 +1180,10 @@ void main() {
       }
       // Full names, not truncations of longer ones.
       expect(secondaryStations, containsAll(['SHOTB-BT', 'SHOTB-GR']));
-      expect(secondaryStations, containsAll(['CURING', 'FETTLING', 'TUMBLING']));
+      expect(
+        secondaryStations,
+        containsAll(['CURING', 'FETTLING', 'TUMBLING']),
+      );
       // The old seeded placeholders are not real stations.
       expect(secondaryStations, isNot(contains('ST1')));
     });
@@ -1205,25 +1256,38 @@ void main() {
 
   group('sheet tables', () {
     test('a department only sees its own tabs', () {
-      expect(
-        rawTabsFor(['casting']).map((t) => t.name),
-        ['Casting_Day', 'Casting_Night'],
-      );
-      expect(
-        rawTabsFor(['machining']).map((t) => t.name),
-        ['Machining_Day', 'Machining_Night', 'Machining_Rejections'],
-      );
+      expect(rawTabsFor(['casting']).map((t) => t.name), [
+        'Casting_Day',
+        'Casting_Night',
+      ]);
+      expect(rawTabsFor(['machining']).map((t) => t.name), [
+        'Machining_Day',
+        'Machining_Night',
+        'Machining_Rejections',
+      ]);
       // Admin (every department) and widget tests (empty) get all of them.
       expect(rawTabsFor(const []).length, 7);
       expect(rawTabsFor(['casting', 'secondary', 'machining']).length, 7);
     });
 
     test('a capped table says so, an uncapped one does not', () {
-      const short = RawTable(tab: 'Casting_Day', cols: ['Date'],
-          rows: [['2026-08-17']], total: 1);
+      const short = RawTable(
+        tab: 'Casting_Day',
+        cols: ['Date'],
+        rows: [
+          ['2026-08-17'],
+        ],
+        total: 1,
+      );
       expect(short.isCapped, isFalse);
-      const capped = RawTable(tab: 'Machining_Day', cols: ['Date'],
-          rows: [['2026-08-17']], total: 4812);
+      const capped = RawTable(
+        tab: 'Machining_Day',
+        cols: ['Date'],
+        rows: [
+          ['2026-08-17'],
+        ],
+        total: 4812,
+      );
       expect(capped.isCapped, isTrue);
     });
 
@@ -1281,7 +1345,9 @@ void main() {
   group('sheet download', () {
     test('today is one day; month runs 1st to last, February included', () {
       final t = DateWindow.forRange(
-          ExportRange.today, DateTime(2026, 8, 17, 14, 30));
+        ExportRange.today,
+        DateTime(2026, 8, 17, 14, 30),
+      );
       expect(t.isSingleDay, isTrue);
       expect(t.label, '2026-08-17');
 
@@ -1355,19 +1421,28 @@ void main() {
     });
 
     test('a short row is padded, never truncating the header', () {
-      final csv = toCsv(['A', 'B', 'C'], [['1']]);
+      final csv = toCsv(
+        ['A', 'B', 'C'],
+        [
+          ['1'],
+        ],
+      );
       expect(csv.trim().split('\n')[1], '1,,');
     });
 
     test('the file is named for the tab and the window', () {
       expect(
-        exportFileName('Machining_Day',
-            DateWindow(DateTime(2026, 8, 17), DateTime(2026, 8, 17))),
+        exportFileName(
+          'Machining_Day',
+          DateWindow(DateTime(2026, 8, 17), DateTime(2026, 8, 17)),
+        ),
         'Machining_Day_2026-08-17.csv',
       );
       expect(
-        exportFileName('Casting_Night',
-            DateWindow(DateTime(2026, 8, 1), DateTime(2026, 8, 31))),
+        exportFileName(
+          'Casting_Night',
+          DateWindow(DateTime(2026, 8, 1), DateTime(2026, 8, 31)),
+        ),
         'Casting_Night_2026-08-01_to_2026-08-31.csv',
       );
     });
@@ -1456,16 +1531,18 @@ void main() {
       });
       await tester.pumpWidget(const HicomOpsApp());
       await tester.pumpAndSettle();
-      tester.state<NavigatorState>(find.byType(Navigator).first).push(
-        MaterialPageRoute<void>(
-          builder: (_) => MachiningPartsScreen(
-            customer: 'Mazda',
-            operation: machiningOperation,
-            shift: 'Day',
-            service: SheetsService(client: mock),
-          ),
-        ),
-      );
+      tester
+          .state<NavigatorState>(find.byType(Navigator).first)
+          .push(
+            MaterialPageRoute<void>(
+              builder: (_) => MachiningPartsScreen(
+                customer: 'Mazda',
+                operation: machiningOperation,
+                shift: 'Day',
+                service: SheetsService(client: mock),
+              ),
+            ),
+          );
       await tester.pumpAndSettle();
     }
 
@@ -1474,11 +1551,16 @@ void main() {
       themeController.value = ThemeMode.system;
     });
 
-    testWidgets('a pushed page has theme, account and sign-out', (tester) async {
+    testWidgets('a pushed page has theme, account and sign-out', (
+      tester,
+    ) async {
       await openPartsAs(tester, 'superadmin');
       expect(find.byIcon(Icons.logout_rounded), findsOneWidget);
       expect(find.byIcon(Icons.account_circle_rounded), findsOneWidget);
-      expect(find.byTooltip('Theme: follow system (tap for light)'), findsOneWidget);
+      expect(
+        find.byTooltip('Theme: follow system (tap for light)'),
+        findsOneWidget,
+      );
       // And the back button, since this page was pushed.
       expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
     });
@@ -1550,7 +1632,12 @@ void main() {
     });
 
     test('the role is read however it was typed into the sheet', () {
-      for (final spelling in ['superadmin', 'SuperAdmin', 'SUPERADMIN', '  superadmin  ']) {
+      for (final spelling in [
+        'superadmin',
+        'SuperAdmin',
+        'SUPERADMIN',
+        '  superadmin  ',
+      ]) {
         expect(
           user(role: spelling).isSuperAdmin,
           isTrue,
@@ -1616,10 +1703,11 @@ void main() {
     });
 
     test('Line 1 to 3 are kept, at the top of the list', () {
-      expect(
-        productionLines.take(3).map((l) => l.label),
-        ['Line 1 001', 'Line 2 002', 'Line 3 003'],
-      );
+      expect(productionLines.take(3).map((l) => l.label), [
+        'Line 1 001',
+        'Line 2 002',
+        'Line 3 003',
+      ]);
     });
 
     test('every line in the roster is distinct', () {
@@ -1652,10 +1740,10 @@ void main() {
       // the row stops saying which line it meant.
       expect(splitLineLabel('Mazak 99'), (name: 'Mazak', number: '99'));
       // Multi-word names keep the number as the last token.
-      expect(
-        splitLineLabel('Brother Speedio S700'),
-        (name: 'Brother Speedio', number: 'S700'),
-      );
+      expect(splitLineLabel('Brother Speedio S700'), (
+        name: 'Brother Speedio',
+        number: 'S700',
+      ));
       // No number at all: it is all name.
       expect(splitLineLabel('Lathe'), (name: 'Lathe', number: ''));
     });
@@ -1726,10 +1814,7 @@ void main() {
       }
       // Case is how someone typed it, not part of the identity.
       expect(
-        downtimeReasonFromCell(
-          '012 · tea break',
-          bundledDowntimeReasons,
-        )?.name,
+        downtimeReasonFromCell('012 · tea break', bundledDowntimeReasons)?.name,
         'TEA BREAK',
       );
       // Hand-typed in the sheet as just the code.
@@ -1775,12 +1860,23 @@ void main() {
 
   group('four-hour checkpoints', () {
     test('each shift logs three times, at the agreed clock times', () {
-      expect(machiningDaySlots.map((s) => s.label), ['12 PM', '4 PM', '7:30 PM']);
-      expect(machiningNightSlots.map((s) => s.label), ['12 AM', '4 AM', '7:30 AM']);
+      expect(machiningDaySlots.map((s) => s.label), [
+        '12 PM',
+        '4 PM',
+        '7:30 PM',
+      ]);
+      expect(machiningNightSlots.map((s) => s.label), [
+        '12 AM',
+        '4 AM',
+        '7:30 AM',
+      ]);
       // Casting and Secondary run the identical schedule.
       expect(castingDaySlots.length, 3);
-      expect(secondaryNightSlots.map((s) => s.label),
-          ['12 AM', '4 AM', '7:30 AM']);
+      expect(secondaryNightSlots.map((s) => s.label), [
+        '12 AM',
+        '4 AM',
+        '7:30 AM',
+      ]);
     });
 
     test('the 7:30 slot key avoids a colon, which Sheets reads as a time', () {
@@ -1802,11 +1898,11 @@ void main() {
       // autoDetect reads the wall clock, so assert the boundary rule it
       // encodes rather than the clock itself.
       bool isDay(int hour) => hour >= 10 && hour < 22;
-      expect(isDay(9), isFalse);   // before the day shift starts
-      expect(isDay(10), isTrue);   // day shift opens
-      expect(isDay(21), isTrue);   // still day at 21:59
-      expect(isDay(22), isFalse);  // night takes over
-      expect(isDay(3), isFalse);   // overnight
+      expect(isDay(9), isFalse); // before the day shift starts
+      expect(isDay(10), isTrue); // day shift opens
+      expect(isDay(21), isTrue); // still day at 21:59
+      expect(isDay(22), isFalse); // night takes over
+      expect(isDay(3), isFalse); // overnight
     });
   });
 
@@ -1885,235 +1981,241 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('machining entry: the reasons come from the sheet, and only those', (
-    tester,
-  ) async {
-    Map<String, dynamic>? posted;
-    var reasonRequests = 0;
-    final mock = MockClient((request) async {
-      final action = request.url.queryParameters['action'];
-      if (request.method == 'POST') {
-        posted =
-            (jsonDecode(request.body) as Map<String, dynamic>)['data']
-                as Map<String, dynamic>;
-        return http.Response('{"status":"success"}', 200);
-      }
-      if (action == 'downtimereasons') {
-        reasonRequests++;
-        // A super admin has trimmed the list and added one of their own.
-        return http.Response(
-          jsonEncode({
-            'status': 'success',
-            'data': [
-              {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
-              {'code': '016', 'name': 'CRANE FAILURE'},
-            ],
-          }),
-          200,
-        );
-      }
-      if (action == 'rejectiontypes') {
-        return http.Response('{"status":"success","data":[]}', 200);
-      }
-      return http.Response('{"status":"success","data":null}', 200);
-    });
+  testWidgets(
+    'machining entry: the reasons come from the sheet, and only those',
+    (tester) async {
+      Map<String, dynamic>? posted;
+      var reasonRequests = 0;
+      final mock = MockClient((request) async {
+        final action = request.url.queryParameters['action'];
+        if (request.method == 'POST') {
+          posted =
+              (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                  as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }
+        if (action == 'downtimereasons') {
+          reasonRequests++;
+          // A super admin has trimmed the list and added one of their own.
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': [
+                {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
+                {'code': '016', 'name': 'CRANE FAILURE'},
+              ],
+            }),
+            200,
+          );
+        }
+        if (action == 'rejectiontypes') {
+          return http.Response('{"status":"success","data":[]}', 200);
+        }
+        return http.Response('{"status":"success","data":null}', 200);
+      });
 
-    SheetsService.clearMasterCaches();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MachiningEntryScreen(
-          customer: 'Mazda',
-          part: '2244',
-          operation: machiningOperation,
-          shift: 'Day',
-          service: SheetsService(client: mock),
+      SheetsService.clearMasterCaches();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningEntryScreen(
+            customer: 'Mazda',
+            part: '2244',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(reasonRequests, 1, reason: 'asked the sheet when the part opened');
+      );
+      await tester.pumpAndSettle();
+      expect(reasonRequests, 1, reason: 'asked the sheet when the part opened');
 
-    await tester.enterText(find.byType(TextFormField).at(3), '40'); // 12PM min
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.byType(DropdownButtonFormField<String>),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -120),
-    );
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextFormField).at(3),
+        '40',
+      ); // 12PM min
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(DropdownButtonFormField<String>),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -120),
+      );
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
 
-    // What the sheet lists is offered — including the one added there...
-    expect(find.text('CRANE FAILURE'), findsWidgets);
-    expect(find.text('MACHINING MAINTENANCE DOWNTIME'), findsWidgets);
-    // ...and nothing else. TEA BREAK is in the app's bundled copy but not on
-    // this sheet, so it is not a choice.
-    expect(find.text('TEA BREAK'), findsNothing);
+      // What the sheet lists is offered — including the one added there...
+      expect(find.text('CRANE FAILURE'), findsWidgets);
+      expect(find.text('MACHINING MAINTENANCE DOWNTIME'), findsWidgets);
+      // ...and nothing else. TEA BREAK is in the app's bundled copy but not on
+      // this sheet, so it is not a choice.
+      expect(find.text('TEA BREAK'), findsNothing);
 
-    // No escape hatch: no "Other", and no box to type a cause into.
-    expect(find.textContaining('Other'), findsNothing);
-    expect(find.text('What happened?'), findsNothing);
+      // No escape hatch: no "Other", and no box to type a cause into.
+      expect(find.textContaining('Other'), findsNothing);
+      expect(find.text('What happened?'), findsNothing);
 
-    await tester.tap(find.text('CRANE FAILURE').last);
-    await tester.pumpAndSettle();
-    expect(find.text('What happened?'), findsNothing);
+      await tester.tap(find.text('CRANE FAILURE').last);
+      await tester.pumpAndSettle();
+      expect(find.text('What happened?'), findsNothing);
 
-    await tester.dragUntilVisible(
-      find.byType(SubmitButton),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -300),
-    );
-    await tester.tap(find.byType(SubmitButton));
-    await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(SubmitButton),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -300),
+      );
+      await tester.tap(find.byType(SubmitButton));
+      await tester.pumpAndSettle();
 
-    // A reason nobody in the app could have known about is what got saved.
-    expect(posted!['DowntimeReason_12PM'], '016 · CRANE FAILURE');
+      // A reason nobody in the app could have known about is what got saved.
+      expect(posted!['DowntimeReason_12PM'], '016 · CRANE FAILURE');
 
-    await tester.pump(const Duration(seconds: 7));
-    await tester.pumpAndSettle();
-  });
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+    },
+  );
 
-  testWidgets('machining entry: a saved reason that is off the list is shown, and replaceable', (
-    tester,
-  ) async {
-    Map<String, dynamic>? posted;
-    final mock = MockClient((request) async {
-      final action = request.url.queryParameters['action'];
-      if (request.method == 'POST') {
-        posted =
-            (jsonDecode(request.body) as Map<String, dynamic>)['data']
-                as Map<String, dynamic>;
-        return http.Response('{"status":"success"}', 200);
-      }
-      if (action == 'downtimereasons') {
-        return http.Response(
-          jsonEncode({
-            'status': 'success',
-            'data': [
-              {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
-              {'code': '012', 'name': 'TEA BREAK'},
-            ],
-          }),
-          200,
-        );
-      }
-      if (action == 'row') {
-        // Logged back when the reason was a free-text box.
-        return http.Response(
-          jsonEncode({
-            'status': 'success',
-            'data': {
-              'Plan': '',
-              'Downtime_12PM': '30',
-              'DowntimeReason_12PM': 'Crane operator off sick',
-            },
-          }),
-          200,
-        );
-      }
-      if (action == 'rejectiontypes') {
-        return http.Response('{"status":"success","data":[]}', 200);
-      }
-      return http.Response('{"status":"success","data":null}', 200);
-    });
+  testWidgets(
+    'machining entry: a saved reason that is off the list is shown, and replaceable',
+    (tester) async {
+      Map<String, dynamic>? posted;
+      final mock = MockClient((request) async {
+        final action = request.url.queryParameters['action'];
+        if (request.method == 'POST') {
+          posted =
+              (jsonDecode(request.body) as Map<String, dynamic>)['data']
+                  as Map<String, dynamic>;
+          return http.Response('{"status":"success"}', 200);
+        }
+        if (action == 'downtimereasons') {
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': [
+                {'code': '008', 'name': 'MACHINING MAINTENANCE DOWNTIME'},
+                {'code': '012', 'name': 'TEA BREAK'},
+              ],
+            }),
+            200,
+          );
+        }
+        if (action == 'row') {
+          // Logged back when the reason was a free-text box.
+          return http.Response(
+            jsonEncode({
+              'status': 'success',
+              'data': {
+                'Plan': '',
+                'Downtime_12PM': '30',
+                'DowntimeReason_12PM': 'Crane operator off sick',
+              },
+            }),
+            200,
+          );
+        }
+        if (action == 'rejectiontypes') {
+          return http.Response('{"status":"success","data":[]}', 200);
+        }
+        return http.Response('{"status":"success","data":null}', 200);
+      });
 
-    SheetsService.clearMasterCaches();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MachiningEntryScreen(
-          customer: 'Mazda',
-          part: '2244',
-          operation: machiningOperation,
-          shift: 'Day',
-          service: SheetsService(client: mock),
+      SheetsService.clearMasterCaches();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningEntryScreen(
+            customer: 'Mazda',
+            part: '2244',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.byType(DropdownButtonFormField<String>),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -120),
-    );
+      );
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(DropdownButtonFormField<String>),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -120),
+      );
 
-    // Not blanked, and not snapped to a near match: it reads as it was saved,
-    // marked, so nobody mistakes it for one of the choices.
-    expect(
-      find.text('Crane operator off sick (not in the list)'),
-      findsOneWidget,
-    );
+      // Not blanked, and not snapped to a near match: it reads as it was saved,
+      // marked, so nobody mistakes it for one of the choices.
+      expect(
+        find.text('Crane operator off sick (not in the list)'),
+        findsOneWidget,
+      );
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('TEA BREAK').last);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('not in the list'), findsNothing);
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('TEA BREAK').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('not in the list'), findsNothing);
 
-    await tester.dragUntilVisible(
-      find.byType(SubmitButton),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -300),
-    );
-    await tester.tap(find.byType(SubmitButton));
-    await tester.pumpAndSettle();
-    expect(posted!['DowntimeReason_12PM'], '012 · TEA BREAK');
+      await tester.dragUntilVisible(
+        find.byType(SubmitButton),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -300),
+      );
+      await tester.tap(find.byType(SubmitButton));
+      await tester.pumpAndSettle();
+      expect(posted!['DowntimeReason_12PM'], '012 · TEA BREAK');
 
-    await tester.pump(const Duration(seconds: 7));
-    await tester.pumpAndSettle();
-  });
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+    },
+  );
 
-  testWidgets('machining entry: an unread sheet falls back to the bundled list', (
-    tester,
-  ) async {
-    // The open menu is only as tall as the screen, and its items are built as
-    // they scroll into view — on the default 600px surface the twelfth is not
-    // there to be found.
-    tester.view.physicalSize = const Size(800, 1400);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'machining entry: an unread sheet falls back to the bundled list',
+    (tester) async {
+      // The open menu is only as tall as the screen, and its items are built as
+      // they scroll into view — on the default 600px surface the twelfth is not
+      // there to be found.
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-    // What an app installed ahead of the backend deploy sees: the reasons
-    // action does not exist yet, so the answer is the version ping.
-    final mock = MockClient((request) async {
-      if (request.url.queryParameters['action'] == 'downtimereasons') {
-        return http.Response(
-          '{"status":"ok","version":"OLD","message":"running"}',
-          200,
-        );
-      }
-      if (request.url.queryParameters['action'] == 'rejectiontypes') {
-        return http.Response('{"status":"success","data":[]}', 200);
-      }
-      return http.Response('{"status":"success","data":null}', 200);
-    });
+      // What an app installed ahead of the backend deploy sees: the reasons
+      // action does not exist yet, so the answer is the version ping.
+      final mock = MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'downtimereasons') {
+          return http.Response(
+            '{"status":"ok","version":"OLD","message":"running"}',
+            200,
+          );
+        }
+        if (request.url.queryParameters['action'] == 'rejectiontypes') {
+          return http.Response('{"status":"success","data":[]}', 200);
+        }
+        return http.Response('{"status":"success","data":null}', 200);
+      });
 
-    SheetsService.clearMasterCaches();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MachiningEntryScreen(
-          customer: 'Mazda',
-          part: '2244',
-          operation: machiningOperation,
-          shift: 'Day',
-          service: SheetsService(client: mock),
+      SheetsService.clearMasterCaches();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MachiningEntryScreen(
+            customer: 'Mazda',
+            part: '2244',
+            operation: machiningOperation,
+            shift: 'Day',
+            service: SheetsService(client: mock),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).at(3), '25');
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.byType(DropdownButtonFormField<String>),
-      find.byType(SingleChildScrollView),
-      const Offset(0, -120),
-    );
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).at(3), '25');
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.byType(DropdownButtonFormField<String>),
+        find.byType(SingleChildScrollView),
+        const Offset(0, -120),
+      );
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
 
-    // Logging a stop is never blocked by a backend that has not caught up.
-    expect(find.text('TEA BREAK'), findsWidgets);
-    expect(find.textContaining('Other'), findsNothing);
-  });
+      // Logging a stop is never blocked by a backend that has not caught up.
+      expect(find.text('TEA BREAK'), findsWidgets);
+      expect(find.textContaining('Other'), findsNothing);
+    },
+  );
 
   testWidgets('machining entry: a phone-width card lays out without overflow', (
     tester,

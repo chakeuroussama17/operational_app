@@ -83,8 +83,8 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   };
 
   /// Why the machine stopped. Holds exactly what goes in the cell: a coded
-  /// reason's full label, or free text when "Other" was chosen. Never locked,
-  /// for the same reason the minutes aren't — a stoppage is often still being
+  /// reason's full label, or free text when "Other" was chosen. Editable at any
+  /// time, like everything else on the form — a stoppage is often still being
   /// understood when the checkpoint passes.
   late final Map<String, TextEditingController> _reasonControllers = {
     for (final slot in _slots) slot.downtimeReasonKey: TextEditingController(),
@@ -114,19 +114,14 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   /// is the good count, so logging one does not change the output.
   final Map<String, List<_RejectionRow>> _slotRows = {};
 
-  /// Hours whose output is already on the sheet. Once logged, an hour is
-  /// history: it shows as a read-only value, not an editable field. Derived
-  /// from the server row on every (re)load, so submitting locks the hours
-  /// that were just saved. The only way it moves after that is a rejection
-  /// correction handing pieces back.
-  final Set<String> _lockedOutputs = {};
+  /// Hours whose output is already on the sheet — for the checkpoint
+  /// timeline's "logged" marks and the attribution line. They stay editable:
+  /// every value on the form can be corrected at any time.
+  final Set<String> _savedOutputs = {};
 
-  /// True once the shift's Plan is on the sheet: the whole shift's LOR hangs
-  /// off it, so it is set once and then read-only.
-  bool _planLocked = false;
-
-  /// Who logged which hour — slot ("8AM") -> {by, at}, from the row's LogMeta
-  /// column. Shown under each locked hour as "Added by Ahmad at 08:07".
+  /// Who logged which hour — slot ("8AM") -> {by, at, editedBy?, editedAt?},
+  /// from the row's LogMeta column. Shown under each saved hour as
+  /// "Added by Ahmad at 08:07 · edited by Siti at 15:40".
   Map<String, dynamic> _logMeta = {};
 
   static Map<String, dynamic> _parseLogMeta(dynamic raw) {
@@ -372,13 +367,12 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
         _reasons = reasons;
         final plan = row?.value('Plan') ?? '';
         _planController.text = plan;
-        _planLocked = plan.isNotEmpty;
-        _lockedOutputs.clear();
+        _savedOutputs.clear();
         for (final slot in _slots) {
           final saved = row?.value(slot.outputKey);
           _outputControllers[slot.outputKey]!.text = saved ?? '';
           if (saved != null && saved.isNotEmpty) {
-            _lockedOutputs.add(slot.outputKey);
+            _savedOutputs.add(slot.outputKey);
           }
           _downtimeControllers[slot.downtimeKey]!.text =
               row?.value(slot.downtimeKey) ?? '';
@@ -452,12 +446,14 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
   };
 
   /// Non-empty fields whose value differs from what the server had.
+  /// Every field whose value differs from what the server had — including
+  /// one emptied on purpose, which clears the value on the sheet. Everything
+  /// on the form can be corrected at any time, so a wrong entry has to be
+  /// removable, not only replaceable.
   Map<String, String> _changedFields() {
     final changed = <String, String>{};
     _currentValues().forEach((key, value) {
-      if (value.isNotEmpty && value != (_initial[key] ?? '')) {
-        changed[key] = value;
-      }
+      if (value != (_initial[key] ?? '')) changed[key] = value;
     });
     return changed;
   }
@@ -500,8 +496,9 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
       });
       if (!mounted) return;
       showSaveSuccessSnack(context);
-      // Re-fetch: the hours just saved lock, corrected outputs come back
-      // adjusted, and every defect returns filed under its own hour.
+      // Re-fetch: the hours just saved pick up who logged them, corrected
+      // outputs come back adjusted, and every defect returns filed under its
+      // own hour.
       await _load();
     } on SheetsSubmissionException catch (error) {
       if (!mounted) return;
@@ -612,20 +609,17 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                           TimelineCheckpoint(
                             label: slot.label,
                             slotKey: slot.slotKey,
-                            logged: _lockedOutputs.contains(slot.outputKey),
+                            logged: _savedOutputs.contains(slot.outputKey),
                           ),
                       ],
                     ),
                     const SizedBox(height: AppDimens.fieldSpacing),
-                    if (_planLocked)
-                      _LockedField(label: 'Plan', value: _planController.text)
-                    else
-                      AppNumberField(
-                        label: 'Plan',
-                        controller: _planController,
-                        required: false,
-                        onChanged: (_) => setState(() {}),
-                      ),
+                    AppNumberField(
+                      label: 'Plan',
+                      controller: _planController,
+                      required: false,
+                      onChanged: (_) => setState(() {}),
+                    ),
                     for (final slot in _slots) ...[
                       const SizedBox(height: AppDimens.fieldSpacing),
                       _SlotBlock(
@@ -639,7 +633,7 @@ class _MachiningEntryScreenState extends State<MachiningEntryScreen> {
                         onReasonPicked: (label) =>
                             _pickReason(slot.downtimeReasonKey, label),
                         lorLabel: _lorLabel(slot),
-                        locked: _lockedOutputs.contains(slot.outputKey),
+                        logged: _savedOutputs.contains(slot.outputKey),
                         stamp: _logMeta[slot.slotKey] as Map?,
                         saved:
                             _savedRows[slot.outputKey] ??
@@ -827,9 +821,9 @@ class _SavedRejection {
 /// directly beneath — logged as the hour is logged, rather than collected
 /// separately at the end.
 ///
-/// An hour whose output is already on the sheet is history: its value shows
-/// in a read-only box with a lock, and rejections saved for it this session
-/// show as read-only lines. More defects can still be added for that hour.
+/// Everything in it stays editable after saving: the hour's count, its
+/// downtime, and the quantity of each defect already filed (set a wrong one to
+/// 0 to drop it). A saved hour is marked with a tick and who logged it.
 class _SlotBlock extends StatelessWidget {
   const _SlotBlock({
     required this.slot,
@@ -839,7 +833,7 @@ class _SlotBlock extends StatelessWidget {
     required this.reasons,
     required this.onReasonPicked,
     required this.lorLabel,
-    required this.locked,
+    required this.logged,
     required this.stamp,
     required this.saved,
     required this.rows,
@@ -863,12 +857,10 @@ class _SlotBlock extends StatelessWidget {
   final void Function(String? label) onReasonPicked;
   final String? lorLabel;
 
-  /// True when this hour's output is already saved to the sheet.
-  final bool locked;
+  /// True when this hour's output is already on the sheet. Still editable.
+  final bool logged;
 
-  /// What the output becomes once pending rejection corrections are saved.
-
-  /// {by, at} for a locked hour — who logged it and when, from LogMeta.
+  /// {by, at, editedBy?, editedAt?} for a saved hour, from LogMeta.
   final Map? stamp;
 
   /// Defects the sheet already holds for this hour: type fixed, qty editable.
@@ -972,8 +964,8 @@ class _SlotBlock extends StatelessWidget {
               ),
             ),
           ),
-          if (locked) ...[
-            Icon(Icons.lock_outline, size: 15, color: AppColors.textSecondary),
+          if (logged) ...[
+            Icon(Icons.check_circle, size: 15, color: AppColors.success),
             const SizedBox(width: 8),
           ],
           Container(
@@ -1040,7 +1032,6 @@ class _SlotBlock extends StatelessWidget {
               ),
             ),
           ),
-          Icon(Icons.lock_outline, size: 15, color: AppColors.textSecondary),
         ],
       ),
     );
@@ -1214,9 +1205,8 @@ class _SlotBlock extends StatelessWidget {
   }
 
   /// Minutes the machine was stopped in this hour. Sits under the hour's
-  /// defects because it belongs to the same hour, and stays editable even once
-  /// the actual is locked — a stoppage can outlast the checkpoint that
-  /// recorded it.
+  /// defects because it belongs to the same hour. Like the rest of the form it
+  /// stays editable — a stoppage can outlast the checkpoint that recorded it.
   Widget _downtimeRow() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1273,73 +1263,27 @@ class _SlotBlock extends StatelessWidget {
 
   /// The hour's count, across the card's full width — the LOR badge that used
   /// to sit beside it now lives in the card header.
+  /// The hour's count — always an editable field, with who logged it (and
+  /// who last changed it) underneath once it is on the sheet.
   Widget _outputRow() {
-    // After a save the hour becomes history, and that change should be seen
-    // happening: the field eases into its locked form instead of swapping.
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 380),
-      switchInCurve: Curves.easeOutCubic,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SizeTransition(
-          sizeFactor: animation,
-          alignment: Alignment.topCenter,
-          child: child,
-        ),
-      ),
-      child: locked
-          ? KeyedSubtree(key: const ValueKey('locked'), child: _lockedOutput())
-          : AppNumberField(
-              key: const ValueKey('open'),
-              label: 'Actual',
-              controller: outputController,
-              required: false,
-            ),
-    );
-  }
-
-  /// An hour that's already on the sheet: the value is shown, not editable.
-  /// Correcting a defect no longer moves it — actual counts everything the
-  /// hour produced, so a correction only changes the good/scrap split.
-  Widget _lockedOutput() {
+    final by = stamp?['by'];
+    final editedBy = stamp?['editedBy'];
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        FieldLabel(label: 'Actual', required: false),
-        const SizedBox(height: 6),
-        Container(
-          height: 58,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceTint,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.borderSubtle),
-          ),
-          child: Row(
-            children: [
-              Text(
-                outputController.text,
-                style: TextStyle(
-                  fontSize: AppDimens.fieldFontSize,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              Icon(
-                Icons.lock_outline,
-                size: 18,
-                color: AppColors.textSecondary,
-              ),
-            ],
-          ),
+        AppNumberField(
+          label: 'Actual',
+          controller: outputController,
+          required: false,
         ),
-        if (stamp != null && stamp!['by'] != null)
+        if (by != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, left: 2),
             child: Text(
-              'Added by ${stamp!['by']}'
-              '${stamp!['at'] != null ? ' at ${stamp!['at']}' : ''}',
+              'Added by $by'
+              '${stamp!['at'] != null ? ' at ${stamp!['at']}' : ''}'
+              '${editedBy != null ? ' · edited by $editedBy' : ''}'
+              '${editedBy != null && stamp!['editedAt'] != null ? ' at ${stamp!['editedAt']}' : ''}',
               style: TextStyle(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
@@ -1382,52 +1326,6 @@ class _SectionLabel extends StatelessWidget {
           Expanded(child: Divider(height: 1, color: AppColors.borderSubtle)),
         ],
       ),
-    );
-  }
-}
-
-/// A value the sheet owns now: shown, not editable.
-class _LockedField extends StatelessWidget {
-  const _LockedField({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        FieldLabel(label: label, required: false),
-        const SizedBox(height: 6),
-        Container(
-          height: 58,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceTint,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.borderSubtle),
-          ),
-          child: Row(
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: AppDimens.fieldFontSize,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              Icon(
-                Icons.lock_outline,
-                size: 18,
-                color: AppColors.textSecondary,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

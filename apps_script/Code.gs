@@ -325,7 +325,7 @@ function getShiftDate(shift) {
 
 // Bump this whenever you redeploy so you can confirm the new code went live:
 // open the /exec URL in a browser and check the "version" field.
-var BACKEND_VERSION = 'PROGRESS-v34';
+var BACKEND_VERSION = 'EDIT-ANYTIME-v35';
 
 function doGet(e) {
   try {
@@ -518,14 +518,6 @@ function upsertSecondaryRow(data) {
       formatDateOnly(r.Date) === shiftDate;
   });
 
-  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
-  if (lockedEdits.length) {
-    return {
-      status: 'error',
-      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
-        '. Corrections go through the admin.',
-    };
-  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -540,11 +532,12 @@ function upsertSecondaryRow(data) {
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
-  if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
+  // Sent only when changed, so a blank here is a deliberate clear.
+  if (data.Plan !== undefined) merged.Plan = data.Plan;
 
   slots.forEach(function (slot) {
     var outKey = 'Actual_' + slot;
-    if (data[outKey] !== undefined && data[outKey] !== '') {
+    if (data[outKey] !== undefined) {
       merged[outKey] = data[outKey];
     }
   });
@@ -665,14 +658,6 @@ function upsertCastingRow(data) {
       formatDateOnly(r.Date) === shiftDate;
   });
 
-  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
-  if (lockedEdits.length) {
-    return {
-      status: 'error',
-      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
-        '. Corrections go through the admin.',
-    };
-  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -689,11 +674,12 @@ function upsertCastingRow(data) {
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
-  if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
+  // Sent only when changed, so a blank here is a deliberate clear.
+  if (data.Plan !== undefined) merged.Plan = data.Plan;
 
   slots.forEach(function (slot) {
     var outKey = 'Actual_' + slot;
-    if (data[outKey] !== undefined && data[outKey] !== '') {
+    if (data[outKey] !== undefined) {
       merged[outKey] = data[outKey];
     }
   });
@@ -1281,25 +1267,7 @@ function upsertMachiningRow(data) {
       formatDateOnly(r.Date) === shiftDate;
   });
 
-  var lockedEdits = findLockedEdits(existing, data, 'Actual_', slots);
-  if (lockedEdits.length) {
-    return {
-      status: 'error',
-      message: 'Already logged and locked: ' + lockedEdits.join(', ') +
-        '. Corrections go through the admin.',
-    };
-  }
 
-  // Plan is set once at the start of the shift and then locked, same as an
-  // output — the whole shift's LOR math hangs off it.
-  if (existing && data.Plan !== undefined && data.Plan !== '' &&
-      existing.Plan !== '' && existing.Plan !== null && existing.Plan !== undefined &&
-      String(existing.Plan) !== String(data.Plan)) {
-    return {
-      status: 'error',
-      message: 'Plan is already set for this shift and locked. Corrections go through the admin.',
-    };
-  }
 
   var merged = existing ? Object.assign({}, existing) : {};
   merged.Date = shiftDate;
@@ -1326,11 +1294,12 @@ function upsertMachiningRow(data) {
     merged.Barcode = pinfo.barcode;
     merged.PartName = pinfo.name;
   }
-  if (data.Plan !== undefined && data.Plan !== '') merged.Plan = data.Plan;
+  // Sent only when changed, so a blank here is a deliberate clear.
+  if (data.Plan !== undefined) merged.Plan = data.Plan;
 
   slots.forEach(function (slot) {
     var outKey = 'Actual_' + slot;
-    if (data[outKey] !== undefined && data[outKey] !== '') {
+    if (data[outKey] !== undefined) {
       merged[outKey] = data[outKey];
     }
   });
@@ -1354,7 +1323,7 @@ function upsertMachiningRow(data) {
   // reconciliation — just copy through whatever the app sent.
   slots.forEach(function (slot) {
     var dtKey = 'Downtime_' + slot;
-    if (data[dtKey] !== undefined && data[dtKey] !== '') {
+    if (data[dtKey] !== undefined) {
       merged[dtKey] = data[dtKey];
     }
   });
@@ -1887,22 +1856,6 @@ function resolveWriter(data, module) {
   return user;
 }
 
-// An output that's on the sheet is history, whoever wrote it — the server
-// refuses to change it no matter what the client claims. Sending the SAME
-// value again is harmless (the app re-posts unchanged fields only rarely,
-// but it must not error). Returns the offending slots.
-function findLockedEdits(existing, data, prefix, slots) {
-  if (!existing) return [];
-  var locked = [];
-  slots.forEach(function (slot) {
-    var incoming = data[prefix + slot];
-    if (incoming === undefined || incoming === '') return;
-    var current = existing[prefix + slot];
-    if (current === '' || current === null || current === undefined) return;
-    if (String(current) !== String(incoming)) locked.push(slot);
-  });
-  return locked;
-}
 
 // Stamps who filled which slot, exactly once — the first writer owns the hour
 // (which the lock above guarantees anyway). Two derived columns:
@@ -1919,9 +1872,24 @@ function applyLogAttribution(merged, data, writer, prefix, slots) {
     meta = {};
   }
   var at = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm');
+  var who = writer.name || writer.email;
   slots.forEach(function (slot) {
-    if (data[prefix + slot] === undefined || data[prefix + slot] === '') return;
-    if (!meta[slot]) meta[slot] = { by: writer.name || writer.email, at: at };
+    var incoming = data[prefix + slot];
+    if (incoming === undefined) return;
+    // Cleared: nobody has logged this hour any more.
+    if (incoming === '') {
+      delete meta[slot];
+      return;
+    }
+    if (!meta[slot]) {
+      meta[slot] = { by: who, at: at };
+    } else {
+      // Every value is editable now, so who first logged an hour is no
+      // longer the whole story. The original entry is kept and the latest
+      // change is recorded beside it — editing stays traceable.
+      meta[slot].editedBy = who;
+      meta[slot].editedAt = at;
+    }
   });
   merged.LogMeta = JSON.stringify(meta);
   merged.LoggedBy = slots
@@ -1942,11 +1910,17 @@ function deriveCumulativeLor(merged, slots, outPrefix, lorPrefix) {
   var running = 0;
   slots.forEach(function (slot) {
     var v = parseFloat(merged[outPrefix + slot]);
-    if (isNaN(v)) return;      // hour not logged yet — leave its LOR cell be
-    running += v;
-    if (plan > 0) {
-      merged[lorPrefix + slot] = (Math.round((running / plan) * 10000) / 100) + '%';
+    // Not logged — or logged and then cleared — so it has no LOR. Blanked
+    // rather than left alone: with every value editable, leaving it would
+    // keep a percentage for an hour that no longer has an output.
+    if (isNaN(v)) {
+      merged[lorPrefix + slot] = '';
+      return;
     }
+    running += v;
+    merged[lorPrefix + slot] = plan > 0
+      ? (Math.round((running / plan) * 10000) / 100) + '%'
+      : '';
   });
   return running;
 }

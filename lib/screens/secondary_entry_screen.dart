@@ -118,12 +118,14 @@ class _SecondaryEntryScreenState extends State<SecondaryEntryScreen> {
   };
 
   /// Non-empty fields whose value differs from what the server had.
+  /// Every field whose value differs from what the server had — including
+  /// one emptied on purpose, which clears the value on the sheet. Everything
+  /// on the form can be corrected at any time, so a wrong entry has to be
+  /// removable, not only replaceable.
   Map<String, String> _changedFields() {
     final changed = <String, String>{};
     _currentValues().forEach((key, value) {
-      if (value.isNotEmpty && value != (_initial[key] ?? '')) {
-        changed[key] = value;
-      }
+      if (value != (_initial[key] ?? '')) changed[key] = value;
     });
     return changed;
   }

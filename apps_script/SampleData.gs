@@ -11,14 +11,17 @@
 // Every sample row is signed "Sample data" in LoggedBy, which is how
 // clearSampleData() finds them again. A row someone has already logged for real
 // is never touched: that part/shift/day is skipped, so seeding into a sheet that
-// is already in use only fills the gaps. Values come from a fixed seed per
-// row, so running seed → clear → seed gives the same numbers twice.
+// is already in use only fills the gaps. Each seed first clears the previous
+// sample and writes it again, so moving SAMPLE_UNTIL later and re-running fills
+// the checkpoints that have passed since. Values come from a fixed seed per
+// row, so a row whose checkpoints have not changed gets the same numbers again.
+// Edits made by hand to a sample row are replaced on re-seed.
 
 var SAMPLE_FROM = '2026-10-01';
 // Checkpoints after this moment are left blank, the way a shift still in
-// progress would look. Night shift's 12AM on 7 Oct is exactly midnight, so it
-// is in; 4AM and 7:30AM are not.
-var SAMPLE_UNTIL = '2026-10-08 00:00';
+// progress would look. At noon on 8 Oct: the night of the 7th is complete
+// (12AM, 4AM, 7:30AM) and the Day shift of the 8th has its 12PM checkpoint.
+var SAMPLE_UNTIL = '2026-10-08 12:00';
 var SAMPLE_BY = 'Sample data';
 
 // Clock time of each checkpoint, as minutes from the shift date's midnight.
@@ -32,7 +35,9 @@ function seedSampleData() {
   var tz = Session.getScriptTimeZone();
   var until = Utilities.parseDate(SAMPLE_UNTIL, tz, 'yyyy-MM-dd HH:mm');
   var dates = sampleDates_(tz, until);
-  var report = [];
+  // Start from a clean slate, so rows written by an earlier, shorter run get
+  // the checkpoints that have passed since instead of being skipped as taken.
+  var report = [clearSampleData()];
 
   ['Day', 'Night'].forEach(function (shift) {
     report.push(seedFlatModule_('casting', 'DCM', getCastingSheetForShift(shift),
